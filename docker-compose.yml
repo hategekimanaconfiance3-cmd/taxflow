@@ -1,0 +1,38 @@
+services:
+  taxflow_db:
+    image: postgres:17.7-trixie
+    container_name: taxflow_db
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "54322:5432"
+    volumes:
+      - taxflow_data:/var/lib/postgresql/data
+
+  tin_db:
+    image: postgres:17.7-trixie
+    container_name: tin_db
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "54323:5432"
+    volumes:
+      - tin_data:/var/lib/postgresql/data
+
+  valkey:
+    image: valkey/valkey:9.0.1-alpine3.23
+    container_name: taxflow_valkey
+    ports:
+      - "6380:6379"
+    volumes:
+      - valkey_data:/data
+    restart: unless-stopped
+
+volumes:
+  taxflow_data:
+  tin_data:
+  valkey_data:

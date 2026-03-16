@@ -1,0 +1,138 @@
+"use server";
+
+import { eq } from "drizzle-orm";
+import db from "@/db/drizzle";
+import { systemConfig } from "@/db/schema";
+import { requireRRASession } from "@/lib/auth-guard";
+import { logAudit } from "@/lib/audit";
+import { z } from "zod";
+
+// ---------------------------------------------------------------------------
+// Default values — used as fallback when no DB row exists
+// ---------------------------------------------------------------------------
+
+const DEFAULTS: Record<string, string> = {
+    compliance_threshold: "0.95",
+    vat_rate: "0.18",
+    dispute_window_hours: "72",
+    auto_suspension_threshold: "0.50",
+};
+
+// ---------------------------------------------------------------------------
+// Typed config object
+// ---------------------------------------------------------------------------
+
+export interface SystemConfigValues {
+    complianceThreshold: number;      // e.g. 0.95
+    vatRate: number;                  // e.g. 0.18
+    disputeWindowHours: number;       // e.g. 72
+    autoSuspensionThreshold: number;  // e.g. 0.50 — auto-suspend below this
+}
+
+// ---------------------------------------------------------------------------
+// Read config (no auth guard — consumed by transaction flows)
+// ---------------------------------------------------------------------------
+
+export async function getSystemConfig(): Promise<SystemConfigValues> {
+    const rows = await db.select().from(systemConfig);
+    const map = new Map(rows.map((r) => [r.key, r.value]));
+
+    return {
+        complianceThreshold: parseFloat(map.get("compliance_threshold") ?? DEFAULTS.compliance_threshold),
+        vatRate: parseFloat(map.get("vat_rate") ?? DEFAULTS.vat_rate),
+        disputeWindowHours: parseInt(map.get("dispute_window_hours") ?? DEFAULTS.dispute_window_hours, 10),
+        autoSuspensionThreshold: parseFloat(map.get("auto_suspension_threshold") ?? DEFAULTS.auto_suspension_threshold),
+    };
+}
+
+// ---------------------------------------------------------------------------
+// Update config (super_admin only)
+// ---------------------------------------------------------------------------
+
+const updateSchema = z.object({
+    key: z.enum(["compliance_threshold", "vat_rate", "dispute_window_hours", "auto_suspension_threshold"]),
+    value: z.string().min(1, "Value is required"),
+});
+
+const VALUE_VALIDATORS: Record<string, (v: string) => string | null> = {
+    compliance_threshold: (v) => {
+        const n = parseFloat(v);
+        if (isNaN(n) || n < 0.01 || n > 1) return "Must be between 0.01 and 1 (e.g. 0.95 for 95%)";
+        return null;
+    },
+    vat_rate: (v) => {
+        const n = parseFloat(v);
+        if (isNaN(n) || n < 0 || n > 1) return "Must be between 0 and 1 (e.g. 0.18 for 18%)";
+        return null;
+    },
+    dispute_window_hours: (v) => {
+        const n = parseInt(v, 10);
+        if (isNaN(n) || n < 1 || n > 720) return "Must be between 1 and 720 hours";
+        return null;
+    },
+    auto_suspension_threshold: (v) => {
+        const n = parseFloat(v);
+        if (isNaN(n) || n < 0.01 || n > 1) return "Must be between 0.01 and 1 (e.g. 0.50 for 50%)";
+        return null;
+    },
+};
+
+export async function updateSystemConfig(data: { key: string; value: string }): Promise<{ success: true }> {
+    const session = await requireRRASession("super_admin");
+
+    const parsed = updateSchema.safeParse(data);
+    if (!parsed.success) {
+        throw new Error("Invalid config key or value");
+    }
+
+    const { key, value } = parsed.data;
+
+    // Validate the value for the specific key
+    const validator = VALUE_VALIDATORS[key];
+    if (validator) {
+        const error = validator(value);
+        if (error) {
+            throw new Error(error);
+        }
+    }
+
+    // Get old value for audit log
+    const [existing] = await db
+        .select()
+        .from(systemConfig)
+        .where(eq(systemConfig.key, key))
+        .limit(1);
+
+    const oldValue = existing?.value ?? DEFAULTS[key] ?? "unknown";
+
+    // Upsert the config value
+    await db
+        .insert(systemConfig)
+        .values({
+            key,
+            value,
+            updatedBy: session.user.id,
+        })
+        .onConflictDoUpdate({
+            target: systemConfig.key,
+            set: {
+                value,
+                updatedBy: session.user.id,
+                updatedAt: new Date(),
+            },
+        });
+
+    await logAudit({
+        userId: session.user.id,
+        action: "SYSTEM_CONFIG_UPDATED",
+        targetType: "system_config",
+        targetId: key,
+        metadata: {
+            key,
+            oldValue,
+            newValue: value,
+        },
+    });
+
+    return { success: true };
+}

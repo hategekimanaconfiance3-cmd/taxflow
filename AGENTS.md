@@ -1,0 +1,267 @@
+# Taxflow Platform Engineering Rules
+Stack: Next.js 16 + React 19 + TypeScript + Drizzle + PostgreSQL
+
+---
+
+# Core Engineering Principles
+
+* Financial correctness > convenience.
+* Every state-changing operation must be:
+  - Validated
+  - Logged
+  - Traceable
+* Avoid clever abstractions.
+* Prefer boring, explicit, maintainable code.
+* Do not introduce new libraries unless justified.
+
+---
+
+# TypeScript Rules
+
+* Strict mode must remain enabled.
+* Never use `any`.
+* Prefer explicit return types on exported functions.
+* Use `zod` for all external input validation.
+* Do not use `@ts-ignore` unless documented with a reason.
+
+Bad:
+```ts
+const data: any = req.body
+```
+
+Good:
+```ts
+const parsed = schema.safeParse(input)
+if (!parsed.success) {
+  return { error: "Invalid input" }
+}
+```
+
+---
+
+# Next.js (App Router) Rules
+
+* All database access must stay on the server.
+* Never import DB logic into client components.
+* Use:
+  - Route Handlers (`app/api/...`)
+  - Server Actions
+  - Server utilities in `/lib`
+* Secrets must never be exposed to the client.
+* Do not mix server and client logic in the same file unless necessary.
+
+---
+
+# React Rules
+
+* Components must be small and focused.
+* UI components should not contain business logic.
+* Avoid unnecessary `useEffect`.
+* Use `react-hook-form` for forms.
+* Validation must use `zodResolver`.
+
+---
+
+# Form Validation Rules
+
+* Always validate twice:
+  - Client (UX)
+  - Server (Security)
+* Never trust client-side validation alone.
+* Return structured validation errors.
+
+---
+
+# Authentication (better-auth)
+
+* Auth logic must stay server-side.
+* Use HTTP-only cookies only.
+* Never store tokens in localStorage.
+* Always verify session in server components or route handlers.
+* Protect all tax-related routes with middleware or server guards.
+
+---
+
+# Database Rules (Drizzle + Postgres)
+
+* Schema definitions live in `/lib/db/schema`.
+* Never write raw SQL unless absolutely necessary.
+* Always handle null results.
+* Multi-step writes must use transactions.
+* Do not ignore DB errors.
+
+Bad:
+```ts
+await db.insert(users).values(data)
+```
+
+Good:
+```ts
+try {
+  await db.insert(users).values(data)
+} catch (error) {
+  console.error("Database insert failed", error)
+  throw new Error("Account creation failed")
+}
+```
+
+---
+
+# Transactions Rule
+
+If a workflow does more than one of the following:
+- Create record
+- Update balance
+- Insert audit log
+- Change status
+
+It MUST use a transaction.
+
+Example:
+```ts
+await db.transaction(async (tx) => {
+  await tx.insert(users).values(user)
+  await tx.insert(auditLogs).values(log)
+})
+```
+
+---
+
+# Async Rules
+
+* Always `await` promises.
+* Never fire-and-forget DB calls.
+* Use `Promise.all` only for independent reads.
+* Background tasks must log failures.
+
+---
+
+# Error Handling
+
+* Never swallow errors.
+* Always log unexpected server errors.
+* Never expose raw database errors to the client.
+* Return safe, user-friendly messages.
+
+---
+
+# Logging & Audit
+
+Since Taxflow handles financial data:
+
+* Every critical mutation must create an audit record.
+* Audit logs must include:
+  - User ID
+  - Action
+  - Timestamp
+  - Reference ID
+* Never log passwords, tokens, or personal IDs.
+
+---
+
+# Folder Structure Philosophy
+
+Domain-first structure:
+
+```
+/app
+  /auth
+  /dashboard
+  /api
+
+/features
+  /auth
+  /taxpayer
+  /filings
+  /payments
+
+/lib
+  /db
+  /auth
+  /validation
+  /utils
+```
+
+Rules:
+* Do not create tiny files unless they represent a real domain boundary.
+* Extract shared logic only when duplication appears.
+
+---
+
+# UI (shadcn + Radix + Tailwind 4)
+
+* UI components must remain purely presentational.
+* Variants must use `class-variance-authority`.
+* Avoid inline style objects.
+* Maintain consistent spacing system.
+
+---
+
+# Security Rules
+
+* Rate-limit:
+  - Login
+  - Signup
+  - OTP
+* Hash passwords using secure algorithm.
+* Validate authorization on the server.
+* Never expose internal IDs if a public ID can be used instead.
+
+---
+
+# Performance Rules
+
+* Do not prematurely optimize.
+* Avoid N+1 queries.
+* Use indexes in PostgreSQL for:
+  - Foreign keys
+  - Frequently queried fields
+  - Unique identifiers
+
+---
+
+# Pull Request Rules
+
+* Imperative title:
+  - "Add taxpayer registration flow"
+  - "Fix login validation bug"
+* No prefixes like `feat:` or `fix:`
+* Include:
+
+Release Notes:
+
+- Added ...
+- Fixed ...
+- Improved ...
+- N/A
+
+---
+
+# Agent Discipline Rules
+
+When building with AI agents:
+
+* Never let the agent:
+  - Modify schema without reviewing migrations
+  - Add new dependencies without justification
+  - Change auth flow casually
+* Agents must follow existing structure.
+* Agents must not refactor unrelated files.
+
+---
+
+# Financial System Rule (Non-Negotiable)
+
+Any code that affects:
+
+- Tax calculations
+- Payments
+- Account balances
+- Filing submissions
+
+Must be:
+- Deterministic
+- Tested
+- Logged
+- Transactional
+- Review-required
