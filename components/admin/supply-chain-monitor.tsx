@@ -5,7 +5,7 @@ import type { SupplyChainData } from "@/lib/actions/supply-chain-stats.action";
 import { formatCompact } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Network, Package, ArrowRight, Clock } from "lucide-react";
+import { Loader2, Network, Package, ArrowRight, Clock, ShieldAlert } from "lucide-react";
 
 // ---------------------------------------------------------------------------
 // Supply Chain Monitor — product flow visualization
@@ -41,7 +41,8 @@ export function SupplyChainMonitor() {
     const STAT_ITEMS = [
         { label: "Products in Circulation", value: data.productsInCirculation, icon: <Package className="h-3.5 w-3.5 text-violet-500" /> },
         { label: "Stock Movement Today", value: data.totalStockMovementToday, icon: <ArrowRight className="h-3.5 w-3.5 text-blue-500" /> },
-        { label: "Pending Confirmations", value: data.pendingConfirmations, icon: <Clock className="h-3.5 w-3.5 text-amber-500" /> },
+        { label: "Pending Confirmations", value: data.pendingConfirmations, icon: <Clock className="h-3.5 w-3.5 text-amber-500" />, highlight: data.pendingConfirmations > 0 },
+        { label: "Unverified Txns", value: data.unverifiedTransactions, icon: <ShieldAlert className="h-3.5 w-3.5 text-red-500" />, highlight: data.unverifiedTransactions > 0 },
     ];
 
     return (
@@ -53,12 +54,19 @@ export function SupplyChainMonitor() {
                 </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-                {/* Key stats */}
-                <div className="grid grid-cols-3 gap-2">
+                {/* Key stats — 2x2 grid */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                     {STAT_ITEMS.map((item) => (
-                        <div key={item.label} className="rounded-lg border p-2.5 text-center">
+                        <div
+                            key={item.label}
+                            className={`rounded-lg border p-2.5 text-center ${
+                                item.highlight ? "border-amber-200 bg-amber-50/30" : ""
+                            }`}
+                        >
                             <div className="flex justify-center mb-1">{item.icon}</div>
-                            <p className="text-lg font-bold">{item.value}</p>
+                            <p className={`text-lg font-bold ${item.highlight ? "text-amber-700" : ""}`}>
+                                {item.value}
+                            </p>
                             <p className="text-[9px] text-muted-foreground">{item.label}</p>
                         </div>
                     ))}

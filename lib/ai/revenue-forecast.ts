@@ -18,6 +18,8 @@ export interface RevenueForecast {
     gap: number;
     gapPercentage: number;
     trend: "growing" | "stable" | "declining";
+    confidence: number;       // 0–100 forecast confidence
+    gapCauses: string[];      // human-readable gap explanations
     monthlyData: MonthlyRevenue[];
     projectedNextMonth: number;
     topGapContributors: GapContributor[];
@@ -64,6 +66,12 @@ export async function getRevenueForecast(
     // Project next month using simple linear regression
     const projectedNextMonth = projectNextMonth(monthlyData);
 
+    // Compute forecast confidence from data richness
+    const confidence = computeConfidence(monthlyData, months);
+
+    // Derive human-readable gap causes
+    const gapCauses = deriveGapCauses(monthlyData, topGapContributors, gapPercentage);
+
     const periodLabel = `Last ${months} months`;
 
     return {
@@ -73,6 +81,8 @@ export async function getRevenueForecast(
         gap: totalGap,
         gapPercentage,
         trend,
+        confidence,
+        gapCauses,
         monthlyData,
         projectedNextMonth,
         topGapContributors,
@@ -265,3 +275,78 @@ function projectNextMonth(data: MonthlyRevenue[]): number {
     const projected = Math.round(intercept + slope * n);
     return Math.max(0, projected); // no negative projection
 }
+
+// ---------------------------------------------------------------------------
+// Confidence scoring — how reliable is the forecast?
+// ---------------------------------------------------------------------------
+
+function computeConfidence(data: MonthlyRevenue[], totalMonths: number): number {
+    // Base: data availability (0-40 pts)
+    const monthsWithData = data.filter((m) => m.expected > 0 || m.actual > 0).length;
+    const dataCoverage = Math.round((monthsWithData / totalMonths) * 40);
+
+    // Trader participation (0-30 pts)
+    const monthsWithTraders = data.filter((m) => m.traderCount > 0).length;
+    const traderCoverage = Math.round((monthsWithTraders / totalMonths) * 30);
+
+    // Trend consistency (0-30 pts) — less variance = more confidence
+    const actuals = data.map((m) => m.actual).filter((a) => a > 0);
+    let consistencyScore = 30;
+    if (actuals.length >= 2) {
+        const mean = actuals.reduce((s, v) => s + v, 0) / actuals.length;
+        if (mean > 0) {
+            const variance = actuals.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / actuals.length;
+            const cv = Math.sqrt(variance) / mean; // coefficient of variation
+            consistencyScore = Math.max(0, Math.round(30 * (1 - Math.min(cv, 1))));
+        }
+    } else {
+        consistencyScore = 5; // very low confidence with <2 data points
+    }
+
+    return Math.min(100, dataCoverage + traderCoverage + consistencyScore);
+}
+
+// ---------------------------------------------------------------------------
+// Gap cause analysis
+// ---------------------------------------------------------------------------
+
+function deriveGapCauses(
+    monthlyData: MonthlyRevenue[],
+    topGapContributors: GapContributor[],
+    gapPercentage: number,
+): string[] {
+    const causes: string[] = [];
+
+    // Check trader activity
+    const avgTraders = monthlyData.reduce((s, m) => s + m.traderCount, 0) / Math.max(monthlyData.length, 1);
+    if (avgTraders < 3) {
+        causes.push("Low trader activity in reporting period");
+    }
+
+    // Check for months with zero payments
+    const zeroPaymentMonths = monthlyData.filter((m) => m.expected > 0 && m.actual === 0).length;
+    if (zeroPaymentMonths > 0) {
+        causes.push(`${zeroPaymentMonths} month(s) with zero payments received`);
+    }
+
+    // Check for underreporting
+    if (gapPercentage > 50) {
+        causes.push("Significant underreporting detected");
+    } else if (gapPercentage > 20) {
+        causes.push("Moderate collection shortfall");
+    }
+
+    // Check top contributors
+    if (topGapContributors.length > 0) {
+        const topContributor = topGapContributors[0];
+        causes.push(`Top contributor: ${topContributor.merchantName} (${topContributor.gapPercentage}% unpaid)`);
+    }
+
+    // Fallback
+    if (causes.length === 0) {
+        causes.push("Collection performance within expected range");
+    }
+
+    return causes.slice(0, 4); // max 4 causes
+}
+

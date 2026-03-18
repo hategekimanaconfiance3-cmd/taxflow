@@ -62,8 +62,10 @@ export function StatCard({
  * Uses compact notation for large values (e.g., 2.5M, 448K, 4.05B).
  */
 export function formatRWF(amount: number): string {
-    const abs = Math.abs(amount);
-    const sign = amount < 0 ? "-" : "";
+    const num = Number(amount) || 0;
+    if (num === 0) return "0 RWF";
+    const abs = Math.abs(num);
+    const sign = num < 0 ? "-" : "";
     if (abs >= 1_000_000_000_000) {
         return `${sign}${(abs / 1_000_000_000_000).toFixed(1)}T RWF`;
     }
@@ -81,17 +83,19 @@ export function formatRWF(amount: number): string {
         currency: "RWF",
         minimumFractionDigits: 0,
         maximumFractionDigits: 0,
-    }).format(amount);
+    }).format(num);
 }
 
 /**
  * Format RWF currency — full format (no abbreviation).
  */
 export function formatRWFFull(amount: number): string {
+    const num = Number(amount) || 0;
+    if (num === 0) return "0 RWF";
     return new Intl.NumberFormat("en-RW", {
         style: "currency",
         currency: "RWF",
         minimumFractionDigits: 0,
         maximumFractionDigits: 0,
-    }).format(amount);
+    }).format(num);
 }

@@ -88,6 +88,24 @@ function formatAction(action: string) {
         .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+/** Normalize status strings into consistent display labels */
+function formatStatus(status: string): string {
+    const STATUS_LABELS: Record<string, string> = {
+        pending: "Pending",
+        confirmed: "Confirmed",
+        completed: "Completed",
+        rejected: "Rejected",
+        submitted: "Submitted",
+        activated: "Activated",
+        filed: "Filed",
+        under_review: "Under Review",
+        resolved: "Resolved",
+        dismissed: "Dismissed",
+        expired: "Expired",
+    };
+    return STATUS_LABELS[status] ?? status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 export function AdminDashboardTabs({
     transactions,
     imports,
@@ -173,7 +191,7 @@ export function AdminDashboardTabs({
                                                 variant="secondary"
                                                 className={`text-xs ${statusColors[t.status] || ""}`}
                                             >
-                                                {t.status}
+                                                {formatStatus(t.status)}
                                             </Badge>
                                         </TableCell>
                                         <TableCell className="text-right text-xs text-muted-foreground">
@@ -231,7 +249,7 @@ export function AdminDashboardTabs({
                                                 variant="secondary"
                                                 className={`text-xs ${statusColors[i.status] || ""}`}
                                             >
-                                                {i.status}
+                                                {formatStatus(i.status)}
                                             </Badge>
                                         </TableCell>
                                         <TableCell className="text-right text-xs text-muted-foreground">
@@ -287,7 +305,7 @@ export function AdminDashboardTabs({
                                                 variant="secondary"
                                                 className={`text-xs ${statusColors[d.status] || ""}`}
                                             >
-                                                {d.status.replace("_", " ")}
+                                                {formatStatus(d.status)}
                                             </Badge>
                                         </TableCell>
                                         <TableCell className="text-right text-xs text-muted-foreground">

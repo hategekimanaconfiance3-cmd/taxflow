@@ -5,7 +5,7 @@ import type { EconomicStatsData } from "@/lib/actions/economic-stats.action";
 import { formatCompact } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Globe, TrendingUp, TrendingDown, Package, BarChart2 } from "lucide-react";
+import { Loader2, Globe, TrendingUp, TrendingDown, Package, BarChart2, Inbox } from "lucide-react";
 
 // ---------------------------------------------------------------------------
 // Economic Intelligence — national overview
@@ -37,6 +37,36 @@ export function EconomicIntelligence() {
     }
 
     if (!data) return null;
+
+    // Check if all data sections are empty / zero
+    const hasNoData =
+        data.sectorActivity.length === 0 &&
+        data.topProducts.length === 0 &&
+        data.priceChanges.length === 0 &&
+        data.stockOverview.totalProducts === 0 &&
+        data.stockOverview.totalQuantity === 0;
+
+    if (hasNoData) {
+        return (
+            <Card>
+                <CardHeader className="pb-2">
+                    <CardTitle className="text-base font-semibold flex items-center gap-2">
+                        <Globe className="h-4 w-4" />
+                        National Economic Intelligence
+                    </CardTitle>
+                </CardHeader>
+                <CardContent className="py-8 text-center">
+                    <Inbox className="h-8 w-8 mx-auto text-muted-foreground/50 mb-2" />
+                    <p className="text-sm font-medium text-muted-foreground">
+                        No data available for selected period
+                    </p>
+                    <p className="text-xs text-muted-foreground/70 mt-1">
+                        Economic intelligence will populate as trading activity increases.
+                    </p>
+                </CardContent>
+            </Card>
+        );
+    }
 
     return (
         <Card>
@@ -130,23 +160,25 @@ export function EconomicIntelligence() {
                     </div>
                 )}
 
-                {/* Stock Overview */}
-                <div className="grid grid-cols-3 gap-2">
-                    <div className="rounded-lg border p-2.5 text-center">
-                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Products</p>
-                        <p className="text-sm font-bold mt-0.5">{data.stockOverview.totalProducts}</p>
+                {/* Stock Overview — only show if there is data */}
+                {(data.stockOverview.totalProducts > 0 || data.stockOverview.totalQuantity > 0) && (
+                    <div className="grid grid-cols-3 gap-2">
+                        <div className="rounded-lg border p-2.5 text-center">
+                            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Products</p>
+                            <p className="text-sm font-bold mt-0.5">{data.stockOverview.totalProducts}</p>
+                        </div>
+                        <div className="rounded-lg border p-2.5 text-center">
+                            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Total Stock</p>
+                            <p className="text-sm font-bold mt-0.5">{data.stockOverview.totalQuantity.toLocaleString()}</p>
+                        </div>
+                        <div className="rounded-lg border p-2.5 text-center">
+                            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">⚠ Negative</p>
+                            <p className={`text-sm font-bold mt-0.5 ${data.stockOverview.negativeStockProducts > 0 ? "text-red-600" : "text-emerald-600"}`}>
+                                {data.stockOverview.negativeStockProducts}
+                            </p>
+                        </div>
                     </div>
-                    <div className="rounded-lg border p-2.5 text-center">
-                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Total Stock</p>
-                        <p className="text-sm font-bold mt-0.5">{data.stockOverview.totalQuantity.toLocaleString()}</p>
-                    </div>
-                    <div className="rounded-lg border p-2.5 text-center">
-                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider">⚠ Negative</p>
-                        <p className={`text-sm font-bold mt-0.5 ${data.stockOverview.negativeStockProducts > 0 ? "text-red-600" : "text-emerald-600"}`}>
-                            {data.stockOverview.negativeStockProducts}
-                        </p>
-                    </div>
-                </div>
+                )}
             </CardContent>
         </Card>
     );

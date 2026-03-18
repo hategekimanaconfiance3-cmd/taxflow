@@ -69,11 +69,12 @@ export default async function AdminDashboardPage({
 
     const complianceRate =
         data.revenue.vatOutput > 0
-            ? Math.min(100, Math.round(
+            ? Math.round(
                 (data.revenue.taxPaymentsTotal / data.revenue.vatOutput) *
                 100,
-            ))
+            )
             : 0;
+    const progressBarPct = Math.min(complianceRate, 100);
 
     return (
         <AdminRealtimeWrapper userId={user.id}>
@@ -288,7 +289,7 @@ export default async function AdminDashboardPage({
                                     {complianceRate}%
                                 </p>
                                 <p className="text-xs text-muted-foreground">
-                                    collection rate
+                                    collection rate · collected ÷ expected VAT
                                 </p>
                             </div>
                             {/* Progress bar */}
@@ -301,7 +302,7 @@ export default async function AdminDashboardPage({
                                             : "bg-red-500"
                                         }`}
                                     style={{
-                                        width: `${Math.min(complianceRate, 100)}%`,
+                                        width: `${progressBarPct}%`,
                                     }}
                                 />
                             </div>

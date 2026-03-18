@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import type { RevenueForecast } from "@/lib/ai/revenue-forecast";
 import { formatCompact } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import {
     TrendingUp,
     TrendingDown,
@@ -11,6 +12,8 @@ import {
     Brain,
     Loader2,
     AlertTriangle,
+    Gauge,
+    Lightbulb,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -57,6 +60,11 @@ export function RevenueForecastChart() {
         forecast.trend === "growing" ? "text-emerald-600" :
         forecast.trend === "declining" ? "text-red-600" : "text-muted-foreground";
 
+    const confidenceColor =
+        (forecast.confidence ?? 0) >= 70 ? "bg-emerald-100 text-emerald-700" :
+        (forecast.confidence ?? 0) >= 40 ? "bg-amber-100 text-amber-700" :
+        "bg-red-100 text-red-700";
+
     return (
         <Card>
             <CardHeader className="pb-2">
@@ -65,10 +73,19 @@ export function RevenueForecastChart() {
                         <Brain className="h-4 w-4" />
                         AI Revenue Forecast
                     </CardTitle>
-                    <div className={`flex items-center gap-1 text-xs font-medium ${trendColor}`}>
-                        <TrendIcon className="h-3.5 w-3.5" />
-                        {forecast.trend === "growing" ? "Growing" :
-                         forecast.trend === "declining" ? "Declining" : "Stable"}
+                    <div className="flex items-center gap-2">
+                        {/* Confidence badge */}
+                        {forecast.confidence != null && (
+                            <Badge variant="secondary" className={`text-[10px] ${confidenceColor}`}>
+                                <Gauge className="h-2.5 w-2.5 mr-0.5" />
+                                {forecast.confidence}% confidence
+                            </Badge>
+                        )}
+                        <div className={`flex items-center gap-1 text-xs font-medium ${trendColor}`}>
+                            <TrendIcon className="h-3.5 w-3.5" />
+                            {forecast.trend === "growing" ? "Growing" :
+                             forecast.trend === "declining" ? "Declining" : "Stable"}
+                        </div>
                     </div>
                 </div>
             </CardHeader>
@@ -103,6 +120,24 @@ export function RevenueForecastChart() {
                         </p>
                     </div>
                 </div>
+
+                {/* Gap Analysis — causes */}
+                {forecast.gapCauses && forecast.gapCauses.length > 0 && forecast.gap > 0 && (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-3 space-y-1.5">
+                        <p className="text-xs font-semibold text-amber-800 flex items-center gap-1.5">
+                            <Lightbulb className="h-3.5 w-3.5" />
+                            Gap Analysis
+                        </p>
+                        <ul className="space-y-0.5">
+                            {forecast.gapCauses.map((cause, i) => (
+                                <li key={i} className="text-[11px] text-amber-700 flex items-start gap-1.5">
+                                    <span className="text-amber-400 mt-0.5 shrink-0">•</span>
+                                    {cause}
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                )}
 
                 {/* Bar chart */}
                 <div className="space-y-2">
