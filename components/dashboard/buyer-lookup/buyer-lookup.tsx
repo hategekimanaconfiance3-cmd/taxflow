@@ -21,6 +21,7 @@ export interface BuyerInfo {
   compliancePct: number;
   isEligible: boolean;
   reason: string;
+  error?: string;
 }
 
 interface BuyerLookupProps {
@@ -46,8 +47,17 @@ export function BuyerLookup({ onBuyerFound, onBuyerCleared }: BuyerLookupProps) 
       try {
         setError('');
         const result = await lookupBuyer(tin.trim());
-        setBuyer(result);
-        onBuyerFound(result);
+
+        // Check if the result contains an error
+        if ('error' in result && result.error) {
+          setError(result.error);
+          setBuyer(null);
+          onBuyerCleared();
+          return;
+        }
+
+        setBuyer(result as BuyerInfo);
+        onBuyerFound(result as BuyerInfo);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to lookup buyer');
         setBuyer(null);

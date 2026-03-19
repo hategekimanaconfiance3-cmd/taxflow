@@ -1,20 +1,20 @@
-"use server";
+'use server';
 
-import { eq, and, or, desc, lt, sql } from "drizzle-orm";
-import db from "@/db/drizzle";
-import { transaction, stock, vatRecord, product, user } from "@/db/schema";
+import { eq, and, or, desc, lt, sql } from 'drizzle-orm';
+import db from '@/db/drizzle';
+import { transaction, stock, vatRecord, product, user } from '@/db/schema';
 import {
-    requireTraderSession,
-    requireApprovedClearance,
-    validateRoleCompatibility,
-    type TraderRole,
-} from "@/lib/auth-guard";
-import { logAudit } from "@/lib/audit";
-import { emitToUser } from "@/lib/realtime";
-import { createNotification } from "@/lib/actions/notification.action";
-import { getTaxComplianceStatus, checkAndAlertCompliance } from "@/lib/actions/compliance.action";
-import { getSystemConfig } from "@/lib/actions/system-config.action";
-import { validatePriceFloor } from "@/lib/ai/price-suggestion";
+  requireTraderSession,
+  requireApprovedClearance,
+  validateRoleCompatibility,
+  type TraderRole,
+} from '@/lib/auth-guard';
+import { logAudit } from '@/lib/audit';
+import { emitToUser } from '@/lib/realtime';
+import { createNotification } from '@/lib/actions/notification.action';
+import { getTaxComplianceStatus, checkAndAlertCompliance } from '@/lib/actions/compliance.action';
+import { getSystemConfig } from '@/lib/actions/system-config.action';
+import { validatePriceFloor } from '@/lib/ai/price-suggestion';
 
 /** Pending transactions expire after 10 minutes (ms). */
 const PENDING_EXPIRY_MS = 10 * 60 * 1000;
@@ -28,27 +28,22 @@ const PENDING_EXPIRY_MS = 10 * 60 * 1000;
  * Called lazily before queries so no background cron is needed.
  */
 async function expireStalePendingTransactions(): Promise<void> {
-    const cutoff = new Date(Date.now() - PENDING_EXPIRY_MS);
+  const cutoff = new Date(Date.now() - PENDING_EXPIRY_MS);
 
-    try {
-        const expired = await db
-            .update(transaction)
-            .set({ status: "expired" })
-            .where(
-                and(
-                    eq(transaction.status, "pending"),
-                    lt(transaction.createdAt, cutoff),
-                ),
-            )
-            .returning({ id: transaction.id, sellerId: transaction.sellerId, buyerId: transaction.buyerId });
+  try {
+    const expired = await db
+      .update(transaction)
+      .set({ status: 'expired' })
+      .where(and(eq(transaction.status, 'pending'), lt(transaction.createdAt, cutoff)))
+      .returning({ id: transaction.id, sellerId: transaction.sellerId, buyerId: transaction.buyerId });
 
-        if (expired.length > 0) {
-            console.log(`[expiry] Expired ${expired.length} stale pending transaction(s)`);
-        }
-    } catch (error) {
-        // Log but don't block the page from loading
-        console.error("Failed to expire stale pending transactions", error);
+    if (expired.length > 0) {
+      console.log(`[expiry] Expired ${expired.length} stale pending transaction(s)`);
     }
+  } catch (error) {
+    // Log but don't block the page from loading
+    console.error('Failed to expire stale pending transactions', error);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -56,167 +51,153 @@ async function expireStalePendingTransactions(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 export async function createTransaction(data: {
-    buyerTin: string; // TIN of the buyer
-    productId: string;
-    quantity: number;
-    unitPrice: number; // RWF
+  buyerTin: string; // TIN of the buyer
+  productId: string;
+  quantity: number;
+  unitPrice: number; // RWF
 }) {
-    const { suspended, clearanceStatus, ...session } =
-        await requireApprovedClearance();
+  const { suspended, clearanceStatus, ...session } = await requireApprovedClearance();
 
-    if (suspended) {
-        throw new Error(
-            `Your account is ${clearanceStatus}. Cannot create transactions.`,
-        );
-    }
+  if (suspended) {
+    throw new Error(`Your account is ${clearanceStatus}. Cannot create transactions.`);
+  }
 
-    const sellerRole = session.user.role as TraderRole;
+  const sellerRole = session.user.role as TraderRole;
 
-    if (sellerRole === "retailer") {
-        throw new Error("Retailers must use createRetailSale() for consumer sales.");
-    }
+  if (sellerRole === 'retailer') {
+    throw new Error('Retailers must use createRetailSale() for consumer sales.');
+  }
 
-    if (data.quantity <= 0 || data.unitPrice <= 0) {
-        throw new Error("Quantity and unit price must be positive");
-    }
+  if (data.quantity <= 0 || data.unitPrice <= 0) {
+    throw new Error('Quantity and unit price must be positive');
+  }
 
-    // Look up the buyer by TIN
-    const [buyer] = await db
-        .select()
-        .from(user)
-        .where(eq(user.tinNumber, data.buyerTin))
-        .limit(1);
+  // Look up the buyer by TIN
+  const [buyer] = await db.select().from(user).where(eq(user.tinNumber, data.buyerTin)).limit(1);
 
-    if (!buyer) {
-        throw new Error("Buyer not found with that TIN");
-    }
+  if (!buyer) {
+    throw new Error('Buyer not found with that TIN');
+  }
 
-    if (!buyer.role) {
-        throw new Error("Buyer has no assigned role");
-    }
+  if (!buyer.role) {
+    throw new Error('Buyer has no assigned role');
+  }
 
-    // Validate seller → buyer role compatibility
-    validateRoleCompatibility(sellerRole, buyer.role);
+  // Validate seller → buyer role compatibility
+  validateRoleCompatibility(sellerRole, buyer.role);
 
-    // Check buyer's clearance
-    if (buyer.clearanceStatus !== "approved") {
-        throw new Error("Buyer's account is not approved by RRA");
-    }
+  // Check buyer's clearance
+  if (buyer.clearanceStatus !== 'approved') {
+    throw new Error("Buyer's account is not approved by RRA");
+  }
 
-    // Tax compliance gate — seller must have paid >= 95% of tax
-    const sellerCompliance = await getTaxComplianceStatus(session.user.id);
-    if (!sellerCompliance.isCompliant) {
-        throw new Error(
-            `You must pay at least ${sellerCompliance.threshold}% of your tax to sell. ` +
-            `Current: ${sellerCompliance.compliancePct}% (outstanding: ${sellerCompliance.outstanding.toLocaleString()} RWF)`,
-        );
-    }
+  // Tax compliance gate — seller must have paid >= 95% of tax
+  const sellerCompliance = await getTaxComplianceStatus(session.user.id);
+  if (!sellerCompliance.isCompliant) {
+    throw new Error(
+      `You must pay at least ${sellerCompliance.threshold}% of your tax to sell. ` +
+        `Current: ${sellerCompliance.compliancePct}% (outstanding: ${sellerCompliance.outstanding.toLocaleString()} RWF)`,
+    );
+  }
 
-    // Tax compliance gate — buyer must have paid >= 95% of tax to restock
-    const buyerCompliance = await getTaxComplianceStatus(buyer.id);
-    if (!buyerCompliance.isCompliant) {
-        throw new Error(
-            `Buyer has not met tax compliance (${buyerCompliance.compliancePct}% paid). ` +
-            `They must pay at least ${buyerCompliance.threshold}% to purchase.`,
-        );
-    }
+  // Tax compliance gate — buyer must have paid >= 95% of tax to restock
+  const buyerCompliance = await getTaxComplianceStatus(buyer.id);
+  if (!buyerCompliance.isCompliant) {
+    throw new Error(
+      `Buyer has not met tax compliance (${buyerCompliance.compliancePct}% paid). ` +
+        `They must pay at least ${buyerCompliance.threshold}% to purchase.`,
+    );
+  }
 
-    // Check seller has enough stock (we don't deduct yet — only on confirmation)
-    const [sellerStock] = await db
-        .select()
-        .from(stock)
-        .where(
-            and(
-                eq(stock.businessId, session.user.id),
-                eq(stock.productId, data.productId),
-            ),
-        )
-        .limit(1);
+  // Check seller has enough stock (we don't deduct yet — only on confirmation)
+  const [sellerStock] = await db
+    .select()
+    .from(stock)
+    .where(and(eq(stock.businessId, session.user.id), eq(stock.productId, data.productId)))
+    .limit(1);
 
-    if (!sellerStock || sellerStock.quantity < data.quantity) {
-        throw new Error(
-            `Insufficient stock. Available: ${sellerStock?.quantity ?? 0}`,
-        );
-    }
+  if (!sellerStock || sellerStock.quantity < data.quantity) {
+    throw new Error(`Insufficient stock. Available: ${sellerStock?.quantity ?? 0}`);
+  }
 
-    const config = await getSystemConfig();
-    const totalAmount = data.quantity * data.unitPrice;
-    const vatAmount = Math.round(totalAmount * config.vatRate);
+  const config = await getSystemConfig();
+  const totalAmount = data.quantity * data.unitPrice;
+  const vatAmount = Math.round(totalAmount * config.vatRate);
 
-    // AI Price Floor enforcement — blocks underreporting
-    const priceCheck = await validatePriceFloor(data.productId, session.user.id, data.unitPrice);
-    if (!priceCheck.valid) {
-        throw new Error(priceCheck.error ?? "Price is below the AI-computed minimum.");
-    }
+  // AI Price Floor enforcement — blocks underreporting
+  const priceCheck = await validatePriceFloor(data.productId, session.user.id, data.unitPrice);
+  if (!priceCheck.valid) {
+    throw new Error(priceCheck.error ?? 'Price is below the AI-computed minimum.');
+  }
 
-    // Log if price is above ceiling (flagged for RRA review)
-    if (
-        priceCheck.suggestion.status !== "no_data" &&
-        priceCheck.suggestion.ceiling > 0 &&
-        data.unitPrice > priceCheck.suggestion.ceiling
-    ) {
-        await logAudit({
-            userId: session.user.id,
-            action: "PRICE_ABOVE_CEILING",
-            targetType: "transaction",
-            targetId: data.productId,
-            metadata: {
-                declaredPrice: data.unitPrice,
-                ceiling: priceCheck.suggestion.ceiling,
-                suggested: priceCheck.suggestion.suggested,
-                district: priceCheck.suggestion.district,
-            },
-        });
-    }
-
-    const [txn] = await db
-        .insert(transaction)
-        .values({
-            sellerId: session.user.id,
-            buyerId: buyer.id,
-            productId: data.productId,
-            quantity: data.quantity,
-            unitPrice: data.unitPrice,
-            totalAmount,
-            vatAmount,
-            status: "pending",
-        })
-        .returning();
-
+  // Log if price is above ceiling (flagged for RRA review)
+  if (
+    priceCheck.suggestion.status !== 'no_data' &&
+    priceCheck.suggestion.ceiling > 0 &&
+    data.unitPrice > priceCheck.suggestion.ceiling
+  ) {
     await logAudit({
-        userId: session.user.id,
-        action: "TRANSACTION_CREATED",
-        targetType: "transaction",
-        targetId: txn.id,
-        metadata: {
-            buyerId: buyer.id,
-            buyerTin: data.buyerTin,
-            productId: data.productId,
-            quantity: data.quantity,
-            totalAmount,
-            vatAmount,
-        },
+      userId: session.user.id,
+      action: 'PRICE_ABOVE_CEILING',
+      targetType: 'transaction',
+      targetId: data.productId,
+      metadata: {
+        declaredPrice: data.unitPrice,
+        ceiling: priceCheck.suggestion.ceiling,
+        suggested: priceCheck.suggestion.suggested,
+        district: priceCheck.suggestion.district,
+      },
     });
+  }
 
-    // Real-time: notify buyer of incoming transaction
-    emitToUser(buyer.id, "txn:incoming", {
-        transactionId: txn.id,
-        sellerName: session.user.name,
-        productId: data.productId,
-        quantity: data.quantity,
-        totalAmount,
-    });
+  const [txn] = await db
+    .insert(transaction)
+    .values({
+      sellerId: session.user.id,
+      buyerId: buyer.id,
+      productId: data.productId,
+      quantity: data.quantity,
+      unitPrice: data.unitPrice,
+      totalAmount,
+      vatAmount,
+      status: 'pending',
+    })
+    .returning();
 
-    // Persist notification
-    await createNotification({
-        userId: buyer.id,
-        type: "txn_incoming",
-        title: "New incoming purchase",
-        message: `${session.user.name} sent you ${data.quantity} units (${totalAmount.toLocaleString()} RWF). Please confirm.`,
-        link: "/dashboard/pending",
-    });
+  await logAudit({
+    userId: session.user.id,
+    action: 'TRANSACTION_CREATED',
+    targetType: 'transaction',
+    targetId: txn.id,
+    metadata: {
+      buyerId: buyer.id,
+      buyerTin: data.buyerTin,
+      productId: data.productId,
+      quantity: data.quantity,
+      totalAmount,
+      vatAmount,
+    },
+  });
 
-    return txn;
+  // Real-time: notify buyer of incoming transaction
+  emitToUser(buyer.id, 'txn:incoming', {
+    transactionId: txn.id,
+    sellerName: session.user.name,
+    productId: data.productId,
+    quantity: data.quantity,
+    totalAmount,
+  });
+
+  // Persist notification
+  await createNotification({
+    userId: buyer.id,
+    type: 'txn_incoming',
+    title: 'New incoming purchase',
+    message: `${session.user.name} sent you ${data.quantity} units (${totalAmount.toLocaleString()} RWF). Please confirm.`,
+    link: '/dashboard/pending',
+  });
+
+  return txn;
 }
 
 // ---------------------------------------------------------------------------
@@ -224,140 +205,127 @@ export async function createTransaction(data: {
 // ---------------------------------------------------------------------------
 
 export async function confirmTransaction(transactionId: string) {
-    const { suspended, clearanceStatus, ...session } =
-        await requireApprovedClearance();
+  const { suspended, clearanceStatus, ...session } = await requireApprovedClearance();
 
-    if (suspended) {
-        throw new Error(
-            `Your account is ${clearanceStatus}. Cannot confirm transactions.`,
-        );
+  if (suspended) {
+    throw new Error(`Your account is ${clearanceStatus}. Cannot confirm transactions.`);
+  }
+
+  // Fetch the pending transaction
+  const [txn] = await db
+    .select()
+    .from(transaction)
+    .where(
+      and(
+        eq(transaction.id, transactionId),
+        eq(transaction.buyerId, session.user.id),
+        eq(transaction.status, 'pending'),
+      ),
+    )
+    .limit(1);
+
+  if (!txn) {
+    throw new Error('Transaction not found or already processed');
+  }
+
+  // All of the following happens atomically in a DB transaction
+  await db.transaction(async (tx) => {
+    // 1. Deduct seller stock
+    const [sellerStock] = await tx
+      .select()
+      .from(stock)
+      .where(and(eq(stock.businessId, txn.sellerId), eq(stock.productId, txn.productId)))
+      .limit(1);
+
+    if (!sellerStock || sellerStock.quantity < txn.quantity) {
+      throw new Error('Seller no longer has sufficient stock');
     }
 
-    // Fetch the pending transaction
-    const [txn] = await db
-        .select()
-        .from(transaction)
-        .where(
-            and(
-                eq(transaction.id, transactionId),
-                eq(transaction.buyerId, session.user.id),
-                eq(transaction.status, "pending"),
-            ),
-        )
-        .limit(1);
+    await tx
+      .update(stock)
+      .set({ quantity: sellerStock.quantity - txn.quantity })
+      .where(eq(stock.id, sellerStock.id));
 
-    if (!txn) {
-        throw new Error("Transaction not found or already processed");
-    }
+    // 2. Add/upsert buyer stock
+    const [buyerStock] = await tx
+      .select()
+      .from(stock)
+      .where(and(eq(stock.businessId, session.user.id), eq(stock.productId, txn.productId)))
+      .limit(1);
 
-    // All of the following happens atomically in a DB transaction
-    await db.transaction(async (tx) => {
-        // 1. Deduct seller stock
-        const [sellerStock] = await tx
-            .select()
-            .from(stock)
-            .where(
-                and(
-                    eq(stock.businessId, txn.sellerId),
-                    eq(stock.productId, txn.productId),
-                ),
-            )
-            .limit(1);
-
-        if (!sellerStock || sellerStock.quantity < txn.quantity) {
-            throw new Error("Seller no longer has sufficient stock");
-        }
-
-        await tx
-            .update(stock)
-            .set({ quantity: sellerStock.quantity - txn.quantity })
-            .where(eq(stock.id, sellerStock.id));
-
-        // 2. Add/upsert buyer stock
-        const [buyerStock] = await tx
-            .select()
-            .from(stock)
-            .where(
-                and(
-                    eq(stock.businessId, session.user.id),
-                    eq(stock.productId, txn.productId),
-                ),
-            )
-            .limit(1);
-
-        if (buyerStock) {
-            await tx
-                .update(stock)
-                .set({ quantity: buyerStock.quantity + txn.quantity })
-                .where(eq(stock.id, buyerStock.id));
-        } else {
-            await tx.insert(stock).values({
-                businessId: session.user.id,
-                productId: txn.productId,
-                quantity: txn.quantity,
-            });
-        }
-
-        // 3. Create VAT output record (seller)
-        await tx.insert(vatRecord).values({
-            transactionId: txn.id,
-            businessId: txn.sellerId,
-            vatType: "output",
-            amount: txn.vatAmount,
-        });
-
-        // 4. Create VAT input record (buyer)
-        await tx.insert(vatRecord).values({
-            transactionId: txn.id,
-            businessId: session.user.id,
-            vatType: "input",
-            amount: txn.vatAmount,
-        });
-
-        // 5. Update transaction status
-        await tx
-            .update(transaction)
-            .set({
-                status: "confirmed",
-                confirmedAt: new Date(),
-            })
-            .where(eq(transaction.id, txn.id));
-    });
-
-    await logAudit({
-        userId: session.user.id,
-        action: "TRANSACTION_CONFIRMED",
-        targetType: "transaction",
-        targetId: txn.id,
-        metadata: {
-            sellerId: txn.sellerId,
-            quantity: txn.quantity,
-            vatAmount: txn.vatAmount,
-        },
-    });
-
-    // Real-time: notify seller that their sale was confirmed
-    emitToUser(txn.sellerId, "txn:confirmed", {
-        transactionId: txn.id,
-        buyerName: session.user.name,
+    if (buyerStock) {
+      await tx
+        .update(stock)
+        .set({ quantity: buyerStock.quantity + txn.quantity })
+        .where(eq(stock.id, buyerStock.id));
+    } else {
+      await tx.insert(stock).values({
+        businessId: session.user.id,
+        productId: txn.productId,
         quantity: txn.quantity,
-        totalAmount: txn.totalAmount,
+      });
+    }
+
+    // 3. Create VAT output record (seller)
+    await tx.insert(vatRecord).values({
+      transactionId: txn.id,
+      businessId: txn.sellerId,
+      vatType: 'output',
+      amount: txn.vatAmount,
     });
 
-    // Persist notification
-    await createNotification({
-        userId: txn.sellerId,
-        type: "txn_confirmed",
-        title: "Sale confirmed",
-        message: `${session.user.name} confirmed your sale of ${txn.quantity} units.`,
-        link: "/dashboard/pending",
+    // 4. Create VAT input record (buyer)
+    await tx.insert(vatRecord).values({
+      transactionId: txn.id,
+      businessId: session.user.id,
+      vatType: 'input',
+      amount: txn.vatAmount,
     });
 
-    // Compliance alert auto-detection — check both seller and buyer
-    checkAndAlertCompliance(txn.sellerId);
-    checkAndAlertCompliance(session.user.id);
+    // 5. Update transaction status
+    await tx
+      .update(transaction)
+      .set({
+        status: 'confirmed',
+        confirmedAt: new Date(),
+      })
+      .where(eq(transaction.id, txn.id));
+  });
 
-    return { success: true };
+  await logAudit({
+    userId: session.user.id,
+    action: 'TRANSACTION_CONFIRMED',
+    targetType: 'transaction',
+    targetId: txn.id,
+    metadata: {
+      sellerId: txn.sellerId,
+      quantity: txn.quantity,
+      vatAmount: txn.vatAmount,
+    },
+  });
+
+  // Real-time: notify seller that their sale was confirmed
+  emitToUser(txn.sellerId, 'txn:confirmed', {
+    transactionId: txn.id,
+    buyerName: session.user.name,
+    quantity: txn.quantity,
+    totalAmount: txn.totalAmount,
+  });
+
+  // Persist notification
+  await createNotification({
+    userId: txn.sellerId,
+    type: 'txn_confirmed',
+    title: 'Sale confirmed',
+    message: `${session.user.name} confirmed your sale of ${txn.quantity} units.`,
+    link: '/dashboard/pending',
+  });
+
+  // Compliance alert auto-detection — check both seller and buyer
+  checkAndAlertCompliance(txn.sellerId);
+  checkAndAlertCompliance(session.user.id);
+
+  return { success: true };
 }
 
 // ---------------------------------------------------------------------------
@@ -365,53 +333,50 @@ export async function confirmTransaction(transactionId: string) {
 // ---------------------------------------------------------------------------
 
 export async function rejectTransaction(transactionId: string) {
-    const session = await requireTraderSession();
+  const session = await requireTraderSession();
 
-    const [txn] = await db
-        .select()
-        .from(transaction)
-        .where(
-            and(
-                eq(transaction.id, transactionId),
-                eq(transaction.buyerId, session.user.id),
-                eq(transaction.status, "pending"),
-            ),
-        )
-        .limit(1);
+  const [txn] = await db
+    .select()
+    .from(transaction)
+    .where(
+      and(
+        eq(transaction.id, transactionId),
+        eq(transaction.buyerId, session.user.id),
+        eq(transaction.status, 'pending'),
+      ),
+    )
+    .limit(1);
 
-    if (!txn) {
-        throw new Error("Transaction not found or already processed");
-    }
+  if (!txn) {
+    throw new Error('Transaction not found or already processed');
+  }
 
-    await db
-        .update(transaction)
-        .set({ status: "rejected" })
-        .where(eq(transaction.id, txn.id));
+  await db.update(transaction).set({ status: 'rejected' }).where(eq(transaction.id, txn.id));
 
-    await logAudit({
-        userId: session.user.id,
-        action: "TRANSACTION_REJECTED",
-        targetType: "transaction",
-        targetId: txn.id,
-        metadata: { sellerId: txn.sellerId },
-    });
+  await logAudit({
+    userId: session.user.id,
+    action: 'TRANSACTION_REJECTED',
+    targetType: 'transaction',
+    targetId: txn.id,
+    metadata: { sellerId: txn.sellerId },
+  });
 
-    // Real-time: notify seller that their sale was rejected
-    emitToUser(txn.sellerId, "txn:rejected", {
-        transactionId: txn.id,
-        buyerName: session.user.name,
-    });
+  // Real-time: notify seller that their sale was rejected
+  emitToUser(txn.sellerId, 'txn:rejected', {
+    transactionId: txn.id,
+    buyerName: session.user.name,
+  });
 
-    // Persist notification
-    await createNotification({
-        userId: txn.sellerId,
-        type: "txn_rejected",
-        title: "Sale rejected",
-        message: `${session.user.name} rejected your sale.`,
-        link: "/dashboard/pending",
-    });
+  // Persist notification
+  await createNotification({
+    userId: txn.sellerId,
+    type: 'txn_rejected',
+    title: 'Sale rejected',
+    message: `${session.user.name} rejected your sale.`,
+    link: '/dashboard/pending',
+  });
 
-    return { success: true };
+  return { success: true };
 }
 
 // ---------------------------------------------------------------------------
@@ -419,132 +384,122 @@ export async function rejectTransaction(transactionId: string) {
 // ---------------------------------------------------------------------------
 
 export async function createRetailSale(data: {
-    productId: string;
-    quantity: number;
-    unitPrice: number;
-    customerName: string;
+  productId: string;
+  quantity: number;
+  unitPrice: number;
+  customerName: string;
 }) {
-    const { suspended, clearanceStatus, ...session } =
-        await requireApprovedClearance();
+  const { suspended, clearanceStatus, ...session } = await requireApprovedClearance();
 
-    if (suspended) {
-        throw new Error(
-            `Your account is ${clearanceStatus}. Cannot create sales.`,
-        );
-    }
+  if (suspended) {
+    throw new Error(`Your account is ${clearanceStatus}. Cannot create sales.`);
+  }
 
-    // Only retailers can sell to consumers
-    await requireTraderSession(["retailer"]);
+  // Only retailers can sell to consumers
+  await requireTraderSession(['retailer']);
 
-    if (data.quantity <= 0 || data.unitPrice <= 0) {
-        throw new Error("Quantity and unit price must be positive");
-    }
+  if (data.quantity <= 0 || data.unitPrice <= 0) {
+    throw new Error('Quantity and unit price must be positive');
+  }
 
-    if (!data.customerName.trim()) {
-        throw new Error("Customer name is required for retail sales");
-    }
+  if (!data.customerName.trim()) {
+    throw new Error('Customer name is required for retail sales');
+  }
 
-    const config = await getSystemConfig();
-    const totalAmount = data.quantity * data.unitPrice;
-    const vatAmount = Math.round(totalAmount * config.vatRate);
+  const config = await getSystemConfig();
+  const totalAmount = data.quantity * data.unitPrice;
+  const vatAmount = Math.round(totalAmount * config.vatRate);
 
-    // AI Price Floor enforcement — blocks underreporting
-    const priceCheck = await validatePriceFloor(data.productId, session.user.id, data.unitPrice);
-    if (!priceCheck.valid) {
-        throw new Error(priceCheck.error ?? "Price is below the AI-computed minimum.");
-    }
+  // AI Price Floor enforcement — blocks underreporting
+  const priceCheck = await validatePriceFloor(data.productId, session.user.id, data.unitPrice);
+  if (!priceCheck.valid) {
+    throw new Error(priceCheck.error ?? 'Price is below the AI-computed minimum.');
+  }
 
-    // Log if price is above ceiling (flagged for RRA review)
-    if (
-        priceCheck.suggestion.status !== "no_data" &&
-        priceCheck.suggestion.ceiling > 0 &&
-        data.unitPrice > priceCheck.suggestion.ceiling
-    ) {
-        await logAudit({
-            userId: session.user.id,
-            action: "PRICE_ABOVE_CEILING",
-            targetType: "transaction",
-            targetId: data.productId,
-            metadata: {
-                declaredPrice: data.unitPrice,
-                ceiling: priceCheck.suggestion.ceiling,
-                suggested: priceCheck.suggestion.suggested,
-                district: priceCheck.suggestion.district,
-            },
-        });
-    }
-
-    // Atomic: deduct stock + create transaction + create VAT record
-    const result = await db.transaction(async (tx) => {
-        // Deduct stock immediately (no confirmation needed)
-        const [retailerStock] = await tx
-            .select()
-            .from(stock)
-            .where(
-                and(
-                    eq(stock.businessId, session.user.id),
-                    eq(stock.productId, data.productId),
-                ),
-            )
-            .limit(1);
-
-        if (!retailerStock || retailerStock.quantity < data.quantity) {
-            throw new Error(
-                `Insufficient stock. Available: ${retailerStock?.quantity ?? 0}`,
-            );
-        }
-
-        await tx
-            .update(stock)
-            .set({ quantity: retailerStock.quantity - data.quantity })
-            .where(eq(stock.id, retailerStock.id));
-
-        // Create completed transaction
-        const [txn] = await tx
-            .insert(transaction)
-            .values({
-                sellerId: session.user.id,
-                buyerId: null,
-                buyerName: data.customerName.trim(),
-                productId: data.productId,
-                quantity: data.quantity,
-                unitPrice: data.unitPrice,
-                totalAmount,
-                vatAmount,
-                status: "completed",
-                confirmedAt: new Date(),
-            })
-            .returning();
-
-        // Create VAT output record (retailer only — no buyer VAT for consumers)
-        await tx.insert(vatRecord).values({
-            transactionId: txn.id,
-            businessId: session.user.id,
-            vatType: "output",
-            amount: vatAmount,
-        });
-
-        return txn;
-    });
-
+  // Log if price is above ceiling (flagged for RRA review)
+  if (
+    priceCheck.suggestion.status !== 'no_data' &&
+    priceCheck.suggestion.ceiling > 0 &&
+    data.unitPrice > priceCheck.suggestion.ceiling
+  ) {
     await logAudit({
-        userId: session.user.id,
-        action: "RETAIL_SALE_COMPLETED",
-        targetType: "transaction",
-        targetId: result.id,
-        metadata: {
-            customerName: data.customerName,
-            productId: data.productId,
-            quantity: data.quantity,
-            totalAmount,
-            vatAmount,
-        },
+      userId: session.user.id,
+      action: 'PRICE_ABOVE_CEILING',
+      targetType: 'transaction',
+      targetId: data.productId,
+      metadata: {
+        declaredPrice: data.unitPrice,
+        ceiling: priceCheck.suggestion.ceiling,
+        suggested: priceCheck.suggestion.suggested,
+        district: priceCheck.suggestion.district,
+      },
+    });
+  }
+
+  // Atomic: deduct stock + create transaction + create VAT record
+  const result = await db.transaction(async (tx) => {
+    // Deduct stock immediately (no confirmation needed)
+    const [retailerStock] = await tx
+      .select()
+      .from(stock)
+      .where(and(eq(stock.businessId, session.user.id), eq(stock.productId, data.productId)))
+      .limit(1);
+
+    if (!retailerStock || retailerStock.quantity < data.quantity) {
+      throw new Error(`Insufficient stock. Available: ${retailerStock?.quantity ?? 0}`);
+    }
+
+    await tx
+      .update(stock)
+      .set({ quantity: retailerStock.quantity - data.quantity })
+      .where(eq(stock.id, retailerStock.id));
+
+    // Create completed transaction
+    const [txn] = await tx
+      .insert(transaction)
+      .values({
+        sellerId: session.user.id,
+        buyerId: null,
+        buyerName: data.customerName.trim(),
+        productId: data.productId,
+        quantity: data.quantity,
+        unitPrice: data.unitPrice,
+        totalAmount,
+        vatAmount,
+        status: 'completed',
+        confirmedAt: new Date(),
+      })
+      .returning();
+
+    // Create VAT output record (retailer only — no buyer VAT for consumers)
+    await tx.insert(vatRecord).values({
+      transactionId: txn.id,
+      businessId: session.user.id,
+      vatType: 'output',
+      amount: vatAmount,
     });
 
-    // Compliance alert auto-detection for retailer
-    checkAndAlertCompliance(session.user.id);
+    return txn;
+  });
 
-    return result;
+  await logAudit({
+    userId: session.user.id,
+    action: 'RETAIL_SALE_COMPLETED',
+    targetType: 'transaction',
+    targetId: result.id,
+    metadata: {
+      customerName: data.customerName,
+      productId: data.productId,
+      quantity: data.quantity,
+      totalAmount,
+      vatAmount,
+    },
+  });
+
+  // Compliance alert auto-detection for retailer
+  checkAndAlertCompliance(session.user.id);
+
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -555,84 +510,81 @@ export async function createRetailSale(data: {
  * Get outgoing transactions (where current user is the seller).
  */
 export async function getOutgoingTransactions() {
-    const session = await requireTraderSession();
+  const session = await requireTraderSession();
 
-    // Expire any stale pending transactions before querying
-    await expireStalePendingTransactions();
+  // Expire any stale pending transactions before querying
+  await expireStalePendingTransactions();
 
-    return db
-        .select({
-            id: transaction.id,
-            buyerName: sql<string>`COALESCE(${user.businessName}, ${transaction.buyerName})`,
-            buyerTin: user.tinNumber,
-            productName: product.name,
-            quantity: transaction.quantity,
-            totalAmount: transaction.totalAmount,
-            vatAmount: transaction.vatAmount,
-            status: transaction.status,
-            createdAt: transaction.createdAt,
-            confirmedAt: transaction.confirmedAt,
-        })
-        .from(transaction)
-        .leftJoin(user, eq(transaction.buyerId, user.id))
-        .innerJoin(product, eq(transaction.productId, product.id))
-        .where(eq(transaction.sellerId, session.user.id))
-        .orderBy(desc(transaction.createdAt));
+  return db
+    .select({
+      id: transaction.id,
+      buyerName: sql<string>`COALESCE(${user.businessName}, ${transaction.buyerName})`,
+      buyerTin: user.tinNumber,
+      productName: product.name,
+      quantity: transaction.quantity,
+      totalAmount: transaction.totalAmount,
+      vatAmount: transaction.vatAmount,
+      status: transaction.status,
+      createdAt: transaction.createdAt,
+      confirmedAt: transaction.confirmedAt,
+    })
+    .from(transaction)
+    .leftJoin(user, eq(transaction.buyerId, user.id))
+    .innerJoin(product, eq(transaction.productId, product.id))
+    .where(eq(transaction.sellerId, session.user.id))
+    .orderBy(desc(transaction.createdAt));
 }
 
 /**
  * Get incoming transactions (where current user is the buyer).
  */
 export async function getIncomingTransactions() {
-    const session = await requireTraderSession();
+  const session = await requireTraderSession();
 
-    // Expire any stale pending transactions before querying
-    await expireStalePendingTransactions();
+  // Expire any stale pending transactions before querying
+  await expireStalePendingTransactions();
 
-    return db
-        .select({
-            id: transaction.id,
-            sellerName: user.businessName,
-            sellerTin: user.tinNumber,
-            productName: product.name,
-            quantity: transaction.quantity,
-            totalAmount: transaction.totalAmount,
-            vatAmount: transaction.vatAmount,
-            status: transaction.status,
-            createdAt: transaction.createdAt,
-        })
-        .from(transaction)
-        .innerJoin(user, eq(transaction.sellerId, user.id))
-        .innerJoin(product, eq(transaction.productId, product.id))
-        .where(eq(transaction.buyerId, session.user.id))
-        .orderBy(desc(transaction.createdAt));
+  return db
+    .select({
+      id: transaction.id,
+      sellerName: user.businessName,
+      sellerTin: user.tinNumber,
+      productName: product.name,
+      quantity: transaction.quantity,
+      totalAmount: transaction.totalAmount,
+      vatAmount: transaction.vatAmount,
+      status: transaction.status,
+      createdAt: transaction.createdAt,
+    })
+    .from(transaction)
+    .innerJoin(user, eq(transaction.sellerId, user.id))
+    .innerJoin(product, eq(transaction.productId, product.id))
+    .where(eq(transaction.buyerId, session.user.id))
+    .orderBy(desc(transaction.createdAt));
 }
 
 /**
  * Get a single transaction by ID (only if the user is a party to it).
  */
 export async function getTransaction(transactionId: string) {
-    const session = await requireTraderSession();
+  const session = await requireTraderSession();
 
-    const [txn] = await db
-        .select()
-        .from(transaction)
-        .where(
-            and(
-                eq(transaction.id, transactionId),
-                or(
-                    eq(transaction.sellerId, session.user.id),
-                    eq(transaction.buyerId, session.user.id),
-                ),
-            ),
-        )
-        .limit(1);
+  const [txn] = await db
+    .select()
+    .from(transaction)
+    .where(
+      and(
+        eq(transaction.id, transactionId),
+        or(eq(transaction.sellerId, session.user.id), eq(transaction.buyerId, session.user.id)),
+      ),
+    )
+    .limit(1);
 
-    if (!txn) {
-        throw new Error("Transaction not found");
-    }
+  if (!txn) {
+    throw new Error('Transaction not found');
+  }
 
-    return txn;
+  return txn;
 }
 
 // ---------------------------------------------------------------------------
@@ -640,79 +592,81 @@ export async function getTransaction(transactionId: string) {
 // ---------------------------------------------------------------------------
 
 export async function lookupBuyer(buyerTin: string) {
+  try {
     const session = await requireTraderSession();
     const sellerRole = session.user.role as TraderRole;
 
     if (!buyerTin || buyerTin.trim().length < 3) {
-        throw new Error("Enter a valid TIN number");
+      return { error: 'Enter a valid TIN number' };
     }
 
     const [buyer] = await db
-        .select({
-            id: user.id,
-            name: user.name,
-            businessName: user.businessName,
-            tinNumber: user.tinNumber,
-            role: user.role,
-            clearanceStatus: user.clearanceStatus,
-        })
-        .from(user)
-        .where(eq(user.tinNumber, buyerTin.trim()))
-        .limit(1);
+      .select({
+        id: user.id,
+        name: user.name,
+        businessName: user.businessName,
+        tinNumber: user.tinNumber,
+        role: user.role,
+        clearanceStatus: user.clearanceStatus,
+      })
+      .from(user)
+      .where(eq(user.tinNumber, buyerTin.trim()))
+      .limit(1);
 
     if (!buyer) {
-        throw new Error("No business found with that TIN");
+      return { error: 'No business found with that TIN' };
     }
 
     if (!buyer.role) {
-        throw new Error("Buyer has no assigned role");
+      return { error: 'Buyer has no assigned role' };
     }
 
     if (buyer.id === session.user.id) {
-        throw new Error("Cannot sell to yourself");
+      return { error: 'Cannot sell to yourself' };
     }
 
     // Check role compatibility
     let isEligible = true;
-    let compatibilityError = "";
+    let compatibilityError = '';
     try {
-        validateRoleCompatibility(sellerRole, buyer.role);
+      validateRoleCompatibility(sellerRole, buyer.role);
     } catch (err) {
-        isEligible = false;
-        compatibilityError =
-            err instanceof Error ? err.message : "Incompatible roles";
+      isEligible = false;
+      compatibilityError = err instanceof Error ? err.message : 'Incompatible roles';
     }
 
     // Tax compliance check for buyer
     let buyerCompliancePct = 100;
-    let buyerTaxReason = "";
+    let buyerTaxReason = '';
     try {
-        const compliance = await getTaxComplianceStatus(buyer.id);
-        buyerCompliancePct = compliance.compliancePct;
-        if (!compliance.isCompliant) {
-            isEligible = false;
-            buyerTaxReason = `Tax compliance: ${compliance.compliancePct}% (need ${compliance.threshold}%). Outstanding: ${compliance.outstanding.toLocaleString()} RWF`;
-        }
+      const compliance = await getTaxComplianceStatus(buyer.id);
+      buyerCompliancePct = compliance.compliancePct;
+      if (!compliance.isCompliant) {
+        isEligible = false;
+        buyerTaxReason = `Tax compliance: ${compliance.compliancePct}% (need ${compliance.threshold}%). Outstanding: ${compliance.outstanding.toLocaleString()} RWF`;
+      }
     } catch {
-        // If compliance check fails, don't block — just report clearance
+      // If compliance check fails, don't block — just report clearance
     }
 
     return {
-        id: buyer.id,
-        name: buyer.name,
-        businessName: buyer.businessName,
-        tinNumber: buyer.tinNumber,
-        role: buyer.role,
-        clearanceStatus: buyer.clearanceStatus,
-        compliancePct: buyerCompliancePct,
-        isEligible:
-            isEligible && buyer.clearanceStatus === "approved",
-        reason:
-            compatibilityError ||
-            buyerTaxReason ||
-            (buyer.clearanceStatus !== "approved"
-                ? `Buyer clearance: ${buyer.clearanceStatus}`
-                : ""),
+      id: buyer.id,
+      name: buyer.name,
+      businessName: buyer.businessName,
+      tinNumber: buyer.tinNumber,
+      role: buyer.role,
+      clearanceStatus: buyer.clearanceStatus,
+      compliancePct: buyerCompliancePct,
+      isEligible: isEligible && buyer.clearanceStatus === 'approved',
+      reason:
+        compatibilityError ||
+        buyerTaxReason ||
+        (buyer.clearanceStatus !== 'approved' ? `Buyer clearance: ${buyer.clearanceStatus}` : ''),
     };
+  } catch (err) {
+    // Handle auth errors and other unexpected errors
+    return {
+      error: err instanceof Error ? err.message : 'Failed to lookup buyer',
+    };
+  }
 }
-
