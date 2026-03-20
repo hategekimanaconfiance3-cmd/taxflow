@@ -1,18 +1,18 @@
 import { Body, Button, Container, Head, Heading, Html, Preview, Section, Text } from '@react-email/components';
 
-interface StatisticaEmailProps {
+interface TaxFlowEmailProps {
   verificationCode?: string;
   actionUrl?: string;
   actionText?: string;
   subject: string;
 }
 
-export default function StatisticaVerifyEmail({
+export default function TaxFlowEmail({
   verificationCode,
   actionUrl,
   actionText,
   subject,
-}: StatisticaEmailProps) {
+}: TaxFlowEmailProps) {
   return (
     <Html>
       <Head />
@@ -22,8 +22,8 @@ export default function StatisticaVerifyEmail({
         <Container style={container}>
           <Section style={header}>
             <div style={logoWrapper}>
-              <div style={logoIcon}>S</div>
-              <Text style={logoText}>Statistica</Text>
+              <div style={logoIcon}>TF</div>
+              <Text style={logoText}>TaxFlow</Text>
             </div>
           </Section>
 
@@ -32,7 +32,7 @@ export default function StatisticaVerifyEmail({
 
             <Text style={paragraph}>
               {verificationCode
-                ? 'Welcome to Statistica. Use the code below to complete your verification process.'
+                ? 'Use the code below to complete your verification process on TaxFlow.'
                 : 'You requested a password reset. Click the button below to proceed.'}
             </Text>
 
@@ -62,7 +62,7 @@ export default function StatisticaVerifyEmail({
           </Section>
 
           <Section style={footer}>
-            <Text style={footerText}>© {new Date().getFullYear()} Statistica. All rights reserved.</Text>
+            <Text style={footerText}>© {new Date().getFullYear()} TaxFlow. All rights reserved.</Text>
           </Section>
         </Container>
       </Body>
@@ -101,7 +101,7 @@ const logoIcon = {
   borderRadius: '8px',
   width: '32px',
   height: '32px',
-  fontSize: '20px',
+  fontSize: '16px',
   fontWeight: 'bold',
   lineHeight: '32px',
   textAlign: 'center' as const,
