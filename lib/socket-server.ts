@@ -3,7 +3,7 @@ import { createAdapter } from '@socket.io/redis-adapter';
 import Redis from 'ioredis';
 import { CHANNEL } from './realtime';
 
-const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6380';
+const REDIS_URL = process.env.REDIS_URL || 'redis://:Taxflow07857@localhost:6380';
 
 let io: SocketIOServer | null = null;
 
@@ -27,8 +27,24 @@ export function initSocketServer(httpServer: import('http').Server) {
   });
 
   // Valkey pub/sub adapter for multi-server scaling
-  const pubClient = new Redis(REDIS_URL);
+  const redisOpts = {
+    maxRetriesPerRequest: 3,
+    retryStrategy: (times: number) => {
+      if (times > 3) return null;
+      return Math.min(times * 200, 2000);
+    },
+  };
+
+  const pubClient = new Redis(REDIS_URL, redisOpts);
+  pubClient.on('error', (err) => {
+    console.error('[Socket.IO] Pub client error:', err.message);
+  });
+
   const subClient = pubClient.duplicate();
+  subClient.on('error', (err) => {
+    console.error('[Socket.IO] Sub client error:', err.message);
+  });
+
   io.adapter(createAdapter(pubClient, subClient));
 
   // Auth: join user-specific room on connection
@@ -45,7 +61,10 @@ export function initSocketServer(httpServer: import('http').Server) {
   });
 
   // ─── Bridge: subscribe to Valkey channel for server action events ───
-  const realtimeSub = new Redis(REDIS_URL);
+  const realtimeSub = new Redis(REDIS_URL, redisOpts);
+  realtimeSub.on('error', (err) => {
+    console.error('[Socket.IO] Realtime sub error:', err.message);
+  });
   realtimeSub.subscribe(CHANNEL, (err) => {
     if (err) {
       console.error('[Socket.IO] Failed to subscribe to realtime channel:', err);

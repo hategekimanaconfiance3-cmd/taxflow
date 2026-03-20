@@ -3,7 +3,7 @@ import Redis from 'ioredis';
 // Valkey/Redis client singleton for server-side use
 // Valkey is 100% Redis-compatible, so ioredis works perfectly
 
-const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
+const REDIS_URL = process.env.REDIS_URL || 'redis://:Taxflow07857@localhost:6380';
 
 function createValkeyClient() {
   const client = new Redis(REDIS_URL, {
