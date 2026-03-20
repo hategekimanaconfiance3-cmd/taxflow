@@ -86,10 +86,36 @@ export function AdminShell({
         .toUpperCase()
         .slice(0, 2);
 
+    // Collect all sidebar hrefs for smarter active-state detection
+    const allHrefs = useMemo(
+        () => groups.flatMap((g) => g.items.map((i) => i.href)),
+        [groups]
+    );
+
     function isActive(href: string): boolean {
-        if (href === "/admin/dashboard") return pathname === "/admin/dashboard";
-        if (href.includes("?")) return false;
-        return pathname === href || pathname.startsWith(href);
+        const cleanPathname = pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
+        const cleanHref = href.endsWith("/") ? href.slice(0, -1) : href;
+
+        // Dashboard is exact-match only
+        if (cleanHref === "/admin/dashboard") return cleanPathname === "/admin/dashboard";
+        // Action triggers with query params are never active
+        if (cleanHref.includes("?")) return false;
+        // Exact match always wins
+        if (cleanPathname === cleanHref) return true;
+        // For startsWith matches, only activate if no OTHER sidebar item
+        // is a more specific (longer) prefix match for the current pathname
+        if (cleanPathname.startsWith(cleanHref + "/")) {
+            const hasMoreSpecificSibling = allHrefs.some((other) => {
+                const cleanOther = other.endsWith("/") ? other.slice(0, -1) : other;
+                return (
+                    cleanOther !== cleanHref &&
+                    cleanOther.length > cleanHref.length &&
+                    cleanPathname.startsWith(cleanOther)
+                );
+            });
+            return !hasMoreSpecificSibling;
+        }
+        return false;
     }
 
     const SidebarNav = () => (

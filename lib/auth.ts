@@ -1,13 +1,13 @@
-import { betterAuth } from "better-auth";
-import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { username } from "better-auth/plugins";
-import { phoneNumber } from "better-auth/plugins";
-import db from "@/db/drizzle";
-import * as schema from "@/db/schema";
+import { betterAuth } from 'better-auth';
+import { drizzleAdapter } from 'better-auth/adapters/drizzle';
+import { username } from 'better-auth/plugins';
+import { phoneNumber } from 'better-auth/plugins';
+import db from '@/db/drizzle';
+import * as schema from '@/db/schema';
 
 export const auth = betterAuth({
   database: drizzleAdapter(db, {
-    provider: "pg",
+    provider: 'pg',
     schema,
   }),
   emailAndPassword: {
@@ -35,28 +35,28 @@ export const auth = betterAuth({
   user: {
     additionalFields: {
       nationalId: {
-        type: "string",
+        type: 'string',
         required: false,
       },
       tinNumber: {
-        type: "string",
+        type: 'string',
         required: false,
       },
       businessName: {
-        type: "string",
+        type: 'string',
         required: false,
       },
       role: {
-        type: "string",
+        type: 'string',
         required: false,
       },
       clearanceStatus: {
-        type: "string",
+        type: 'string',
         required: false,
-        defaultValue: "approved",
+        defaultValue: 'approved',
       },
       isActive: {
-        type: "boolean",
+        type: 'boolean',
         required: false,
         defaultValue: true,
       },

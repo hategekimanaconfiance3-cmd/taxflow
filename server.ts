@@ -23,10 +23,10 @@ app.prepare().then(() => {
   httpServer.listen(port, () => {
     console.log(`
   ┌─────────────────────────────────────────┐
-  │  TaxFlow Platform                       │
-  │  https://${hostname}:${port}                  │
-  │  Socket.IO:  /api/socketio              │
-  │  Mode:       ${dev ? 'development' : 'production'}               │
+  │  TaxFlow Platform                           │
+  │  https: //${hostname}:${port}               │
+  │  Socket.IO: /api/socketio                   │
+  │  Mode: ${dev ? 'development' : 'production'}│
   └─────────────────────────────────────────┘
         `);
   });
