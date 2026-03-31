@@ -172,7 +172,7 @@ export function ResetPasswordForm() {
                                                 <button
                                                     type="button"
                                                     onClick={() => setShowPassword((v) => !v)}
-                                                    className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600"
+                                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
                                                     tabIndex={-1}
                                                 >
                                                     {showPassword ? (
@@ -206,7 +206,7 @@ export function ResetPasswordForm() {
                                                 <button
                                                     type="button"
                                                     onClick={() => setShowConfirm((v) => !v)}
-                                                    className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600"
+                                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
                                                     tabIndex={-1}
                                                 >
                                                     {showConfirm ? (

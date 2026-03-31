@@ -6,7 +6,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import Link from 'next/link';
-import { Loader2, ShieldCheck } from 'lucide-react';
+import { Loader2, ShieldCheck, Eye, EyeOff } from 'lucide-react';
 
 import { authClient } from '@/lib/auth-client';
 import { verifyRRAStaff } from '@/lib/actions/auth.action';
@@ -36,6 +36,7 @@ type AdminLoginValues = z.infer<typeof adminLoginSchema>;
 export function AdminLoginForm() {
   const router = useRouter();
   const [serverError, setServerError] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
 
   const form = useForm<AdminLoginValues>({
     resolver: zodResolver(adminLoginSchema),
@@ -123,7 +124,21 @@ export function AdminLoginForm() {
                       </Link>
                     </div>
                     <FormControl>
-                      <Input {...field} type="password" className="h-10 border-gray-200 bg-gray-50 focus:bg-white" />
+                      <div className="relative">
+                        <Input
+                          {...field}
+                          type={showPassword ? 'text' : 'password'}
+                          className="h-10 border-gray-200 bg-gray-50 focus:bg-white pr-10"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword((v) => !v)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                          tabIndex={-1}
+                        >
+                          {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        </button>
+                      </div>
                     </FormControl>
                     <FormMessage />
                   </FormItem>
