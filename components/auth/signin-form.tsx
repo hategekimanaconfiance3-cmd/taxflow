@@ -49,7 +49,7 @@ function RoleSelector({
           className={`rounded-md border px-4 py-1.5 text-sm font-medium transition-colors
                         ${
                           value === r.value
-                            ? 'border-[#99a1af] bg-[#99a1af] text-black'
+                            ? 'border-[#99a1af] bg-gray-200 text-black'
                             : 'border-gray-200 bg-white text-gray-500 hover:border-[#99a1af] hover:text-[#99a1af]'
                         }
                         disabled:pointer-events-none disabled:opacity-60`}
