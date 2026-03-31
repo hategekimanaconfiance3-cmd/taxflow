@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useState, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import { authClient } from "@/lib/auth-client";
 import {
@@ -37,7 +38,26 @@ export function DashboardTopbar({
     userId,
 }: DashboardTopbarProps) {
     const pathname = usePathname();
+    const router = useRouter();
     const groups = getSidebarGroups(role);
+    const [isSigningOut, setIsSigningOut] = useState(false);
+
+    const handleSignOut = useCallback(async () => {
+        if (isSigningOut) return;
+        setIsSigningOut(true);
+        try {
+            await authClient.signOut({
+                fetchOptions: {
+                    onSuccess: () => {
+                        window.location.href = "/sign-in";
+                    },
+                },
+            });
+        } catch (error) {
+            console.error("Sign-out failed:", error);
+            setIsSigningOut(false);
+        }
+    }, [isSigningOut]);
     const initials = userName
         .split(" ")
         .map((n) => n[0])
@@ -145,19 +165,12 @@ export function DashboardTopbar({
                     {/* Sign out */}
                     <div className="px-2 py-3">
                         <button
-                            onClick={async () => {
-                                await authClient.signOut({
-                                    fetchOptions: {
-                                        onSuccess: () => {
-                                            window.location.href = "/sign-in";
-                                        },
-                                    },
-                                });
-                            }}
-                            className="flex w-full items-center gap-2.5 rounded-md px-3 py-[7px] text-[13px] font-medium text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+                            onClick={handleSignOut}
+                            disabled={isSigningOut}
+                            className="flex w-full items-center gap-2.5 rounded-md px-3 py-[7px] text-[13px] font-medium text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors disabled:opacity-50"
                         >
                             <LogOut className="h-4 w-4" />
-                            Sign Out
+                            {isSigningOut ? "Signing out…" : "Sign Out"}
                         </button>
                     </div>
                 </SheetContent>

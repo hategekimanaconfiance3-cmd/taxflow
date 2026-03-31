@@ -3,7 +3,9 @@
 import { eq } from "drizzle-orm";
 import { tinDb } from "@/db/tin-drizzle";
 import { citizen, tinRecord } from "@/db/tin-schema";
-
+import { auth } from "@/lib/auth";
+import { headers } from "next/headers";
+import { redirect } from "next/navigation";
 // ---------------------------------------------------------------------------
 // Auth Server Actions
 // Queries the TIN database (mock government registry) for citizen/business info
@@ -119,4 +121,24 @@ export async function verifyRRAStaff(): Promise<RRAVerifyResult> {
         console.error("RRA staff verification failed:", error);
         return { success: false, error: "Failed to verify staff access. Please try again." };
     }
+}
+
+// ---------------------------------------------------------------------------
+// Sign Out
+// ---------------------------------------------------------------------------
+
+/**
+ * Sign out the current user server-side and redirect.
+ * Uses better-auth server API to revoke the session + Next.js redirect().
+ */
+export async function signOutAction(redirectTo: string = "/sign-in"): Promise<void> {
+    try {
+        await auth.api.signOut({
+            headers: await headers(),
+        });
+    } catch (error) {
+        console.error("Sign-out failed:", error);
+    }
+
+    redirect(redirectTo);
 }

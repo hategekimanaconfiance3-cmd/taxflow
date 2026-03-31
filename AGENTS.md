@@ -1,5 +1,6 @@
 # Taxflow Platform Engineering Rules
-Stack: Next.js 16 + React 19 + TypeScript + Drizzle + PostgreSQL
+Stack: Next.js 16 + React 19 + TypeScript + Drizzle + PostgreSQL  
+RealTime: Valkey + Socket.IO
 
 ---
 

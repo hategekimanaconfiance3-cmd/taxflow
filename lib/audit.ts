@@ -1,24 +1,24 @@
-"use server";
+'use server';
 
-import db from "@/db/drizzle";
-import { auditLog } from "@/db/schema";
+import db from '@/db/drizzle';
+import { auditLog } from '@/db/schema';
 
 /**
  * Log an auditable event.
  * Called from server actions on every mutation (transactions, clearance changes, etc.)
  */
 export async function logAudit(params: {
-    userId: string;
-    action: string;
-    targetType?: string;
-    targetId?: string;
-    metadata?: Record<string, unknown>;
+  userId: string;
+  action: string;
+  targetType?: string;
+  targetId?: string;
+  metadata?: Record<string, unknown>;
 }) {
-    await db.insert(auditLog).values({
-        userId: params.userId,
-        action: params.action,
-        targetType: params.targetType ?? null,
-        targetId: params.targetId ?? null,
-        metadata: params.metadata ? JSON.stringify(params.metadata) : null,
-    });
+  await db.insert(auditLog).values({
+    userId: params.userId,
+    action: params.action,
+    targetType: params.targetType ?? null,
+    targetId: params.targetId ?? null,
+    metadata: params.metadata ? JSON.stringify(params.metadata) : null,
+  });
 }

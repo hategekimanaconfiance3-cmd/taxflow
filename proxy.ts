@@ -2,25 +2,34 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSessionCookie } from 'better-auth/cookies';
 
 export default function proxy(request: NextRequest) {
-  // Skip middleware for server actions (e.g. verifyRRAStaff called from admin-login)
+  // Skip middleware for server actions
   if (request.headers.get('Next-Action')) {
     return NextResponse.next();
   }
 
-  const sessionCookie = getSessionCookie(request);
   const { pathname } = request.nextUrl;
+
+  const sessionCookie = getSessionCookie(request);
 
   const isAuthPage =
     pathname.startsWith('/sign-in') || pathname.startsWith('/sign-up') || pathname.startsWith('/admin-login');
 
+  const isAuthenticated = !!sessionCookie;
+
   // Redirect authenticated users away from auth pages
-  if (sessionCookie && isAuthPage) {
+  // Exception: always allow /admin-login — admins signing out may still
+  // carry the session cookie until the browser processes the Set-Cookie header
+  if (isAuthenticated && isAuthPage) {
+    if (pathname.startsWith('/admin-login')) {
+      return NextResponse.next();
+    }
     return NextResponse.redirect(new URL('/dashboard', request.url));
   }
 
-  // Redirect unauthenticated users to sign-in (or admin-login for admin routes)
-  if (!sessionCookie && !isAuthPage) {
+  // Redirect unauthenticated users
+  if (!isAuthenticated && !isAuthPage) {
     const redirectTo = pathname.startsWith('/admin') ? '/admin-login' : '/sign-in';
+
     return NextResponse.redirect(new URL(redirectTo, request.url));
   }
 

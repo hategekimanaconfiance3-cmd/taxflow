@@ -1,21 +1,21 @@
-import { eq } from "drizzle-orm";
-import { auth } from "@/lib/auth";
-import db from "@/db/drizzle";
-import { rraStaff } from "@/db/schema";
-import { headers } from "next/headers";
-import { redirect } from "next/navigation";
+import { eq } from 'drizzle-orm';
+import { auth } from '@/lib/auth';
+import db from '@/db/drizzle';
+import { rraStaff } from '@/db/schema';
+import { headers } from 'next/headers';
+import { redirect } from 'next/navigation';
 
 // ---------------------------------------------------------------------------
 // RRA Roles (specialized, not hierarchical)
 // ---------------------------------------------------------------------------
 
 export const RRA_ROLES = [
-    "super_admin",
-    "compliance_officer",
-    "audit_officer",
-    "stock_officer",
-    "correction_officer",
-    "reporting_officer",
+  'super_admin',
+  'compliance_officer',
+  'audit_officer',
+  'stock_officer',
+  'correction_officer',
+  'reporting_officer',
 ] as const;
 
 export type RRARole = (typeof RRA_ROLES)[number];
@@ -24,18 +24,18 @@ export type RRARole = (typeof RRA_ROLES)[number];
 // Trader roles
 // ---------------------------------------------------------------------------
 
-export type TraderRole = "manufacturer" | "wholesaler" | "retailer";
+export type TraderRole = 'manufacturer' | 'wholesaler' | 'retailer';
 
-const TRADER_ROLES: TraderRole[] = ["manufacturer", "wholesaler", "retailer"];
+const TRADER_ROLES: TraderRole[] = ['manufacturer', 'wholesaler', 'retailer'];
 
 /**
  * Seller → buyer compatibility matrix.
  * Retailer sells to "consumer" (special case: no buyer_id in DB).
  */
 export const ALLOWED_BUYERS: Record<string, string[]> = {
-    manufacturer: ["manufacturer", "wholesaler", "retailer"],
-    wholesaler: ["wholesaler", "retailer"],
-    retailer: ["consumer"],
+  manufacturer: ['manufacturer', 'wholesaler', 'retailer'],
+  wholesaler: ['wholesaler', 'retailer'],
+  retailer: ['consumer'],
 };
 
 // ---------------------------------------------------------------------------
@@ -49,15 +49,15 @@ export const ALLOWED_BUYERS: Record<string, string[]> = {
  * @returns The validated session (user + session data)
  */
 export async function requireSession() {
-    const session = await auth.api.getSession({
-        headers: await headers(),
-    });
+  const session = await auth.api.getSession({
+    headers: await headers(),
+  });
 
-    if (!session) {
-        redirect("/sign-in");
-    }
+  if (!session || !session.user) {
+    redirect('/sign-in');
+  }
 
-    return session;
+  return session;
 }
 
 /**
@@ -69,32 +69,27 @@ export async function requireSession() {
  * @returns The session plus the staff record
  */
 export async function requireRRASession(...allowedRoles: RRARole[]) {
-    const session = await requireSession();
+  const session = await requireSession();
 
-    const staffRecords = await db
-        .select()
-        .from(rraStaff)
-        .where(eq(rraStaff.userId, session.user.id))
-        .limit(1);
+  const staffRecords = await db.select().from(rraStaff).where(eq(rraStaff.userId, session.user.id)).limit(1);
 
-    if (staffRecords.length === 0 || !staffRecords[0].isActive) {
-        redirect("/sign-in");
+  if (staffRecords.length === 0 || !staffRecords[0].isActive) {
+    redirect('/sign-in');
+  }
+
+  const staff = staffRecords[0];
+  const userRole = staff.clearanceLevel as RRARole;
+
+  // If specific roles are required, check access
+  if (allowedRoles.length > 0) {
+    const hasAccess = userRole === 'super_admin' || allowedRoles.includes(userRole);
+
+    if (!hasAccess) {
+      redirect('/admin/dashboard');
     }
+  }
 
-    const staff = staffRecords[0];
-    const userRole = staff.clearanceLevel as RRARole;
-
-    // If specific roles are required, check access
-    if (allowedRoles.length > 0) {
-        const hasAccess =
-            userRole === "super_admin" || allowedRoles.includes(userRole);
-
-        if (!hasAccess) {
-            redirect("/admin/dashboard");
-        }
-    }
-
-    return { ...session, staff };
+  return { ...session, staff };
 }
 
 /**
@@ -105,18 +100,18 @@ export async function requireRRASession(...allowedRoles: RRARole[]) {
  * @returns The validated session
  */
 export async function requireTraderSession(allowedRoles?: TraderRole[]) {
-    const session = await requireSession();
-    const role = session.user.role;
+  const session = await requireSession();
+  const role = session.user.role;
 
-    if (!role || !TRADER_ROLES.includes(role as TraderRole)) {
-        redirect("/admin/dashboard");
-    }
+  if (!role || !TRADER_ROLES.includes(role as TraderRole)) {
+    redirect('/admin/dashboard');
+  }
 
-    if (allowedRoles && !allowedRoles.includes(role as TraderRole)) {
-        redirect("/dashboard");
-    }
+  if (allowedRoles && !allowedRoles.includes(role as TraderRole)) {
+    redirect('/dashboard');
+  }
 
-    return session;
+  return session;
 }
 
 /**
@@ -127,15 +122,14 @@ export async function requireTraderSession(allowedRoles?: TraderRole[]) {
  * @returns The session plus suspended status
  */
 export async function requireApprovedClearance() {
-    const session = await requireSession();
-    const clearance = (session.user as Record<string, unknown>)
-        .clearanceStatus as string;
+  const session = await requireSession();
+  const clearance = (session.user as Record<string, unknown>).clearanceStatus as string;
 
-    return {
-        ...session,
-        suspended: clearance !== "approved",
-        clearanceStatus: clearance ?? "approved",
-    };
+  return {
+    ...session,
+    suspended: clearance !== 'approved',
+    clearanceStatus: clearance ?? 'approved',
+  };
 }
 
 /**
@@ -145,16 +139,10 @@ export async function requireApprovedClearance() {
  * @param sellerRole - The seller's role
  * @param buyerRole - The buyer's role (or "consumer" for retail sales)
  */
-export function validateRoleCompatibility(
-    sellerRole: string,
-    buyerRole: string,
-): void {
-    const allowed = ALLOWED_BUYERS[sellerRole];
+export function validateRoleCompatibility(sellerRole: string, buyerRole: string): void {
+  const allowed = ALLOWED_BUYERS[sellerRole];
 
-    if (!allowed || !allowed.includes(buyerRole)) {
-        throw new Error(
-            `A ${sellerRole} cannot sell to a ${buyerRole}.`,
-        );
-    }
+  if (!allowed || !allowed.includes(buyerRole)) {
+    throw new Error(`A ${sellerRole} cannot sell to a ${buyerRole}.`);
+  }
 }
-

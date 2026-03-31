@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useMemo } from 'react';
+import { useMemo, useState, useCallback } from 'react';
 import { cn } from '@/lib/utils';
 import { authClient } from '@/lib/auth-client';
 import { getSidebarGroups, ROLE_LABELS, ROLE_COLORS, type TraderRole } from '@/lib/sidebar-config';
@@ -30,6 +30,24 @@ export function DashboardSidebar({ role, businessName, userName = 'User' }: Dash
   const pathname = usePathname();
   const router = useRouter();
   const groups = getSidebarGroups(role);
+  const [isSigningOut, setIsSigningOut] = useState(false);
+
+  const handleSignOut = useCallback(async () => {
+    if (isSigningOut) return;
+    setIsSigningOut(true);
+    try {
+      await authClient.signOut({
+        fetchOptions: {
+          onSuccess: () => {
+            window.location.href = '/sign-in';
+          },
+        },
+      });
+    } catch (error) {
+      console.error('Sign-out failed:', error);
+      setIsSigningOut(false);
+    }
+  }, [isSigningOut]);
 
   // Build command palette items from sidebar config
   const commandItems: CommandItem[] = useMemo(
@@ -187,19 +205,12 @@ export function DashboardSidebar({ role, businessName, userName = 'User' }: Dash
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
-                onClick={async () => {
-                  await authClient.signOut({
-                    fetchOptions: {
-                      onSuccess: () => {
-                        router.push('/sign-in');
-                      },
-                    },
-                  });
-                }}
+                onClick={handleSignOut}
+                disabled={isSigningOut}
                 className="text-destructive focus:text-destructive"
               >
                 <LogOut className="mr-2 h-3.5 w-3.5" />
-                Sign Out
+                {isSigningOut ? 'Signing out…' : 'Sign Out'}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
