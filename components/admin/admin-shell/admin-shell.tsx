@@ -109,18 +109,19 @@ export function AdminShell({ userName, staffId, clearanceLevel, children }: Admi
 
       {/* ── Search trigger ───────────────────── */}
       <div className="px-3 pb-2">
-        <button
+        <Button
           onClick={() => {
             document.dispatchEvent(new KeyboardEvent('keydown', { key: 'f' }));
           }}
-          className="flex w-full items-center gap-2.5 rounded-md border border-border/60 px-3 py-[7px] text-sm transition-colors hover:bg-accent/50"
+          className="flex w-full items-center gap-2.5 rounded-md border border-border/60 px-3 py-1.75 text-sm transition-colors hover:bg-accent/50"
+          variant="ghost"
         >
           <Search className="h-3.5 w-3.5 text-muted-foreground/70" />
           <span className="flex-1 text-left text-muted-foreground/70 text-[13px]">Find...</span>
           <kbd className="pointer-events-none hidden h-5 select-none items-center rounded border border-border/60 bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground sm:flex">
             F
           </kbd>
-        </button>
+        </Button>
       </div>
 
       <Separator className="opacity-60" />
@@ -139,7 +140,7 @@ export function AdminShell({ userName, staffId, clearanceLevel, children }: Admi
             )}
 
             {/* Items */}
-            <div className="px-2 space-y-[2px]">
+            <div className="px-2 space-y-0.5">
               {group.items.map((item) => {
                 const active = isActive(item.href);
                 return (
@@ -148,7 +149,7 @@ export function AdminShell({ userName, staffId, clearanceLevel, children }: Admi
                       <Link
                         href={item.href}
                         className={cn(
-                          'group relative flex items-center gap-2.5 rounded-md px-3 py-[7px] text-[13px] font-medium transition-all duration-150',
+                          'group relative flex items-center gap-2.5 rounded-md px-3 py-1.75 text-[13px] font-medium transition-all duration-150',
                           active
                             ? 'bg-accent text-foreground'
                             : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
@@ -156,7 +157,7 @@ export function AdminShell({ userName, staffId, clearanceLevel, children }: Admi
                       >
                         {/* Active indicator bar */}
                         {active && (
-                          <span className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-full bg-foreground" />
+                          <span className="absolute left-0 top-1.5 bottom-1.5 w-0.75 rounded-full bg-foreground" />
                         )}
                         <item.icon
                           className={cn(
@@ -219,7 +220,7 @@ export function AdminShell({ userName, staffId, clearanceLevel, children }: Admi
               <ChevronDown className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />
             </button>
           </PopoverTrigger>
-          <PopoverContent side="top" align="start" className="w-[232px] p-0">
+          <PopoverContent side="top" align="start" className="w-58 p-0">
             {/* User info */}
             <div className="px-3 py-3">
               <p className="text-sm font-medium truncate">{userName}</p>
@@ -271,7 +272,7 @@ export function AdminShell({ userName, staffId, clearanceLevel, children }: Admi
         <CommandPalette items={commandItems} portalLabel="RRA Admin" />
 
         {/* Desktop sidebar */}
-        <aside className="fixed inset-y-0 left-0 z-30 hidden w-[260px] flex-col border-r border-border/60 bg-background lg:flex">
+        <aside className="fixed inset-y-0 left-0 z-30 hidden w-65 flex-col border-r border-border/60 bg-background lg:flex">
           {sidebarContent}
         </aside>
 
@@ -284,7 +285,7 @@ export function AdminShell({ userName, staffId, clearanceLevel, children }: Admi
                 <span className="sr-only">Toggle menu</span>
               </Button>
             </SheetTrigger>
-            <SheetContent side="left" className="w-[260px] p-0">
+            <SheetContent side="left" className="w-65 p-0">
               <SheetTitle className="sr-only">Admin Navigation</SheetTitle>
               {sidebarContent}
             </SheetContent>
@@ -307,7 +308,7 @@ export function AdminShell({ userName, staffId, clearanceLevel, children }: Admi
         </header>
 
         {/* Main */}
-        <main className="lg:pl-[260px]">
+        <main className="lg:pl-65">
           <div className="p-6">{children}</div>
         </main>
       </div>
