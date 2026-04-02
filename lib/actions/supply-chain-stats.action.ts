@@ -1,6 +1,6 @@
 "use server";
 
-import { sql, and, eq, gte } from "drizzle-orm";
+import { sql, and, eq, gte, lt } from "drizzle-orm";
 import db from "@/db/drizzle";
 import { transaction, stock, user, product } from "@/db/schema";
 import { requireRRASession } from "@/lib/auth-guard";
@@ -9,11 +9,22 @@ import { requireRRASession } from "@/lib/auth-guard";
 // Supply Chain Stats — product flow across Manufacturer → Wholesaler → Retailer
 // ---------------------------------------------------------------------------
 
+export interface StalePendingItem {
+    id: string;
+    businessName: string | null;
+    totalAmount: number;
+    hoursStale: number;
+    createdAt: string;
+}
+
 export interface SupplyChainData {
     productsInCirculation: number;
     totalStockMovementToday: number;
     unverifiedTransactions: number;
     pendingConfirmations: number;
+    // Broken chain signals
+    stalePendingCount: number;         // pending > 48h
+    stalePendingItems: StalePendingItem[]; // top stale items
     flowSummary: {
         label: string;
         count: number;
@@ -55,13 +66,31 @@ export async function getSupplyChainStats(): Promise<SupplyChainData> {
             .from(transaction)
             .where(gte(transaction.createdAt, today));
 
-        // 3. Unverified/pending transactions
+        // 3. All pending transactions
         const [pending] = await db
             .select({
                 count: sql<number>`COUNT(*)::int`.as("count"),
             })
             .from(transaction)
             .where(eq(transaction.status, "pending"));
+
+        // 3b. Stale pending: pending > 48 hours (broken chain signal)
+        const fortyEightHoursAgo = new Date(Date.now() - 48 * 60 * 60 * 1000);
+        const stalePendingRows = await db
+            .select({
+                id: transaction.id,
+                businessName: user.businessName,
+                totalAmount: transaction.totalAmount,
+                createdAt: transaction.createdAt,
+            })
+            .from(transaction)
+            .leftJoin(user, eq(transaction.sellerId, user.id))
+            .where(and(
+                eq(transaction.status, "pending"),
+                lt(transaction.createdAt, fortyEightHoursAgo),
+            ))
+            .orderBy(transaction.createdAt)
+            .limit(5);
 
         // 4. Flow summary: transactions by role pair (seller_role → buyer_role)
         const flowData = await db
@@ -105,11 +134,32 @@ export async function getSupplyChainStats(): Promise<SupplyChainData> {
             .orderBy(sql`total_value DESC`)
             .limit(5);
 
+        const nowMs = Date.now();
+        const stalePendingItems: StalePendingItem[] = stalePendingRows.map((r) => ({
+            id: r.id,
+            businessName: r.businessName ?? null,
+            totalAmount: r.totalAmount,
+            hoursStale: Math.floor((nowMs - new Date(r.createdAt).getTime()) / (1000 * 60 * 60)),
+            createdAt: r.createdAt.toISOString(),
+        }));
+
         return {
             productsInCirculation: productsResult?.count ?? 0,
             totalStockMovementToday: todayMovement?.count ?? 0,
-            unverifiedTransactions: todayMovement?.count ?? 0,
+            // unverifiedTransactions = transactions with no buyer assigned (anonymous sales)
+            unverifiedTransactions: await (async () => {
+                const [r] = await db
+                    .select({ count: sql<number>`COUNT(*)::int`.as("count") })
+                    .from(transaction)
+                    .where(and(
+                        sql`${transaction.buyerId} IS NULL`,
+                        gte(transaction.createdAt, sevenDaysAgo),
+                    ));
+                return r?.count ?? 0;
+            })(),
             pendingConfirmations: pending?.count ?? 0,
+            stalePendingCount: stalePendingItems.length,
+            stalePendingItems,
             flowSummary,
             topProducts: topProducts.map((p) => ({
                 name: p.name,
@@ -125,6 +175,8 @@ export async function getSupplyChainStats(): Promise<SupplyChainData> {
             totalStockMovementToday: 0,
             unverifiedTransactions: 0,
             pendingConfirmations: 0,
+            stalePendingCount: 0,
+            stalePendingItems: [],
             flowSummary: [],
             topProducts: [],
         };

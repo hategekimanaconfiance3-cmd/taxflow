@@ -222,6 +222,28 @@ export const transaction = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// Transaction Items — line items within a transaction (multi-product support)
+// ---------------------------------------------------------------------------
+
+export const transactionItem = pgTable(
+  "transaction_item",
+  {
+    id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    transactionId: text("transaction_id")
+      .notNull()
+      .references(() => transaction.id, { onDelete: "cascade" }),
+    productName: text("product_name").notNull(),
+    quantity: real("quantity").notNull(),
+    unitPrice: integer("unit_price").notNull(), // RWF
+    totalPrice: integer("total_price").notNull(), // quantity × unitPrice
+    vatAmount: integer("vat_amount").notNull(), // totalPrice × 0.18
+  },
+  (table) => [
+    index("txn_item_txn_idx").on(table.transactionId),
+  ],
+);
+
+// ---------------------------------------------------------------------------
 // VAT Records
 // ---------------------------------------------------------------------------
 
@@ -505,10 +527,18 @@ export const transactionRelations = relations(
       fields: [transaction.productId],
       references: [product.id],
     }),
+    items: many(transactionItem),
     vatRecords: many(vatRecord),
     disputes: many(dispute),
   }),
 );
+
+export const transactionItemRelations = relations(transactionItem, ({ one }) => ({
+  transaction: one(transaction, {
+    fields: [transactionItem.transactionId],
+    references: [transaction.id],
+  }),
+}));
 
 export const vatRecordRelations = relations(vatRecord, ({ one }) => ({
   transaction: one(transaction, {
