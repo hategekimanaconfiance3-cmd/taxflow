@@ -5,7 +5,8 @@ import type { SupplyChainData } from "@/lib/actions/supply-chain-stats.action";
 import { formatCompact } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Network, Package, ArrowRight, Clock, ShieldAlert } from "lucide-react";
+import type { StalePendingItem } from "@/lib/actions/supply-chain-stats.action";
+import { Loader2, Network, Package, ArrowRight, Clock, ShieldAlert, AlertTriangle } from "lucide-react";
 
 // ---------------------------------------------------------------------------
 // Supply Chain Monitor — product flow visualization
@@ -45,13 +46,23 @@ export function SupplyChainMonitor() {
         { label: "Unverified Txns", value: data.unverifiedTransactions, icon: <ShieldAlert className="h-3.5 w-3.5 text-red-500" />, highlight: data.unverifiedTransactions > 0 },
     ];
 
+    const hasBrokenChain = data.stalePendingCount > 0;
+
     return (
         <Card>
             <CardHeader className="pb-2">
-                <CardTitle className="text-base font-semibold flex items-center gap-2">
-                    <Network className="h-4 w-4" />
-                    Supply Chain Monitor
-                </CardTitle>
+                <div className="flex items-center justify-between">
+                    <CardTitle className="text-base font-semibold flex items-center gap-2">
+                        <Network className="h-4 w-4" />
+                        Supply Chain Monitor
+                    </CardTitle>
+                    {hasBrokenChain && (
+                        <Badge variant="secondary" className="bg-red-100 text-red-700 text-[10px]">
+                            <AlertTriangle className="h-2.5 w-2.5 mr-0.5" />
+                            {data.stalePendingCount} stale &gt;48h
+                        </Badge>
+                    )}
+                </div>
             </CardHeader>
             <CardContent className="space-y-4">
                 {/* Key stats — 2x2 grid */}
@@ -117,6 +128,39 @@ export function SupplyChainMonitor() {
                                 </div>
                             </div>
                         ))}
+                    </div>
+                )}
+
+                {/* Broken chain: stale pending transactions */}
+                {hasBrokenChain && (
+                    <div className="space-y-1.5">
+                        <p className="text-xs font-medium flex items-center gap-1.5 text-red-600">
+                            <AlertTriangle className="h-3 w-3" />
+                            Broken Chain — Delayed Confirmations
+                        </p>
+                        {data.stalePendingItems.map((item) => (
+                            <div
+                                key={item.id}
+                                className="flex items-center justify-between text-xs py-1.5 px-2.5 rounded border border-red-200 bg-red-50/40"
+                            >
+                                <div className="min-w-0">
+                                    <p className="font-medium truncate">
+                                        {item.businessName ?? "Unknown business"}
+                                    </p>
+                                    <p className="text-[10px] text-red-500 font-mono">
+                                        Stale {item.hoursStale}h · {formatCompact(item.totalAmount)}
+                                    </p>
+                                </div>
+                                <Badge variant="secondary" className="bg-red-100 text-red-700 text-[9px] shrink-0 ml-2">
+                                    pending
+                                </Badge>
+                            </div>
+                        ))}
+                        {data.stalePendingCount > data.stalePendingItems.length && (
+                            <p className="text-[10px] text-muted-foreground text-center">
+                                +{data.stalePendingCount - data.stalePendingItems.length} more stale transactions
+                            </p>
+                        )}
                     </div>
                 )}
             </CardContent>

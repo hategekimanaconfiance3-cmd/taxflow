@@ -21,6 +21,22 @@ interface AuditTrader {
     level: "critical" | "high" | "medium" | "low";
     topReason: string;
     hasAlerts: boolean;
+    suggestedAction: string;
+}
+
+function deriveSuggestedAction(level: AuditTrader["level"], reason: string, hasAlerts: boolean): string {
+    const r = reason.toLowerCase();
+    if (r.includes("suspicious") || r.includes("pricing")) return "Review pricing anomalies vs sector baseline";
+    if (r.includes("vat") || r.includes("tax")) return "Cross-check VAT filings vs reported sales";
+    if (r.includes("stock") || r.includes("inventory")) return "Verify stock levels against purchase records";
+    if (r.includes("payment") || r.includes("unpaid")) return "Issue formal payment demand notice";
+    if (r.includes("dispute")) return "Escalate disputes for manual review";
+    if (r.includes("compliance") || r.includes("filing")) return "Schedule compliance interview";
+    if (hasAlerts && level === "critical") return "Initiate field audit immediately";
+    if (level === "critical") return "Initiate field audit — high risk score";
+    if (level === "high") return "Schedule desk audit within 7 days";
+    if (level === "medium") return "Monitor transactions for next 30 days";
+    return "Flag for routine quarterly review";
 }
 
 export function AuditPriorityQueue() {
@@ -104,40 +120,55 @@ export function AuditPriorityQueue() {
                         <Link
                             key={trader.id}
                             href={`/admin/traders`}
-                            className="flex items-center gap-3 rounded-lg border px-3 py-2.5 text-xs hover:bg-muted/50 transition-colors cursor-pointer"
+                            className="rounded-lg border px-3 py-2.5 text-xs hover:bg-muted/50 transition-colors cursor-pointer block"
                         >
-                            <span className="text-muted-foreground font-mono w-5 text-right shrink-0">
-                                #{index + 1}
-                            </span>
-                            <RiskScoreBadge
-                                score={trader.score}
-                                level={trader.level}
-                            />
-                            <div className="flex-1 min-w-0">
-                                <p className="font-medium truncate">
-                                    {trader.name}
-                                </p>
-                                <p className="text-[10px] text-muted-foreground truncate">
-                                    {trader.topReason}
-                                </p>
-                            </div>
-                            <div className="flex items-center gap-1.5 shrink-0">
-                                {trader.hasAlerts && (
-                                    <Badge variant="secondary" className="text-[9px] bg-amber-100 text-amber-700">
-                                        alert
+                            <div className="flex items-center gap-3">
+                                <span className="text-muted-foreground font-mono w-5 text-right shrink-0">
+                                    #{index + 1}
+                                </span>
+                                <RiskScoreBadge
+                                    score={trader.score}
+                                    level={trader.level}
+                                />
+                                <div className="flex-1 min-w-0">
+                                    <p className="font-medium truncate">
+                                        {trader.name}
+                                    </p>
+                                    <p className="text-[10px] text-muted-foreground truncate">
+                                        {trader.topReason}
+                                    </p>
+                                </div>
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                    {trader.hasAlerts && (
+                                        <Badge variant="secondary" className="text-[9px] bg-amber-100 text-amber-700">
+                                            alert
+                                        </Badge>
+                                    )}
+                                    <Badge
+                                        variant="secondary"
+                                        className={`text-[10px] shrink-0 ${
+                                            trader.level === "critical" ? "bg-red-100 text-red-700" :
+                                            trader.level === "high" ? "bg-orange-100 text-orange-700" :
+                                            trader.level === "medium" ? "bg-amber-100 text-amber-700" :
+                                            "bg-emerald-100 text-emerald-700"
+                                        }`}
+                                    >
+                                        {trader.level}
                                     </Badge>
-                                )}
-                                <Badge
-                                    variant="secondary"
-                                    className={`text-[10px] shrink-0 ${
-                                        trader.level === "critical" ? "bg-red-100 text-red-700" :
-                                        trader.level === "high" ? "bg-orange-100 text-orange-700" :
-                                        trader.level === "medium" ? "bg-amber-100 text-amber-700" :
-                                        "bg-emerald-100 text-emerald-700"
-                                    }`}
-                                >
-                                    {trader.level}
-                                </Badge>
+                                </div>
+                            </div>
+                            {/* Suggested action */}
+                            <div className="mt-1.5 ml-[calc(1.25rem+0.75rem+2.5rem)] flex items-center gap-1.5">
+                                <span className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground/60">
+                                    Action:
+                                </span>
+                                <span className={`text-[10px] font-medium ${
+                                    trader.level === "critical" ? "text-red-600" :
+                                    trader.level === "high" ? "text-orange-600" :
+                                    "text-muted-foreground"
+                                }`}>
+                                    {trader.suggestedAction}
+                                </span>
                             </div>
                         </Link>
                     ))}
@@ -167,6 +198,7 @@ function buildPriorityList(
                 level: t.level,
                 topReason: t.topReason,
                 hasAlerts: false,
+                suggestedAction: deriveSuggestedAction(t.level, t.topReason, false),
             });
         }
     }
@@ -184,16 +216,20 @@ function buildPriorityList(
                     existing.score = Math.min(100, existing.score + 20);
                     existing.level = existing.score >= 75 ? "critical" : existing.score >= 50 ? "high" : existing.level;
                 }
+                // Re-derive action now that hasAlerts may have changed
+                existing.suggestedAction = deriveSuggestedAction(existing.level, existing.topReason, existing.hasAlerts);
             } else {
                 // Add trader from alerts even if not in top risk
                 const alertScore = alert.severity === "critical" ? 70 : 40;
+                const level: AuditTrader["level"] = alertScore >= 75 ? "critical" : alertScore >= 50 ? "high" : "medium";
                 traderMap.set(alert.traderId, {
                     id: alert.traderId,
                     name: alert.traderName,
                     score: alertScore,
-                    level: alertScore >= 75 ? "critical" : alertScore >= 50 ? "high" : "medium",
+                    level,
                     topReason: alert.title,
                     hasAlerts: true,
+                    suggestedAction: deriveSuggestedAction(level, alert.title, true),
                 });
             }
         }

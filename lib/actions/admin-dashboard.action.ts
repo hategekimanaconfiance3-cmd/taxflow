@@ -323,8 +323,9 @@ export async function getDashboardOverview(from?: Date, to?: Date) {
 
     function pctChange(current: number, previous: number): { value: string; positive: boolean } | undefined {
         if (previous === 0 && current === 0) return undefined;
-        if (previous === 0) return { value: "+100%", positive: true };
+        if (previous === 0) return { value: "New activity", positive: true };
         const pct = Math.round(((current - previous) / previous) * 100);
+        if (pct === -100) return { value: "No data last month", positive: false };
         return { value: `${pct >= 0 ? "+" : ""}${pct}% vs last month`, positive: pct >= 0 };
     }
 

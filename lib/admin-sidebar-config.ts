@@ -26,6 +26,8 @@ import {
     Megaphone,
     Ticket,
     FileText,
+    LayoutGrid,
+    BarChart3,
 } from "lucide-react";
 import type { RRARole } from "@/lib/auth-guard";
 
@@ -35,12 +37,20 @@ import type { RRARole } from "@/lib/auth-guard";
 
 export type { RRARole };
 
+export interface AdminSidebarChild {
+    label: string;
+    href: string;
+    icon: React.ComponentType<{ className?: string }>;
+}
+
 export interface AdminSidebarItem {
     label: string;
     href: string;
     icon: React.ComponentType<{ className?: string }>;
     /** Roles that can see this item. Super Admin always sees everything. */
     allowedRoles: RRARole[];
+    /** Sub-items rendered indented below this item in the sidebar. */
+    children?: AdminSidebarChild[];
 }
 
 export interface AdminSidebarGroup {
@@ -93,9 +103,21 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
         items: [
             {
                 label: "Command Center",
-                href: "/admin/dashboard",
+                href: "/admin/dashboard/overview",
                 icon: LayoutDashboard,
                 allowedRoles: ALL,
+                children: [
+                    {
+                        label: "Overview",
+                        href: "/admin/dashboard/overview",
+                        icon: LayoutGrid,
+                    },
+                    {
+                        label: "Analytics",
+                        href: "/admin/dashboard/analytics",
+                        icon: BarChart3,
+                    },
+                ],
             },
         ],
     },

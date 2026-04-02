@@ -44,16 +44,24 @@ export function AdminShell({ userName, staffId, clearanceLevel, children }: Admi
     }
   }, [isSigningOut]);
 
-  // Build command palette items from admin sidebar config
+  // Build command palette items from admin sidebar config (includes children)
   const commandItems: CommandItem[] = useMemo(
     () =>
       groups.flatMap((group) =>
-        group.items.map((item) => ({
-          label: item.label,
-          href: item.href,
-          icon: item.icon,
-          group: group.label || 'Overview',
-        })),
+        group.items.flatMap((item) => [
+          {
+            label: item.label,
+            href: item.href,
+            icon: item.icon,
+            group: group.label || 'Overview',
+          },
+          ...(item.children?.map((child) => ({
+            label: child.label,
+            href: child.href,
+            icon: child.icon,
+            group: item.label,
+          })) ?? []),
+        ]),
       ),
     [groups],
   );
@@ -67,15 +75,19 @@ export function AdminShell({ userName, staffId, clearanceLevel, children }: Admi
     .toUpperCase()
     .slice(0, 2);
 
-  // Collect all sidebar hrefs for smarter active-state detection
-  const allHrefs = useMemo(() => groups.flatMap((g) => g.items.map((i) => i.href)), [groups]);
+  // Collect all sidebar hrefs (including children) for smarter active-state detection
+  const allHrefs = useMemo(
+    () =>
+      groups.flatMap((g) =>
+        g.items.flatMap((i) => [i.href, ...(i.children?.map((c) => c.href) ?? [])]),
+      ),
+    [groups],
+  );
 
   function isActive(href: string): boolean {
     const cleanPathname = pathname.endsWith('/') ? pathname.slice(0, -1) : pathname;
     const cleanHref = href.endsWith('/') ? href.slice(0, -1) : href;
 
-    // Dashboard is exact-match only
-    if (cleanHref === '/admin/dashboard') return cleanPathname === '/admin/dashboard';
     // Action triggers with query params are never active
     if (cleanHref.includes('?')) return false;
     // Exact match always wins
@@ -142,36 +154,75 @@ export function AdminShell({ userName, staffId, clearanceLevel, children }: Admi
             {/* Items */}
             <div className="px-2 space-y-0.5">
               {group.items.map((item) => {
-                const active = isActive(item.href);
+                const hasChildren = item.children && item.children.length > 0;
+                const parentActive = hasChildren
+                  ? item.children!.some((child) => isActive(child.href))
+                  : isActive(item.href);
                 return (
-                  <Tooltip key={item.href}>
-                    <TooltipTrigger asChild>
-                      <Link
-                        href={item.href}
-                        className={cn(
-                          'group relative flex items-center gap-2.5 rounded-md px-3 py-1.75 text-[13px] font-medium transition-all duration-150',
-                          active
-                            ? 'bg-accent text-foreground'
-                            : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
-                        )}
-                      >
-                        {/* Active indicator bar */}
-                        {active && (
-                          <span className="absolute left-0 top-1.5 bottom-1.5 w-0.75 rounded-full bg-foreground" />
-                        )}
-                        <item.icon
+                  <div key={item.href}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Link
+                          href={item.href}
                           className={cn(
-                            'h-4 w-4 shrink-0 transition-colors',
-                            active ? 'text-foreground' : 'text-muted-foreground/70 group-hover:text-foreground',
+                            'group relative flex items-center gap-2.5 rounded-md px-3 py-[7px] text-[13px] font-medium transition-all duration-150',
+                            parentActive
+                              ? 'bg-accent text-foreground'
+                              : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
                           )}
-                        />
+                        >
+                          {/* Active indicator bar */}
+                          {parentActive && !hasChildren && (
+                            <span className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-full bg-foreground" />
+                          )}
+                          <item.icon
+                            className={cn(
+                              'h-4 w-4 shrink-0 transition-colors',
+                              parentActive ? 'text-foreground' : 'text-muted-foreground/70 group-hover:text-foreground',
+                            )}
+                          />
+                          {item.label}
+                        </Link>
+                      </TooltipTrigger>
+                      <TooltipContent side="right" className="text-xs">
                         {item.label}
-                      </Link>
-                    </TooltipTrigger>
-                    <TooltipContent side="right" className="text-xs">
-                      {item.label}
-                    </TooltipContent>
-                  </Tooltip>
+                      </TooltipContent>
+                    </Tooltip>
+
+                    {/* Sub-items */}
+                    {hasChildren && (
+                      <div className="ml-3 pl-3 border-l border-border/40 mt-[2px] space-y-[2px]">
+                        {item.children!.map((child) => {
+                          const childActive = isActive(child.href);
+                          return (
+                            <Link
+                              key={child.href}
+                              href={child.href}
+                              className={cn(
+                                'group relative flex items-center gap-2 rounded-md px-3 py-[6px] text-[12px] font-medium transition-all duration-150',
+                                childActive
+                                  ? 'bg-accent text-foreground'
+                                  : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
+                              )}
+                            >
+                              {childActive && (
+                                <span className="absolute left-0 top-1 bottom-1 w-[2px] rounded-full bg-foreground" />
+                              )}
+                              <child.icon
+                                className={cn(
+                                  'h-3.5 w-3.5 shrink-0 transition-colors',
+                                  childActive
+                                    ? 'text-foreground'
+                                    : 'text-muted-foreground/70 group-hover:text-foreground',
+                                )}
+                              />
+                              {child.label}
+                            </Link>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                 );
               })}
             </div>

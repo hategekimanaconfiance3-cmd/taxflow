@@ -78,12 +78,10 @@ export function formatRWF(amount: number): string {
     if (abs >= 10_000) {
         return `${sign}${(abs / 1_000).toFixed(0)}K RWF`;
     }
-    return new Intl.NumberFormat("en-RW", {
-        style: "currency",
-        currency: "RWF",
+    return `${sign}${new Intl.NumberFormat("en-US", {
         minimumFractionDigits: 0,
         maximumFractionDigits: 0,
-    }).format(num);
+    }).format(abs)} RWF`;
 }
 
 /**
@@ -92,10 +90,10 @@ export function formatRWF(amount: number): string {
 export function formatRWFFull(amount: number): string {
     const num = Number(amount) || 0;
     if (num === 0) return "0 RWF";
-    return new Intl.NumberFormat("en-RW", {
-        style: "currency",
-        currency: "RWF",
+    const sign = num < 0 ? "-" : "";
+    const abs = Math.abs(num);
+    return `${sign}${new Intl.NumberFormat("en-US", {
         minimumFractionDigits: 0,
         maximumFractionDigits: 0,
-    }).format(num);
+    }).format(abs)} RWF`;
 }
