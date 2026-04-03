@@ -30,12 +30,12 @@ const computeSummary = unstable_cache(
 
     // ── 1. VAT collection trend (this month vs last month) ──────────────
     const [vatThis] = await db
-      .select({ total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)`.as('t') })
+      .select({ total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`.as('t') })
       .from(vatRecord)
       .where(and(eq(vatRecord.vatType, 'output'), gte(vatRecord.createdAt, thirtyDaysAgo)));
 
     const [vatPrev] = await db
-      .select({ total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)`.as('t') })
+      .select({ total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`.as('t') })
       .from(vatRecord)
       .where(and(
         eq(vatRecord.vatType, 'output'),
@@ -156,24 +156,26 @@ const computeSummary = unstable_cache(
 
     // ── 6. Tax gap severity ───────────────────────────────────────────────
     const [totalVatOwed] = await db
-      .select({ total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)`.as('t') })
+      .select({ total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`.as('t') })
       .from(vatRecord)
       .where(eq(vatRecord.vatType, 'output'));
 
     const [totalPaid] = await db
-      .select({ total: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)`.as('t') })
+      .select({ total: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)::float8`.as('t') })
       .from(taxPayment)
       .where(eq(taxPayment.status, 'confirmed'));
 
     const owed = totalVatOwed?.total ?? 0;
     const paid = totalPaid?.total ?? 0;
     if (owed > 0) {
-      const gapPct = Math.round(((owed - paid) / owed) * 100);
+      // Clamp to 0-100: if paid >= owed the gap is 0 (fully covered / overpaid)
+      const rawGap = ((owed - paid) / owed) * 100;
+      const gapPct = Math.round(Math.max(0, Math.min(100, rawGap)));
       if (gapPct >= 30) {
         insights.push({ id: 'tax-gap', level: 'critical', message: `National tax gap is ${gapPct}% — high outstanding VAT obligations`, metric: `${gapPct}% gap`, href: '/admin/tax' });
       } else if (gapPct >= 15) {
         insights.push({ id: 'tax-gap', level: 'warning', message: `National tax gap at ${gapPct}% — collection below target`, metric: `${gapPct}% gap`, href: '/admin/tax' });
-      } else if (gapPct < 5 && owed > 0) {
+      } else {
         insights.push({ id: 'tax-gap', level: 'ok', message: `Tax collection strong — only ${gapPct}% gap nationally`, metric: `${gapPct}% gap` });
       }
     }

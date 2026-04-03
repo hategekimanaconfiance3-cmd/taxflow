@@ -45,10 +45,11 @@ export async function getTaxGapData(): Promise<TaxGapData> {
 
   try {
     // VAT output per trader (what they owe)
+    // Cast to float8 so pg driver returns a JS number, not a bigint string
     const vatByTrader = await db
       .select({
         businessId: vatRecord.businessId,
-        total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)`.as('total'),
+        total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`.as('total'),
       })
       .from(vatRecord)
       .where(eq(vatRecord.vatType, 'output'))
@@ -58,7 +59,7 @@ export async function getTaxGapData(): Promise<TaxGapData> {
     const payByTrader = await db
       .select({
         businessId: taxPayment.businessId,
-        total: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)`.as('total'),
+        total: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)::float8`.as('total'),
       })
       .from(taxPayment)
       .where(eq(taxPayment.status, 'confirmed'))
@@ -84,8 +85,8 @@ export async function getTaxGapData(): Promise<TaxGapData> {
 
     // Process all traders with VAT obligations
     for (const vat of vatByTrader) {
-      const expected = vat.total;
-      const collected = paidMap.get(vat.businessId) ?? 0;
+      const expected = Number(vat.total) || 0;
+      const collected = Number(paidMap.get(vat.businessId) ?? 0) || 0;
       const gap = expected - collected;
       const trader = traderMap.get(vat.businessId);
       const role = trader?.role ?? 'unknown';

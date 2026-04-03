@@ -44,8 +44,8 @@ export async function generateComplianceAlerts(): Promise<ComplianceAlert[]> {
     const vatData = await db
         .select({
             businessId: vatRecord.businessId,
-            outputTotal: sql<number>`COALESCE(SUM(CASE WHEN ${vatRecord.vatType} = 'output' THEN ${vatRecord.amount} ELSE 0 END), 0)`.as("output_total"),
-            inputTotal: sql<number>`COALESCE(SUM(CASE WHEN ${vatRecord.vatType} = 'input' THEN ${vatRecord.amount} ELSE 0 END), 0)`.as("input_total"),
+            outputTotal: sql<number>`COALESCE(SUM(CASE WHEN ${vatRecord.vatType} = 'output' THEN ${vatRecord.amount} ELSE 0 END), 0)::float8`.as("output_total"),
+            inputTotal: sql<number>`COALESCE(SUM(CASE WHEN ${vatRecord.vatType} = 'input' THEN ${vatRecord.amount} ELSE 0 END), 0)::float8`.as("input_total"),
         })
         .from(vatRecord)
         .groupBy(vatRecord.businessId);

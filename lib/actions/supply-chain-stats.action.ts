@@ -61,7 +61,7 @@ export async function getSupplyChainStats(): Promise<SupplyChainData> {
         const [todayMovement] = await db
             .select({
                 count: sql<number>`COUNT(*)::int`.as("count"),
-                totalValue: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)`.as("total"),
+                totalValue: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)::float8`.as("total"),
             })
             .from(transaction)
             .where(gte(transaction.createdAt, today));
@@ -98,7 +98,7 @@ export async function getSupplyChainStats(): Promise<SupplyChainData> {
                 sellerRole: sql<string>`seller_user.role`.as("seller_role"),
                 buyerRole: sql<string>`COALESCE(buyer_user.role, 'consumer')`.as("buyer_role"),
                 count: sql<number>`COUNT(*)::int`.as("count"),
-                totalValue: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)`.as("total_value"),
+                totalValue: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)::float8`.as("total_value"),
             })
             .from(transaction)
             .innerJoin(sql`"user" AS seller_user`, sql`seller_user.id = ${transaction.sellerId}`)
@@ -124,7 +124,7 @@ export async function getSupplyChainStats(): Promise<SupplyChainData> {
             .select({
                 name: product.name,
                 totalQuantity: sql<number>`COALESCE(SUM(${transaction.quantity}), 0)::int`.as("total_qty"),
-                totalValue: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)`.as("total_value"),
+                totalValue: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)::float8`.as("total_value"),
                 txnCount: sql<number>`COUNT(*)::int`.as("txn_count"),
             })
             .from(transaction)

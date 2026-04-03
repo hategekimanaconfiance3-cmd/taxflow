@@ -28,6 +28,7 @@ import {
     FileText,
     LayoutGrid,
     BarChart3,
+    Cpu,
 } from "lucide-react";
 import type { RRARole } from "@/lib/auth-guard";
 
@@ -116,6 +117,11 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                         label: "Analytics",
                         href: "/admin/dashboard/analytics",
                         icon: BarChart3,
+                    },
+                    {
+                        label: "TaxFlow AI Compute",
+                        href: "/admin/dashboard/ai-compute",
+                        icon: Cpu,
                     },
                 ],
             },

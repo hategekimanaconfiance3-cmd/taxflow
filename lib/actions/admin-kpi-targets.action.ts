@@ -113,7 +113,7 @@ export async function getKPIProgress(): Promise<KPIProgressReport> {
     // ── Metric 1: Total Revenue Collected ──────────────────────────────
     const [revResult] = await db
         .select({
-            total: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)`.as("total"),
+            total: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)::float8`.as("total"),
         })
         .from(taxPayment)
         .where(eq(taxPayment.status, "confirmed"));
@@ -131,7 +131,7 @@ export async function getKPIProgress(): Promise<KPIProgressReport> {
         const vatResult = await db
             .select({
                 vatType: vatRecord.vatType,
-                total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)`.as("total"),
+                total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`.as("total"),
             })
             .from(vatRecord)
             .where(eq(vatRecord.businessId, trader.id))
@@ -148,7 +148,7 @@ export async function getKPIProgress(): Promise<KPIProgressReport> {
 
         const [payResult] = await db
             .select({
-                paid: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)`.as("paid"),
+                paid: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)::float8`.as("paid"),
             })
             .from(taxPayment)
             .where(sql`${taxPayment.businessId} = ${trader.id} AND ${taxPayment.status} = 'confirmed'`);
@@ -181,7 +181,7 @@ export async function getKPIProgress(): Promise<KPIProgressReport> {
     // ── Metric 5: Transaction Volume (total value this month) ─────────
     const [txnVolume] = await db
         .select({
-            total: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)`.as("total"),
+            total: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)::float8`.as("total"),
         })
         .from(transaction)
         .where(

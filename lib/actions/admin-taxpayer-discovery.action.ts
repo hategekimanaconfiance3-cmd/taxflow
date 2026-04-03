@@ -42,7 +42,7 @@ export async function getUnregisteredBuyers(): Promise<UnregisteredBuyer[]> {
         .select({
             buyerName: transaction.buyerName,
             count: sql<number>`COUNT(*)::int`.as("count"),
-            totalValue: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)`.as("total_value"),
+            totalValue: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)::float8`.as("total_value"),
             lastSeen: sql<Date>`MAX(${transaction.createdAt})`.as("last_seen"),
         })
         .from(transaction)

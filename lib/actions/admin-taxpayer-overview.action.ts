@@ -59,7 +59,7 @@ export async function getTaxpayerOverview(
             .select({
                 businessId: vatRecord.businessId,
                 vatType: vatRecord.vatType,
-                total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)`.as("total"),
+                total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`.as("total"),
             })
             .from(vatRecord)
             .groupBy(vatRecord.businessId, vatRecord.vatType),
@@ -68,7 +68,7 @@ export async function getTaxpayerOverview(
         db
             .select({
                 businessId: taxPayment.businessId,
-                total: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)`.as("total"),
+                total: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)::float8`.as("total"),
             })
             .from(taxPayment)
             .where(eq(taxPayment.status, "confirmed"))
@@ -200,7 +200,7 @@ export async function getComplianceAlerts() {
     const [pendingPayments] = await db
         .select({
             count: sql<number>`COUNT(*)`.as("count"),
-            total: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)`.as("total"),
+            total: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)::float8`.as("total"),
         })
         .from(taxPayment)
         .where(eq(taxPayment.status, "pending"));

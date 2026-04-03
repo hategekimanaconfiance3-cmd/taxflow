@@ -83,11 +83,11 @@ export async function getDashboardOverview(from?: Date, to?: Date) {
         db
             .select({
                 status: transaction.status,
-                count: sql<number>`COUNT(*)`.as("count"),
-                totalValue: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)`.as(
+                count: sql<number>`COUNT(*)::int`.as("count"),
+                totalValue: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)::float8`.as(
                     "total_value",
                 ),
-                totalVat: sql<number>`COALESCE(SUM(${transaction.vatAmount}), 0)`.as(
+                totalVat: sql<number>`COALESCE(SUM(${transaction.vatAmount}), 0)::float8`.as(
                     "total_vat",
                 ),
             })
@@ -99,7 +99,7 @@ export async function getDashboardOverview(from?: Date, to?: Date) {
         db
             .select({
                 count: sql<number>`COUNT(*)`.as("count"),
-                totalValue: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)`.as(
+                totalValue: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)::float8`.as(
                     "total_value",
                 ),
             })
@@ -110,7 +110,7 @@ export async function getDashboardOverview(from?: Date, to?: Date) {
         db
             .select({
                 count: sql<number>`COUNT(*)`.as("count"),
-                totalValue: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)`.as(
+                totalValue: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)::float8`.as(
                     "total_value",
                 ),
             })
@@ -123,7 +123,7 @@ export async function getDashboardOverview(from?: Date, to?: Date) {
         db
             .select({
                 vatType: vatRecord.vatType,
-                total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)`.as(
+                total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`.as(
                     "total",
                 ),
             })
@@ -134,7 +134,7 @@ export async function getDashboardOverview(from?: Date, to?: Date) {
         // 8. Tax payment totals
         db
             .select({
-                total: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)`.as(
+                total: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)::float8`.as(
                     "total",
                 ),
                 count: sql<number>`COUNT(*)`.as("count"),
@@ -241,9 +241,9 @@ export async function getDashboardOverview(from?: Date, to?: Date) {
 
     // Parse aggregate results
     const vatOutput =
-        vatStats.find((r) => r.vatType === "output")?.total ?? 0;
+        Number(vatStats.find((r) => r.vatType === "output")?.total ?? 0) || 0;
     const vatInput =
-        vatStats.find((r) => r.vatType === "input")?.total ?? 0;
+        Number(vatStats.find((r) => r.vatType === "input")?.total ?? 0) || 0;
 
     const confirmedTxns =
         transactionStats.find((s) => s.status === "confirmed") ?? {
@@ -265,11 +265,11 @@ export async function getDashboardOverview(from?: Date, to?: Date) {
         };
 
     const totalTxnCount = transactionStats.reduce(
-        (sum, s) => sum + s.count,
+        (sum, s) => sum + (Number(s.count) || 0),
         0,
     );
     const totalTxnValue = transactionStats.reduce(
-        (sum, s) => sum + s.totalValue,
+        (sum, s) => sum + (Number(s.totalValue) || 0),
         0,
     );
 
@@ -293,40 +293,44 @@ export async function getDashboardOverview(from?: Date, to?: Date) {
         tradersByRole.map((r) => [r.role, r.count]),
     ) as Record<string, number>;
 
-    // ── Period comparison (this month vs last month) ──────────────
+    // ── Period comparison (last 30 days vs prior 30 days) ─────────
+    // Only computed when a date filter is active; "All Time" has no
+    // meaningful period-over-period comparison so we skip the queries.
+    const hasDates = !!(from || to);
+
     const now = new Date();
-    const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const sixtyDaysAgo = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
 
     const [
-        txnThisMonth,
-        txnLastMonth,
-        vatThisMonth,
-        vatLastMonth,
-        payThisMonth,
-        payLastMonth,
-    ] = await Promise.all([
-        db.select({ count: sql<number>`COUNT(*)::int`.as("c"), total: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)`.as("t") })
-            .from(transaction).where(gte(transaction.createdAt, thisMonthStart)),
-        db.select({ count: sql<number>`COUNT(*)::int`.as("c"), total: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)`.as("t") })
-            .from(transaction).where(and(gte(transaction.createdAt, lastMonthStart), lte(transaction.createdAt, lastMonthEnd))),
-        db.select({ total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)`.as("t") })
-            .from(vatRecord).where(and(eq(vatRecord.vatType, "output"), gte(vatRecord.createdAt, thisMonthStart))),
-        db.select({ total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)`.as("t") })
-            .from(vatRecord).where(and(eq(vatRecord.vatType, "output"), gte(vatRecord.createdAt, lastMonthStart), lte(vatRecord.createdAt, lastMonthEnd))),
-        db.select({ total: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)`.as("t") })
-            .from(taxPayment).where(and(eq(taxPayment.status, "confirmed"), gte(taxPayment.createdAt, thisMonthStart))),
-        db.select({ total: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)`.as("t") })
-            .from(taxPayment).where(and(eq(taxPayment.status, "confirmed"), gte(taxPayment.createdAt, lastMonthStart), lte(taxPayment.createdAt, lastMonthEnd))),
-    ]);
+        txnCurrent,
+        txnPrior,
+        vatCurrent,
+        vatPrior,
+        payCurrent,
+        payPrior,
+    ] = hasDates
+        ? await Promise.all([
+            db.select({ count: sql<number>`COUNT(*)::int`.as("c"), total: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)::float8`.as("t") })
+                .from(transaction).where(gte(transaction.createdAt, thirtyDaysAgo)),
+            db.select({ count: sql<number>`COUNT(*)::int`.as("c"), total: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)::float8`.as("t") })
+                .from(transaction).where(and(gte(transaction.createdAt, sixtyDaysAgo), lte(transaction.createdAt, thirtyDaysAgo))),
+            db.select({ total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`.as("t") })
+                .from(vatRecord).where(and(eq(vatRecord.vatType, "output"), gte(vatRecord.createdAt, thirtyDaysAgo))),
+            db.select({ total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`.as("t") })
+                .from(vatRecord).where(and(eq(vatRecord.vatType, "output"), gte(vatRecord.createdAt, sixtyDaysAgo), lte(vatRecord.createdAt, thirtyDaysAgo))),
+            db.select({ total: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)::float8`.as("t") })
+                .from(taxPayment).where(and(eq(taxPayment.status, "confirmed"), gte(taxPayment.createdAt, thirtyDaysAgo))),
+            db.select({ total: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)::float8`.as("t") })
+                .from(taxPayment).where(and(eq(taxPayment.status, "confirmed"), gte(taxPayment.createdAt, sixtyDaysAgo), lte(taxPayment.createdAt, thirtyDaysAgo))),
+          ])
+        : [null, null, null, null, null, null];
 
     function pctChange(current: number, previous: number): { value: string; positive: boolean } | undefined {
         if (previous === 0 && current === 0) return undefined;
         if (previous === 0) return { value: "New activity", positive: true };
         const pct = Math.round(((current - previous) / previous) * 100);
-        if (pct === -100) return { value: "No data last month", positive: false };
-        return { value: `${pct >= 0 ? "+" : ""}${pct}% vs last month`, positive: pct >= 0 };
+        return { value: `${pct >= 0 ? "+" : ""}${pct}% vs prior 30d`, positive: pct >= 0 };
     }
 
     return {
@@ -345,9 +349,9 @@ export async function getDashboardOverview(from?: Date, to?: Date) {
             vatOutput,
             vatInput,
             netVatDue: vatOutput - vatInput,
-            taxPaymentsTotal: taxPaymentStats[0]?.total ?? 0,
+            taxPaymentsTotal: Number(taxPaymentStats[0]?.total ?? 0) || 0,
             taxPaymentsCount: taxPaymentStats[0]?.count ?? 0,
-            outstanding: (vatOutput - vatInput) - (taxPaymentStats[0]?.total ?? 0),
+            outstanding: (vatOutput - vatInput) - (Number(taxPaymentStats[0]?.total ?? 0) || 0),
         },
 
         // Transactions
@@ -359,11 +363,11 @@ export async function getDashboardOverview(from?: Date, to?: Date) {
             pending: pendingTxns.count,
             today: {
                 count: transactionsToday[0]?.count ?? 0,
-                value: transactionsToday[0]?.totalValue ?? 0,
+                value: Number(transactionsToday[0]?.totalValue ?? 0) || 0,
             },
             thisWeek: {
                 count: transactionsThisWeek[0]?.count ?? 0,
-                value: transactionsThisWeek[0]?.totalValue ?? 0,
+                value: Number(transactionsThisWeek[0]?.totalValue ?? 0) || 0,
             },
         },
 
@@ -389,12 +393,12 @@ export async function getDashboardOverview(from?: Date, to?: Date) {
             audit: recentAudit,
         },
 
-        // Trends (period comparison)
+        // Trends (last 30d vs prior 30d — undefined when All Time)
         trends: {
-            vatGenerated: pctChange(vatThisMonth[0]?.total ?? 0, vatLastMonth[0]?.total ?? 0),
-            vatCollected: pctChange(payThisMonth[0]?.total ?? 0, payLastMonth[0]?.total ?? 0),
-            transactions: pctChange(txnThisMonth[0]?.count ?? 0, txnLastMonth[0]?.count ?? 0),
-            transactionValue: pctChange(txnThisMonth[0]?.total ?? 0, txnLastMonth[0]?.total ?? 0),
+            vatGenerated: hasDates ? pctChange(Number(vatCurrent?.[0]?.total ?? 0) || 0, Number(vatPrior?.[0]?.total ?? 0) || 0) : undefined,
+            vatCollected: hasDates ? pctChange(Number(payCurrent?.[0]?.total ?? 0) || 0, Number(payPrior?.[0]?.total ?? 0) || 0) : undefined,
+            transactions: hasDates ? pctChange(txnCurrent?.[0]?.count ?? 0, txnPrior?.[0]?.count ?? 0) : undefined,
+            transactionValue: hasDates ? pctChange(Number(txnCurrent?.[0]?.total ?? 0) || 0, Number(txnPrior?.[0]?.total ?? 0) || 0) : undefined,
         },
     };
 }

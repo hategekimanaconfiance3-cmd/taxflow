@@ -52,7 +52,7 @@ export async function getEconomicStats(): Promise<EconomicStatsData> {
             .select({
                 name: product.name,
                 volume: sql<number>`COALESCE(SUM(${transaction.quantity}), 0)::int`.as("volume"),
-                value: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)`.as("value"),
+                value: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)::float8`.as("value"),
                 avgPrice: sql<number>`COALESCE(AVG(${transaction.unitPrice}), 0)`.as("avg_price"),
             })
             .from(transaction)
@@ -74,7 +74,7 @@ export async function getEconomicStats(): Promise<EconomicStatsData> {
                 role: user.role,
                 traderCount: sql<number>`COUNT(DISTINCT ${transaction.sellerId})::int`.as("trader_count"),
                 txnCount: sql<number>`COUNT(*)::int`.as("txn_count"),
-                totalValue: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)`.as("total_value"),
+                totalValue: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)::float8`.as("total_value"),
             })
             .from(transaction)
             .innerJoin(user, eq(transaction.sellerId, user.id))
@@ -84,21 +84,21 @@ export async function getEconomicStats(): Promise<EconomicStatsData> {
         const sectorVat = await db
             .select({
                 role: user.role,
-                vatTotal: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)`.as("vat_total"),
+                vatTotal: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`.as("vat_total"),
             })
             .from(vatRecord)
             .innerJoin(user, eq(vatRecord.businessId, user.id))
             .where(sql`${vatRecord.vatType} = 'output' AND ${vatRecord.createdAt} >= ${thirtyDaysAgo}`)
             .groupBy(user.role);
 
-        const vatByRole = new Map(sectorVat.map((s) => [s.role, s.vatTotal]));
+        const vatByRole = new Map(sectorVat.map((s) => [s.role, Number(s.vatTotal) || 0]));
 
         const sectorActivity = sectorTxns.map((s) => ({
             role: s.role,
             label: ROLE_LABELS[s.role] ?? s.role,
             traderCount: s.traderCount,
             transactionCount: s.txnCount,
-            totalValue: s.totalValue,
+            totalValue: Number(s.totalValue) || 0,
             vatGenerated: vatByRole.get(s.role) ?? 0,
         })).sort((a, b) => b.totalValue - a.totalValue);
 

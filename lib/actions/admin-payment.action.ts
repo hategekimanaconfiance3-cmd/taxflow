@@ -49,8 +49,8 @@ export async function getPaymentSummary() {
 
     const [totals] = await db
         .select({
-            totalCollected: sql<number>`COALESCE(SUM(CASE WHEN ${taxPayment.status} = 'confirmed' THEN ${taxPayment.amount} ELSE 0 END), 0)`.as("total_collected"),
-            totalPending: sql<number>`COALESCE(SUM(CASE WHEN ${taxPayment.status} = 'pending' THEN ${taxPayment.amount} ELSE 0 END), 0)`.as("total_pending"),
+            totalCollected: sql<number>`COALESCE(SUM(CASE WHEN ${taxPayment.status} = 'confirmed' THEN ${taxPayment.amount} ELSE 0 END), 0)::float8`.as("total_collected"),
+            totalPending: sql<number>`COALESCE(SUM(CASE WHEN ${taxPayment.status} = 'pending' THEN ${taxPayment.amount} ELSE 0 END), 0)::float8`.as("total_pending"),
             countAll: sql<number>`COUNT(*)`.as("count_all"),
             countPending: sql<number>`COUNT(*) FILTER (WHERE ${taxPayment.status} = 'pending')`.as("count_pending"),
             countConfirmed: sql<number>`COUNT(*) FILTER (WHERE ${taxPayment.status} = 'confirmed')`.as("count_confirmed"),

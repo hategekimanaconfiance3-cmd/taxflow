@@ -16,7 +16,7 @@ export async function getVATSummaryByMonth() {
         .select({
             month: sql<string>`TO_CHAR(${vatRecord.createdAt}, 'YYYY-MM')`.as("month"),
             vatType: vatRecord.vatType,
-            total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)`.as("total"),
+            total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`.as("total"),
         })
         .from(vatRecord)
         .groupBy(sql`TO_CHAR(${vatRecord.createdAt}, 'YYYY-MM')`, vatRecord.vatType)
@@ -63,14 +63,14 @@ export async function getTraderTaxReport(traderId: string) {
         db
             .select({
                 vatType: vatRecord.vatType,
-                total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)`.as("total"),
+                total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`.as("total"),
             })
             .from(vatRecord)
             .where(eq(vatRecord.businessId, traderId))
             .groupBy(vatRecord.vatType),
         db
             .select({
-                totalPaid: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)`.as("total_paid"),
+                totalPaid: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)::float8`.as("total_paid"),
                 count: sql<number>`COUNT(*)`.as("count"),
             })
             .from(taxPayment)
@@ -82,7 +82,7 @@ export async function getTraderTaxReport(traderId: string) {
             ),
         db
             .select({
-                totalValue: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)`.as("total_value"),
+                totalValue: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)::float8`.as("total_value"),
                 count: sql<number>`COUNT(*)`.as("count"),
             })
             .from(transaction)
