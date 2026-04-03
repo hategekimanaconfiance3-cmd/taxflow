@@ -178,7 +178,7 @@ async function computeTaxCompliance(
         // Total VAT output owed
         const [vatOwed] = await db
             .select({
-                total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)`,
+                total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`,
             })
             .from(vatRecord)
             .where(
@@ -191,7 +191,7 @@ async function computeTaxCompliance(
         // Total paid
         const [paid] = await db
             .select({
-                total: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)`,
+                total: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)::float8`,
             })
             .from(taxPayment)
             .where(

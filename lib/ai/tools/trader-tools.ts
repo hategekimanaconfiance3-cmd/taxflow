@@ -44,7 +44,7 @@ export function createTraderTools(userId: string) {
             const salesResult = await db
                 .select({
                     totalSold: sql<number>`COALESCE(SUM(${transaction.quantity}), 0)`,
-                    totalSalesValue: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)`,
+                    totalSalesValue: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)::float8`,
                     txnCount: sql<number>`COUNT(*)`,
                 })
                 .from(transaction)
@@ -63,7 +63,7 @@ export function createTraderTools(userId: string) {
             const vatResult = await db
                 .select({
                     vatType: vatRecord.vatType,
-                    total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)`,
+                    total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`,
                 })
                 .from(vatRecord)
                 .where(eq(vatRecord.businessId, userId))
@@ -86,7 +86,7 @@ export function createTraderTools(userId: string) {
 
             // 5. Tax payments
             const [payments] = await db
-                .select({ total: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)` })
+                .select({ total: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)::float8` })
                 .from(taxPayment)
                 .where(and(eq(taxPayment.businessId, userId), eq(taxPayment.status, "confirmed")));
 
@@ -205,7 +205,7 @@ export function createTraderTools(userId: string) {
             const vatResult = await db
                 .select({
                     vatType: vatRecord.vatType,
-                    total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)`,
+                    total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`,
                 })
                 .from(vatRecord)
                 .where(eq(vatRecord.businessId, userId))
@@ -217,7 +217,7 @@ export function createTraderTools(userId: string) {
 
             // Actual payments made to RRA
             const [payments] = await db
-                .select({ total: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)` })
+                .select({ total: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)::float8` })
                 .from(taxPayment)
                 .where(and(eq(taxPayment.businessId, userId), eq(taxPayment.status, "confirmed")));
 
@@ -279,7 +279,7 @@ export function createTraderTools(userId: string) {
             const vatResult = await db
                 .select({
                     vatType: vatRecord.vatType,
-                    total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)`,
+                    total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`,
                 })
                 .from(vatRecord)
                 .where(eq(vatRecord.businessId, userId))
@@ -350,7 +350,7 @@ export function createTraderTools(userId: string) {
             const rawSales = await db
                 .select({
                     month: sql<string>`TO_CHAR(${transaction.createdAt}, 'Mon')`,
-                    total: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)`,
+                    total: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)::float8`,
                     unitsSold: sql<number>`COALESCE(SUM(${transaction.quantity}), 0)`,
                 })
                 .from(transaction)

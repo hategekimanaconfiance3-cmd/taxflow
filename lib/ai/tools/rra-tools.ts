@@ -182,17 +182,17 @@ export const getTaxStatus = tool({
         if (!trader) return { found: false, message: "Trader not found" };
 
         const [vatOutput] = await db
-            .select({ total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)` })
+            .select({ total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8` })
             .from(vatRecord)
             .where(and(eq(vatRecord.businessId, trader.id), eq(vatRecord.vatType, "output")));
 
         const [vatInput] = await db
-            .select({ total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)` })
+            .select({ total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8` })
             .from(vatRecord)
             .where(and(eq(vatRecord.businessId, trader.id), eq(vatRecord.vatType, "input")));
 
         const [paid] = await db
-            .select({ total: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)` })
+            .select({ total: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)::float8` })
             .from(taxPayment)
             .where(and(eq(taxPayment.businessId, trader.id), eq(taxPayment.status, "confirmed")));
 
@@ -277,31 +277,31 @@ export const getSystemStats = tool({
             db.select({
                 status: transaction.status,
                 count: sql<number>`COUNT(*)`,
-                totalValue: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)`,
-                totalVat: sql<number>`COALESCE(SUM(${transaction.vatAmount}), 0)`,
+                totalValue: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)::float8`,
+                totalVat: sql<number>`COALESCE(SUM(${transaction.vatAmount}), 0)::float8`,
             }).from(transaction).groupBy(transaction.status),
 
             // Transactions today
             db.select({
                 count: sql<number>`COUNT(*)`,
-                totalValue: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)`,
+                totalValue: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)::float8`,
             }).from(transaction).where(sql`${transaction.createdAt} >= CURRENT_DATE`),
 
             // Transactions this week
             db.select({
                 count: sql<number>`COUNT(*)`,
-                totalValue: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)`,
+                totalValue: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)::float8`,
             }).from(transaction).where(sql`${transaction.createdAt} >= CURRENT_DATE - INTERVAL '7 days'`),
 
             // VAT stats from vatRecord table (NOT transaction.vatAmount)
             db.select({
                 vatType: vatRecord.vatType,
-                total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)`,
+                total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`,
             }).from(vatRecord).groupBy(vatRecord.vatType),
 
             // Tax payments
             db.select({
-                total: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)`,
+                total: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)::float8`,
                 count: sql<number>`COUNT(*)`,
             }).from(taxPayment).where(eq(taxPayment.status, "confirmed")),
 

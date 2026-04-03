@@ -22,6 +22,12 @@ export interface TopTraderActivity {
   avgValue: number;
 }
 
+export interface DailyBucket {
+  date: string;   // "Apr 01"
+  count: number;
+  value: number;
+}
+
 export interface TransactionBehaviorData {
   // Totals
   totalToday: number;
@@ -34,6 +40,9 @@ export interface TransactionBehaviorData {
   peakHours: HourlyBucket[];
   peakHour: number;                 // most active hour
 
+  // 30-day daily trend
+  dailyTrend: DailyBucket[];
+
   // Top traders by activity
   topActiveTraders: TopTraderActivity[];
 
@@ -44,13 +53,14 @@ export interface TransactionBehaviorData {
 const computeBehavior = unstable_cache(
   async (): Promise<TransactionBehaviorData> => {
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
     // 1. Hourly distribution (last 7 days)
     const hourlyRows = await db
       .select({
         hour: sql<number>`EXTRACT(HOUR FROM ${transaction.createdAt})::int`.as('hour'),
         count: sql<number>`COUNT(*)::int`.as('count'),
-        value: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)`.as('value'),
+        value: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)::float8`.as('value'),
       })
       .from(transaction)
       .where(gte(transaction.createdAt, sevenDaysAgo))
@@ -67,7 +77,26 @@ const computeBehavior = unstable_cache(
 
     const peakHour = peakHours.reduce((best, h) => (h.count > best.count ? h : best), peakHours[0]).hour;
 
-    // 2. Today / week totals
+    // 2. 30-day daily trend
+    const dailyRows = await db
+      .select({
+        dateStr: sql<string>`TO_CHAR(${transaction.createdAt}, 'Mon DD')`.as('date_str'),
+        dateSort: sql<string>`DATE(${transaction.createdAt})`.as('date_sort'),
+        count: sql<number>`COUNT(*)::int`.as('count'),
+        value: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)::float8`.as('value'),
+      })
+      .from(transaction)
+      .where(gte(transaction.createdAt, thirtyDaysAgo))
+      .groupBy(sql`DATE(${transaction.createdAt}), TO_CHAR(${transaction.createdAt}, 'Mon DD')`)
+      .orderBy(sql`DATE(${transaction.createdAt})`);
+
+    const dailyTrend: DailyBucket[] = dailyRows.map((r) => ({
+      date: r.dateStr,
+      count: r.count,
+      value: Number(r.value) || 0,
+    }));
+
+    // 3. Today / week totals
     const [todayRow] = await db
       .select({ count: sql<number>`COUNT(*)::int`.as('c') })
       .from(transaction)
@@ -76,7 +105,7 @@ const computeBehavior = unstable_cache(
     const [weekRow] = await db
       .select({
         count: sql<number>`COUNT(*)::int`.as('c'),
-        totalValue: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)`.as('v'),
+        totalValue: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)::float8`.as('v'),
       })
       .from(transaction)
       .where(gte(transaction.createdAt, sevenDaysAgo));
@@ -101,7 +130,7 @@ const computeBehavior = unstable_cache(
         businessName: user.businessName,
         tinNumber: user.tinNumber,
         txnCount: sql<number>`COUNT(*)::int`.as('txn_count'),
-        totalValue: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)`.as('total_value'),
+        totalValue: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)::float8`.as('total_value'),
         avgValue: sql<number>`COALESCE(AVG(${transaction.totalAmount}), 0)`.as('avg_value'),
       })
       .from(transaction)
@@ -155,6 +184,7 @@ const computeBehavior = unstable_cache(
       avgTransactionsPerTrader: txnPerTrader,
       peakHours,
       peakHour,
+      dailyTrend,
       topActiveTraders: topTraders.map((t) => ({
         businessName: t.businessName ?? 'Unknown',
         tinNumber: t.tinNumber ?? null,

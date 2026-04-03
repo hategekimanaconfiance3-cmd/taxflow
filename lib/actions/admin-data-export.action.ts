@@ -41,7 +41,7 @@ export async function getNationalTaxData() {
             .select({
                 businessId: vatRecord.businessId,
                 vatType: vatRecord.vatType,
-                total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)`.as(
+                total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`.as(
                     "total",
                 ),
             })
@@ -51,7 +51,7 @@ export async function getNationalTaxData() {
         db
             .select({
                 businessId: taxPayment.businessId,
-                totalPaid: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)`.as(
+                totalPaid: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)::float8`.as(
                     "total_paid",
                 ),
                 count: sql<number>`COUNT(*)`.as("count"),
@@ -64,7 +64,7 @@ export async function getNationalTaxData() {
             .select({
                 sellerId: transaction.sellerId,
                 count: sql<number>`COUNT(*)`.as("count"),
-                totalValue: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)`.as(
+                totalValue: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)::float8`.as(
                     "total_value",
                 ),
             })

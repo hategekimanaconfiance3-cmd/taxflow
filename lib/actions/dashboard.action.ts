@@ -35,7 +35,7 @@ export async function getDashboardStats() {
                 "total_sold",
             ),
             totalSalesValue:
-                sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)`.as(
+                sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)::float8`.as(
                     "total_sales_value",
                 ),
             txnCount: sql<number>`COUNT(*)`.as("txn_count"),
@@ -58,7 +58,7 @@ export async function getDashboardStats() {
     const vatResult = await db
         .select({
             vatType: vatRecord.vatType,
-            total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)`.as(
+            total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`.as(
                 "total",
             ),
         })
@@ -148,7 +148,7 @@ export async function getMonthlyStats() {
         .select({
             month: sql<string>`TO_CHAR(${transaction.createdAt}, 'Mon')`.as("month"),
             monthNum: sql<number>`EXTRACT(MONTH FROM ${transaction.createdAt})`.as("month_num"),
-            total: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)`.as("total"),
+            total: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)::float8`.as("total"),
         })
         .from(transaction)
         .where(

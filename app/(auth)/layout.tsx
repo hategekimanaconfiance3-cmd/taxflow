@@ -24,9 +24,16 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
           </h1>
         </div>
 
-        {/* Illustration — fills the bottom, centered */}
+        {/* Illustration — served via proxy route to keep blob token server-side */}
         <div className="absolute bottom-0 left-0 right-0 h-[45%] z-0 pointer-events-none">
-          <Image src="/bars.svg" alt="Finance Illustration" fill className="object-contain object-bottom" priority />
+          <Image
+            src="/api/assets/bars-svg"
+            alt="Finance Illustration"
+            priority
+            fill
+            unoptimized
+            className="object-contain object-bottom"
+          />
         </div>
       </div>
 
@@ -38,7 +45,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
         </div>
 
         {/* System Status — top-left of the right panel */}
-        <div className="absolute top-2.5 left-8 z-10">
+        <div className="absolute top-2.5 left-4 z-10">
           <SystemStatus status="active" />
         </div>
 

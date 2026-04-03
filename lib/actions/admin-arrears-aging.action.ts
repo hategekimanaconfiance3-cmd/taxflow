@@ -68,7 +68,7 @@ export async function getArrearsAging(): Promise<ArrearsAgingSummary> {
         .select({
             businessId: vatRecord.businessId,
             vatType: vatRecord.vatType,
-            total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)`.as("total"),
+            total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`.as("total"),
         })
         .from(vatRecord)
         .groupBy(vatRecord.businessId, vatRecord.vatType);
@@ -77,7 +77,7 @@ export async function getArrearsAging(): Promise<ArrearsAgingSummary> {
     const payments = await db
         .select({
             businessId: taxPayment.businessId,
-            totalPaid: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)`.as("total_paid"),
+            totalPaid: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)::float8`.as("total_paid"),
         })
         .from(taxPayment)
         .where(eq(taxPayment.status, "confirmed"))

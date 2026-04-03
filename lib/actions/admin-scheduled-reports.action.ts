@@ -74,7 +74,7 @@ export async function generateComplianceSummary(): Promise<ComplianceSummaryRepo
         const vatResult = await db
             .select({
                 vatType: vatRecord.vatType,
-                total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)`.as("total"),
+                total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`.as("total"),
             })
             .from(vatRecord)
             .where(eq(vatRecord.businessId, trader.id))
@@ -91,7 +91,7 @@ export async function generateComplianceSummary(): Promise<ComplianceSummaryRepo
 
         const [payResult] = await db
             .select({
-                paid: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)`.as("paid"),
+                paid: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)::float8`.as("paid"),
             })
             .from(taxPayment)
             .where(sql`${taxPayment.businessId} = ${trader.id} AND ${taxPayment.status} = 'confirmed'`);
@@ -117,8 +117,8 @@ export async function generateComplianceSummary(): Promise<ComplianceSummaryRepo
     // ── Revenue Stats ──────────────────────────────────────────────────
     const [revenueOwed] = await db
         .select({
-            output: sql<number>`COALESCE(SUM(CASE WHEN ${vatRecord.vatType} = 'output' THEN ${vatRecord.amount} ELSE 0 END), 0)`.as("output"),
-            input: sql<number>`COALESCE(SUM(CASE WHEN ${vatRecord.vatType} = 'input' THEN ${vatRecord.amount} ELSE 0 END), 0)`.as("input"),
+            output: sql<number>`COALESCE(SUM(CASE WHEN ${vatRecord.vatType} = 'output' THEN ${vatRecord.amount} ELSE 0 END), 0)::float8`.as("output"),
+            input: sql<number>`COALESCE(SUM(CASE WHEN ${vatRecord.vatType} = 'input' THEN ${vatRecord.amount} ELSE 0 END), 0)::float8`.as("input"),
         })
         .from(vatRecord);
 
@@ -126,7 +126,7 @@ export async function generateComplianceSummary(): Promise<ComplianceSummaryRepo
 
     const [revenueCollected] = await db
         .select({
-            total: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)`.as("total"),
+            total: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)::float8`.as("total"),
         })
         .from(taxPayment)
         .where(eq(taxPayment.status, "confirmed"));
@@ -137,7 +137,7 @@ export async function generateComplianceSummary(): Promise<ComplianceSummaryRepo
     const [txnStats] = await db
         .select({
             total: sql<number>`COUNT(*)::int`.as("total"),
-            totalValue: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)`.as("total_value"),
+            totalValue: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)::float8`.as("total_value"),
             confirmed: sql<number>`COUNT(*) FILTER (WHERE ${transaction.status} IN ('confirmed', 'completed'))::int`.as("confirmed"),
             rejected: sql<number>`COUNT(*) FILTER (WHERE ${transaction.status} = 'rejected')::int`.as("rejected"),
             expired: sql<number>`COUNT(*) FILTER (WHERE ${transaction.status} = 'expired')::int`.as("expired"),

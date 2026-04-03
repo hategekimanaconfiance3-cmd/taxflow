@@ -1,34 +1,36 @@
 import { requireRRASession } from '@/lib/auth-guard';
 import { AdminDashboardSearch } from '@/components/admin/admin-dashboard-search';
 import { AdminRealtimeWrapper } from '@/components/admin/admin-realtime-wrapper';
-import { RevenueForecastChart } from '@/components/admin/revenue-forecast-chart';
-import { AuditRecommendations } from '@/components/admin/audit-recommendations';
-import { ComplianceRiskHeatmap } from '@/components/admin/compliance-risk-heatmap';
-import { ComplianceTrendChart } from '@/components/admin/compliance-trend-chart';
-import { TaxGapDashboard } from '@/components/admin/tax-gap-dashboard';
-import { SuspiciousPricingCard } from '@/components/admin/suspicious-pricing-card';
-import { SmartAlertsPanel } from '@/components/admin/smart-alerts-panel';
-import { SupplyChainMonitor } from '@/components/admin/supply-chain-monitor';
-import { AuditPriorityQueue } from '@/components/admin/audit-priority-queue';
-import { TraderRiskPanel } from '@/components/admin/trader-risk-panel';
-import { EconomicIntelligence } from '@/components/admin/economic-intelligence';
 import { TimeFilter } from '@/components/admin/time-filter';
 import { AnalyticsInsightBar } from '@/components/admin/analytics-insight-bar';
-import { TransactionBehavior } from '@/components/admin/transaction-behavior';
+import { VatPerformance } from '@/components/admin/analytics/vat-performance';
+import { ComplianceOverview } from '@/components/admin/analytics/compliance-overview';
+import { SectorAnalysis } from '@/components/admin/analytics/sector-analysis';
+import { TransactionAnalytics } from '@/components/admin/analytics/transaction-analytics';
+import { ProvinceTaxMap } from '@/components/admin/analytics/province-tax-map';
+import { EconomicSummary } from '@/components/admin/analytics/economic-summary';
+import { TaxGapDashboard } from '@/components/admin/tax-gap-dashboard';
 import { Suspense } from 'react';
 
-export default async function AdminDashboardAnalyticsPage() {
+export default async function AdminDashboardAnalyticsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ from?: string; to?: string }>;
+}) {
   const { user, staff } = await requireRRASession();
+  const params = await searchParams;
+  const from = params.from;
+  const to = params.to;
 
   return (
     <AdminRealtimeWrapper userId={user.id}>
-      <div className="space-y-6">
+      <div className="space-y-8">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center gap-4">
           <div className="flex-1">
             <h1 className="text-2xl font-bold tracking-tight">Analytics</h1>
             <p className="text-sm text-muted-foreground mt-0.5">
-              {staff.department ?? 'General'} department · Intelligence & forecasting
+              {staff.department ?? 'General'} department · Data, trends & comparisons
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -39,44 +41,29 @@ export default async function AdminDashboardAnalyticsPage() {
           </div>
         </div>
 
-        {/* ── INTELLIGENCE SUMMARY ─────────────────────── */}
+        {/* ── 0. Insight Summary Bar ──────────────────────────── */}
         <AnalyticsInsightBar />
 
-        {/* ── AI REVENUE FORECAST ───────────────────────── */}
-        <RevenueForecastChart />
+        {/* ── 1. Revenue & Tax Performance (full width) ───────── */}
+        <VatPerformance from={from} to={to} />
 
-        {/* ── Risk Heatmap + Suspicious Pricing ── */}
-        <div className="grid gap-4 lg:grid-cols-2">
-          <ComplianceRiskHeatmap />
-          <SuspiciousPricingCard />
-        </div>
-
-        {/* ── Tax Gap + Compliance Trend ──── */}
-        <div className="grid gap-4 lg:grid-cols-2">
+        {/* ── 2. Compliance Overview + Tax Gap ────────────────── */}
+        <div className="grid gap-5 lg:grid-cols-2">
+          <ComplianceOverview from={from} to={to} />
           <TaxGapDashboard />
-          <ComplianceTrendChart />
         </div>
 
-        {/* ── Supply Chain + Audit Queue ──── */}
-        <div className="grid gap-4 lg:grid-cols-2">
-          <SupplyChainMonitor />
-          <AuditPriorityQueue />
-        </div>
+        {/* ── 3. Sector Analysis (full width) ─────────────────── */}
+        <SectorAnalysis from={from} to={to} />
 
-        {/* ── Trader Risk Panel + Economic Intel ─ */}
-        <div className="grid gap-4 lg:grid-cols-2">
-          <TraderRiskPanel />
-          <EconomicIntelligence />
-        </div>
+        {/* ── 4. Transaction Analytics ────────────────────────── */}
+        <TransactionAnalytics from={from} to={to} />
 
-        {/* ── Transaction Behavior ──────────────── */}
-        <TransactionBehavior />
+        {/* ── 5. Province Tax Distribution (full width) ───────── */}
+        <ProvinceTaxMap from={from} to={to} />
 
-        {/* ── AI AUDIT RECOMMENDATIONS ────────────────────── */}
-        <AuditRecommendations />
-
-        {/* ── SMART ALERTS ───────────────────────────────── */}
-        <SmartAlertsPanel />
+        {/* ── 6. Economic Intelligence ─────────────────────────── */}
+        <EconomicSummary />
       </div>
     </AdminRealtimeWrapper>
   );

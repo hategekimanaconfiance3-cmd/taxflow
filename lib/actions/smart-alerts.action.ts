@@ -68,7 +68,7 @@ export async function getSmartAlerts(): Promise<SmartAlertsData> {
             .select({
                 businessId: vatRecord.businessId,
                 vatType: vatRecord.vatType,
-                total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)`.as("total"),
+                total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`.as("total"),
             })
             .from(vatRecord)
             .where(gte(vatRecord.createdAt, sevenDaysAgo))

@@ -44,7 +44,7 @@ export async function generateTaxReportPDF(): Promise<{
     const vatResult = await db
         .select({
             vatType: vatRecord.vatType,
-            total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)`.as("total"),
+            total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`.as("total"),
         })
         .from(vatRecord)
         .where(eq(vatRecord.businessId, userId))
@@ -57,7 +57,7 @@ export async function generateTaxReportPDF(): Promise<{
     // 3. Payment history
     const [paymentSummary] = await db
         .select({
-            totalPaid: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)`.as("total_paid"),
+            totalPaid: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)::float8`.as("total_paid"),
             paymentCount: sql<number>`COUNT(*)`.as("count"),
         })
         .from(taxPayment)

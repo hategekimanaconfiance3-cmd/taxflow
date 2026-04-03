@@ -31,7 +31,7 @@ export async function getTradersWithUnpaidVat(): Promise<UnpaidTrader[]> {
     const vatDue = await db
         .select({
             businessId: vatRecord.businessId,
-            totalDue: sql<number>`COALESCE(SUM(CASE WHEN ${vatRecord.vatType} = 'output' THEN ${vatRecord.amount} ELSE 0 END) - SUM(CASE WHEN ${vatRecord.vatType} = 'input' THEN ${vatRecord.amount} ELSE 0 END), 0)`.as(
+            totalDue: sql<number>`COALESCE(SUM(CASE WHEN ${vatRecord.vatType} = 'output' THEN ${vatRecord.amount} ELSE 0 END) - SUM(CASE WHEN ${vatRecord.vatType} = 'input' THEN ${vatRecord.amount} ELSE 0 END), 0)::float8`.as(
                 "total_due",
             ),
         })

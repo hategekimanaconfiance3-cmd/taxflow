@@ -111,7 +111,7 @@ async function getMonthlyRevenue(months: number): Promise<MonthlyRevenue[]> {
             // Expected: VAT output records generated in this month
             const [expected] = await db
                 .select({
-                    total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)`,
+                    total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`,
                 })
                 .from(vatRecord)
                 .where(
@@ -125,7 +125,7 @@ async function getMonthlyRevenue(months: number): Promise<MonthlyRevenue[]> {
             // Actual: Tax payments received in this month
             const [actual] = await db
                 .select({
-                    total: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)`,
+                    total: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)::float8`,
                 })
                 .from(taxPayment)
                 .where(
@@ -184,7 +184,7 @@ async function getTopGapContributors(limit: number = 10): Promise<GapContributor
         const owed = await db
             .select({
                 businessId: vatRecord.businessId,
-                total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)`,
+                total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`,
             })
             .from(vatRecord)
             .where(eq(vatRecord.vatType, "output"))
@@ -194,7 +194,7 @@ async function getTopGapContributors(limit: number = 10): Promise<GapContributor
         const paid = await db
             .select({
                 businessId: taxPayment.businessId,
-                total: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)`,
+                total: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)::float8`,
             })
             .from(taxPayment)
             .where(eq(taxPayment.status, "confirmed"))

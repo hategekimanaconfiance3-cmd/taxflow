@@ -50,7 +50,7 @@ export async function getRiskHeatmap(): Promise<RiskHeatmapData> {
         const vatOwed = await db
             .select({
                 businessId: vatRecord.businessId,
-                total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)`.as("total"),
+                total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`.as("total"),
             })
             .from(vatRecord)
             .where(sql`${vatRecord.vatType} = 'output'`)
@@ -60,7 +60,7 @@ export async function getRiskHeatmap(): Promise<RiskHeatmapData> {
         const paid = await db
             .select({
                 businessId: taxPayment.businessId,
-                total: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)`.as("total"),
+                total: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)::float8`.as("total"),
             })
             .from(taxPayment)
             .where(sql`${taxPayment.status} = 'confirmed'`)

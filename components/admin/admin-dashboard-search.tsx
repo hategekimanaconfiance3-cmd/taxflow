@@ -95,7 +95,7 @@ export function AdminDashboardSearch() {
         (results?.disputes.length ?? 0);
 
     return (
-        <div ref={containerRef} className="relative w-full max-w-md">
+        <div ref={containerRef} className="relative w-full max-w-lg">
             <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
@@ -120,7 +120,7 @@ export function AdminDashboardSearch() {
 
             {/* Dropdown results */}
             {isOpen && results && (
-                <Card className="absolute top-full mt-1 left-0 right-0 z-50 max-h-[420px] overflow-y-auto shadow-xl border p-0">
+                <Card className="absolute top-full mt-1 right-0 z-50 w-[580px] max-h-[480px] overflow-y-auto shadow-xl border p-0">
                     <div className="p-2 text-xs text-muted-foreground border-b">
                         {totalResults} result{totalResults !== 1 ? "s" : ""}{" "}
                         for &quot;{query}&quot;

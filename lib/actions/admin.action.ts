@@ -231,7 +231,7 @@ export async function getComplianceReport() {
         .select({
             status: transaction.status,
             count: sql<number>`COUNT(*)`.as("count"),
-            totalValue: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)`.as(
+            totalValue: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)::float8`.as(
                 "total_value",
             ),
         })
@@ -242,7 +242,7 @@ export async function getComplianceReport() {
     const vatStats = await db
         .select({
             vatType: vatRecord.vatType,
-            total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)`.as("total"),
+            total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`.as("total"),
         })
         .from(vatRecord)
         .groupBy(vatRecord.vatType);

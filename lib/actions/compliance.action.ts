@@ -27,7 +27,7 @@ export async function getTaxComplianceStatus(userId?: string) {
   const vatResult = await db
     .select({
       vatType: vatRecord.vatType,
-      total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)`.as('total'),
+      total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`.as('total'),
     })
     .from(vatRecord)
     .where(eq(vatRecord.businessId, targetId))
@@ -40,7 +40,7 @@ export async function getTaxComplianceStatus(userId?: string) {
   // 2. Get total confirmed payments
   const [paymentResult] = await db
     .select({
-      totalPaid: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)`.as('total_paid'),
+      totalPaid: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)::float8`.as('total_paid'),
     })
     .from(taxPayment)
     .where(sql`${taxPayment.businessId} = ${targetId} AND ${taxPayment.status} = 'confirmed'`);
@@ -80,7 +80,7 @@ export async function recordTaxPayment(data: {
   const vatResult = await db
     .select({
       vatType: vatRecord.vatType,
-      total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)`.as('total'),
+      total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`.as('total'),
     })
     .from(vatRecord)
     .where(eq(vatRecord.businessId, session.user.id))
@@ -92,7 +92,7 @@ export async function recordTaxPayment(data: {
 
   const [paymentResult] = await db
     .select({
-      totalPaid: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)`.as('total_paid'),
+      totalPaid: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)::float8`.as('total_paid'),
     })
     .from(taxPayment)
     .where(sql`${taxPayment.businessId} = ${session.user.id} AND ${taxPayment.status} = 'confirmed'`);
@@ -176,7 +176,7 @@ export async function checkAndAlertCompliance(traderId: string) {
     const vatResult = await db
       .select({
         vatType: vatRecord.vatType,
-        total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)`.as('total'),
+        total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`.as('total'),
       })
       .from(vatRecord)
       .where(eq(vatRecord.businessId, traderId))
@@ -190,7 +190,7 @@ export async function checkAndAlertCompliance(traderId: string) {
 
     const [paymentResult] = await db
       .select({
-        totalPaid: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)`.as('total_paid'),
+        totalPaid: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)::float8`.as('total_paid'),
       })
       .from(taxPayment)
       .where(sql`${taxPayment.businessId} = ${traderId} AND ${taxPayment.status} = 'confirmed'`);
@@ -317,7 +317,7 @@ export async function runSystemComplianceCheck() {
       const vatResult = await db
         .select({
           vatType: vatRecord.vatType,
-          total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)`.as('total'),
+          total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`.as('total'),
         })
         .from(vatRecord)
         .where(eq(vatRecord.businessId, trader.id))
@@ -334,7 +334,7 @@ export async function runSystemComplianceCheck() {
 
       const [paymentResult] = await db
         .select({
-          totalPaid: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)`.as('total_paid'),
+          totalPaid: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)::float8`.as('total_paid'),
         })
         .from(taxPayment)
         .where(sql`${taxPayment.businessId} = ${trader.id} AND ${taxPayment.status} = 'confirmed'`);
