@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import type { TransactionBehaviorData } from "@/app/api/admin/transaction-behavior/route";
 import { formatCompact } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Loader2, Activity, Inbox } from "lucide-react";
+import { Activity, Inbox } from "lucide-react";
+import { ChartCardSkeleton } from "@/components/admin/loading-skeletons";
 import { cn } from "@/lib/utils";
 import {
   ResponsiveContainer,
@@ -74,16 +75,8 @@ export function TransactionAnalytics({ from, to }: { from?: string; to?: string 
       .finally(() => setLoading(false));
   }, [from, to]);
 
-  if (loading) {
-    return (
-      <Card>
-        <CardContent className="flex items-center justify-center py-12">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground mr-2" />
-          <span className="text-sm text-muted-foreground">Loading transaction analytics…</span>
-        </CardContent>
-      </Card>
-    );
-  }
+  if (loading) return <ChartCardSkeleton metrics={3} chartHeight="h-56" />;
+
 
   if (!data) return null;
 

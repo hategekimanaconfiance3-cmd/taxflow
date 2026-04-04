@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import type { VatPerformanceData } from "@/app/api/admin/vat-performance/route";
 import { formatCompact } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Loader2, TrendingUp, TrendingDown, Minus, BarChart3, Inbox } from "lucide-react";
+import { TrendingUp, TrendingDown, Minus, BarChart3, Inbox } from "lucide-react";
+import { ChartCardSkeleton } from "@/components/admin/loading-skeletons";
 import {
   ResponsiveContainer,
   AreaChart,
@@ -87,16 +88,7 @@ export function VatPerformance({ from, to }: { from?: string; to?: string } = {}
       .finally(() => setLoading(false));
   }, [from, to]);
 
-  if (loading) {
-    return (
-      <Card>
-        <CardContent className="flex items-center justify-center py-12">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground mr-2" />
-          <span className="text-sm text-muted-foreground">Loading VAT performance…</span>
-        </CardContent>
-      </Card>
-    );
-  }
+  if (loading) return <ChartCardSkeleton metrics={3} chartHeight="h-64" />;
 
   if (!data) return null;
 

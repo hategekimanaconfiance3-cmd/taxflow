@@ -4,8 +4,8 @@ import { useEffect, useState } from "react";
 import type { InsightsFeedData, InsightItem } from "@/app/api/ai/insights-feed/route";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { FeedCardSkeleton } from "@/components/admin/loading-skeletons";
 import {
-  Loader2,
   Rss,
   AlertCircle,
   AlertTriangle,
@@ -116,14 +116,7 @@ export function AIInsightsFeed() {
   useEffect(() => { fetchData(); }, []);
 
   if (loading) {
-    return (
-      <Card>
-        <CardContent className="flex items-center justify-center py-12">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-          <span className="ml-2 text-sm text-muted-foreground">Generating intelligence feed…</span>
-        </CardContent>
-      </Card>
-    );
+    return <FeedCardSkeleton items={5} />;
   }
 
   if (!data) return null;

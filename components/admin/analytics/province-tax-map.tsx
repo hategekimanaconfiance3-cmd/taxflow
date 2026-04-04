@@ -5,8 +5,8 @@ import type { ProvinceTaxData, ProvincePoint } from "@/app/api/admin/province-ta
 import { formatCompact } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { GeoCardSkeleton } from "@/components/admin/loading-skeletons";
 import {
-  Loader2,
   MapPin,
   Trophy,
   TrendingDown,
@@ -161,16 +161,7 @@ export function ProvinceTaxMap(_props: { from?: string; to?: string } = {}) {
       .finally(() => setLoading(false));
   }, []);
 
-  if (loading) {
-    return (
-      <Card>
-        <CardContent className="flex items-center justify-center py-12">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground mr-2" />
-          <span className="text-sm text-muted-foreground">Loading province tax data…</span>
-        </CardContent>
-      </Card>
-    );
-  }
+  if (loading) return <GeoCardSkeleton />;
 
   if (!data || data.provinces.length === 0) {
     return (

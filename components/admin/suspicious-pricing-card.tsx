@@ -5,8 +5,8 @@ import type { SuspiciousTransactionsData, SuspiciousFlag } from "@/lib/actions/s
 import { formatCompact } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { CardSkeleton } from "@/components/admin/loading-skeletons";
 import {
-  Loader2,
   AlertTriangle,
   TrendingDown,
   TrendingUp,
@@ -107,16 +107,7 @@ export function SuspiciousPricingCard() {
       .finally(() => setLoading(false));
   }, []);
 
-  if (loading) {
-    return (
-      <Card>
-        <CardContent className="flex items-center justify-center py-12">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-          <span className="ml-2 text-sm text-muted-foreground">Scanning for suspicious pricing…</span>
-        </CardContent>
-      </Card>
-    );
-  }
+  if (loading) return <CardSkeleton rows={3} />;
 
   if (!data) return null;
 

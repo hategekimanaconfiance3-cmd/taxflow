@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import type { SmartAlertsData, SmartAlert } from "@/lib/actions/smart-alerts.action";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Bell, AlertTriangle, AlertCircle, Info, ChevronDown, ChevronUp } from "lucide-react";
+import { Bell, AlertTriangle, AlertCircle, Info, ChevronDown, ChevronUp } from "lucide-react";
+import { CardSkeleton } from "@/components/admin/loading-skeletons";
 
 // ---------------------------------------------------------------------------
 // Smart Alerts Panel — grouped by type with severity indicators
@@ -90,16 +91,7 @@ export function SmartAlertsPanel() {
     }, []);
 
     if (loading) {
-        return (
-            <Card>
-                <CardContent className="flex items-center justify-center py-12">
-                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                    <span className="ml-2 text-sm text-muted-foreground">
-                        Analyzing for alerts…
-                    </span>
-                </CardContent>
-            </Card>
-        );
+        return <CardSkeleton rows={4} />;
     }
 
     if (!data || data.alerts.length === 0) {

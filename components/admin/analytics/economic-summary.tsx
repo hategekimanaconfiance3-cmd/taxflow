@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import type { EconomicStatsData } from "@/lib/actions/economic-stats.action";
 import { formatCompact } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Loader2, Globe, TrendingUp, TrendingDown, Inbox, Star } from "lucide-react";
+import { Globe, TrendingUp, TrendingDown, Inbox, Star } from "lucide-react";
+import { EconomicSkeleton } from "@/components/admin/loading-skeletons";
 import {
   ResponsiveContainer,
   BarChart,
@@ -35,16 +36,7 @@ export function EconomicSummary() {
       .finally(() => setLoading(false));
   }, []);
 
-  if (loading) {
-    return (
-      <Card>
-        <CardContent className="flex items-center justify-center py-12">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground mr-2" />
-          <span className="text-sm text-muted-foreground">Loading economic data…</span>
-        </CardContent>
-      </Card>
-    );
-  }
+  if (loading) return <EconomicSkeleton />;
 
   if (!data) return null;
 

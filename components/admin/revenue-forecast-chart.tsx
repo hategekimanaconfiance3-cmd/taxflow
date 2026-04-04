@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { RevenueForecast } from "@/lib/ai/revenue-forecast";
 import { formatCompact } from "@/lib/utils";
+import { ForecastCardSkeleton } from "@/components/admin/loading-skeletons";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -10,7 +11,6 @@ import {
   TrendingDown,
   Minus,
   Brain,
-  Loader2,
   AlertTriangle,
   Gauge,
   Lightbulb,
@@ -81,14 +81,7 @@ export function RevenueForecastChart() {
   }, []);
 
   if (loading) {
-    return (
-      <Card>
-        <CardContent className="flex items-center justify-center py-12">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-          <span className="ml-2 text-sm text-muted-foreground">AI computing forecast…</span>
-        </CardContent>
-      </Card>
-    );
+    return <ForecastCardSkeleton />;
   }
 
   if (!forecast) return null;

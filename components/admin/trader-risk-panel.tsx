@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { RiskScoreBadge } from "@/components/admin/risk-score-badge";
-import { Loader2, Shield, AlertTriangle, TrendingDown, Clock, BarChart2, Activity } from "lucide-react";
+import { Shield, AlertTriangle, TrendingDown, Clock, BarChart2, Activity } from "lucide-react";
+import { ListCardSkeleton } from "@/components/admin/loading-skeletons";
 
 // ---------------------------------------------------------------------------
 // Trader Risk Panel — detailed 5-signal risk breakdown
@@ -87,16 +88,7 @@ export function TraderRiskPanel() {
     }, []);
 
     if (loading) {
-        return (
-            <Card>
-                <CardContent className="flex items-center justify-center py-12">
-                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                    <span className="ml-2 text-sm text-muted-foreground">
-                        Computing risk signals…
-                    </span>
-                </CardContent>
-            </Card>
-        );
+        return <ListCardSkeleton rows={6} />;
     }
 
     if (data.length === 0) return null;

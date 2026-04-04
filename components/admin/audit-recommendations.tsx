@@ -7,9 +7,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { RiskScoreBadge } from "@/components/admin/risk-score-badge";
+import { ListCardSkeleton } from "@/components/admin/loading-skeletons";
 import {
   Brain,
-  Loader2,
   Target,
   TrendingUp,
   ChevronDown,
@@ -70,14 +70,7 @@ export function AuditRecommendations() {
   }, []);
 
   if (loading) {
-    return (
-      <Card>
-        <CardContent className="flex items-center justify-center py-12">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-          <span className="ml-2 text-sm text-muted-foreground">AI selecting audit targets…</span>
-        </CardContent>
-      </Card>
-    );
+    return <ListCardSkeleton rows={5} />;
   }
 
   if (!plan || plan.clusters.length === 0) {
