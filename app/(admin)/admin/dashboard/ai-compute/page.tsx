@@ -52,28 +52,26 @@ export default async function TaxflowAIComputePage() {
           <AIDecisionPanel />
         </section>
 
-        {/* ── 1. AI Insights Feed ──────────────────────────────── */}
+        {/* ── 1. AI Insights Feed + Anomaly Timeline ───────────── */}
         <section className="space-y-3">
           <SectionDivider label="Live Intelligence Feed" />
-          <AIInsightsFeed />
+          <div className="grid gap-5 lg:grid-cols-2">
+            <AnomalyTimeline />
+            <AIInsightsFeed />
+          </div>
         </section>
 
-        {/* ── 2. Revenue Forecast + Anomaly Timeline ───────────── */}
+        {/* ── 2. Revenue Forecast (full width) ─────────────────── */}
         <section className="space-y-3">
-          <SectionDivider label="Revenue Forecast & Anomaly Detection" />
-          <div className="grid gap-5 lg:grid-cols-2">
-            <RevenueForecastChart />
-            <AnomalyTimeline />
-          </div>
+          <SectionDivider label="Revenue Forecast" />
+          <RevenueForecastChart />
         </section>
 
         {/* ── 3. Risk Intelligence ─────────────────────────────── */}
         <section className="space-y-3">
           <SectionDivider label="Risk Intelligence" />
-          <div className="grid gap-5 lg:grid-cols-2">
-            <TraderRiskPanel />
-            <AuditPriorityQueue />
-          </div>
+          <TraderRiskPanel />
+          <AuditPriorityQueue />
         </section>
 
         {/* ── 4. Suspicious Pricing ────────────────────────────── */}

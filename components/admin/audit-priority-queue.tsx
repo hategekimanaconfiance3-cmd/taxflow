@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { RiskScoreBadge } from "@/components/admin/risk-score-badge";
-import { Loader2, Target, AlertTriangle, CheckCircle2, FileSearch, ChevronDown, ChevronUp, Users, MapPin } from "lucide-react";
+import { Loader2, Target, CheckCircle2, FileSearch, ChevronDown, ChevronUp, Users, MapPin } from "lucide-react";
 import Link from "next/link";
 
 // ---------------------------------------------------------------------------
@@ -150,28 +150,33 @@ export function AuditPriorityQueue() {
       <div key={trader.id} className={`rounded-lg border ${levelColors[trader.level]} overflow-hidden transition-all`}>
         {/* Main row */}
         <div
-          className="flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-muted/30"
+          className="flex items-center gap-3 px-3 py-3 cursor-pointer hover:bg-muted/30"
           onClick={() => toggleExpand(trader.id)}
         >
           <span className="text-muted-foreground font-mono text-[10px] w-4 shrink-0">#{index + 1}</span>
           <RiskScoreBadge score={trader.score} level={trader.level} />
-          <div className="flex-1 min-w-0">
-            <p className="text-xs font-semibold truncate">{trader.name}</p>
-            <p className="text-[10px] text-muted-foreground truncate">{trader.topReason}</p>
+          <div className="flex-1 min-w-0 space-y-0.5">
+            <p className="text-xs font-semibold">{trader.name}</p>
+            <p className="text-[10px] text-muted-foreground">{trader.topReason}</p>
+            <div className="flex items-center gap-1.5 pt-0.5">
+              <Badge variant="secondary" className={`text-[9px] px-1.5 ${
+                trader.level === "critical" ? "bg-red-100 text-red-700" :
+                trader.level === "high" ? "bg-orange-100 text-orange-700" :
+                trader.level === "medium" ? "bg-amber-100 text-amber-700" :
+                "bg-emerald-100 text-emerald-700"
+              }`}>{trader.level}</Badge>
+              {trader.hasAlerts && (
+                <Badge variant="secondary" className="text-[9px] bg-amber-100 text-amber-700 px-1.5">alert</Badge>
+              )}
+              {trader.isNew && (
+                <Badge variant="secondary" className="text-[9px] bg-blue-100 text-blue-700 px-1.5">new</Badge>
+              )}
+              <span className="text-[10px] text-muted-foreground/60 font-medium ml-auto pr-1">
+                {trader.suggestedAction}
+              </span>
+            </div>
           </div>
-          <div className="flex items-center gap-1.5 shrink-0">
-            {trader.hasAlerts && (
-              <Badge variant="secondary" className="text-[9px] bg-amber-100 text-amber-700 px-1.5">alert</Badge>
-            )}
-            {trader.isNew && (
-              <Badge variant="secondary" className="text-[9px] bg-blue-100 text-blue-700 px-1.5">new</Badge>
-            )}
-            <Badge variant="secondary" className={`text-[9px] px-1.5 ${
-              trader.level === "critical" ? "bg-red-100 text-red-700" :
-              trader.level === "high" ? "bg-orange-100 text-orange-700" :
-              trader.level === "medium" ? "bg-amber-100 text-amber-700" :
-              "bg-emerald-100 text-emerald-700"
-            }`}>{trader.level}</Badge>
+          <div className="shrink-0">
             {isExpanded
               ? <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" />
               : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
@@ -186,12 +191,6 @@ export function AuditPriorityQueue() {
             <div className="rounded-md bg-muted/30 px-2.5 py-2">
               <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">AI Reasoning</p>
               <p className="text-[11px] text-foreground leading-relaxed">{trader.aiReasoning}</p>
-            </div>
-
-            {/* Suggested action */}
-            <div className="flex items-start gap-2">
-              <AlertTriangle className="h-3.5 w-3.5 text-amber-500 mt-0.5 shrink-0" />
-              <p className="text-[11px] font-medium">{trader.suggestedAction}</p>
             </div>
 
             {/* Action buttons */}

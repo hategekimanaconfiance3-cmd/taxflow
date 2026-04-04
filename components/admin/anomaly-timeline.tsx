@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import type { AnomalyTimelineData } from "@/app/api/ai/anomaly-timeline/route";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Activity, TrendingDown, TrendingUp, Minus } from "lucide-react";
+import { Loader2, Activity, TrendingDown, TrendingUp, Minus, ShieldCheck } from "lucide-react";
 import {
   ResponsiveContainer,
   AreaChart,
@@ -139,68 +139,119 @@ export function AnomalyTimeline() {
           </div>
         </div>
 
-        {/* Stacked area chart */}
-        <div className="h-56 w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={chartData} margin={{ top: 6, right: 8, bottom: 0, left: -16 }}>
-              <defs>
-                <linearGradient id="pricingGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.5} />
-                  <stop offset="95%" stopColor="#f59e0b" stopOpacity={0.05} />
-                </linearGradient>
-                <linearGradient id="complianceGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#ef4444" stopOpacity={0.5} />
-                  <stop offset="95%" stopColor="#ef4444" stopOpacity={0.05} />
-                </linearGradient>
-                <linearGradient id="gapsGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#60a5fa" stopOpacity={0.4} />
-                  <stop offset="95%" stopColor="#60a5fa" stopOpacity={0.02} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
-              <XAxis
-                dataKey="date"
-                tick={{ fontSize: 9, fill: "hsl(var(--muted-foreground))" }}
-                axisLine={false}
-                tickLine={false}
-                interval={4}
-              />
-              <YAxis
-                tick={{ fontSize: 9, fill: "hsl(var(--muted-foreground))" }}
-                axisLine={false}
-                tickLine={false}
-                allowDecimals={false}
-              />
-              {avg > 0 && (
-                <ReferenceLine
-                  y={avg}
-                  stroke="hsl(var(--muted-foreground))"
-                  strokeDasharray="4 3"
-                  strokeWidth={1}
-                  label={{ value: "avg", position: "insideTopRight", fontSize: 8, fill: "hsl(var(--muted-foreground))" }}
-                />
-              )}
-              <Tooltip content={<AnomalyTooltip />} cursor={{ stroke: "hsl(var(--border))", strokeWidth: 1 }} />
-              <Area type="monotone" dataKey="complianceFlags" stackId="1" stroke="#ef4444" strokeWidth={1.5} fill="url(#complianceGrad)" name="complianceFlags" />
-              <Area type="monotone" dataKey="pricingAnomalies" stackId="1" stroke="#f59e0b" strokeWidth={1.5} fill="url(#pricingGrad)" name="pricingAnomalies" />
-              <Area type="monotone" dataKey="transactionGaps" stackId="1" stroke="#60a5fa" strokeWidth={1} fill="url(#gapsGrad)" name="transactionGaps" />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-
-        {/* Legend */}
-        <div className="flex items-center gap-4 flex-wrap">
-          {[
-            { color: "bg-red-500", label: "Compliance flags" },
-            { color: "bg-amber-500", label: "Pricing anomalies" },
-            { color: "bg-blue-400", label: "Transaction gaps" },
-          ].map(({ color, label }) => (
-            <div key={label} className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-              <span className={`h-2 w-2 rounded-full ${color}`} />
-              {label}
+        {data.totalAnomalies === 0 ? (
+          <div className="space-y-3">
+            {/* Clean bill of health */}
+            <div className="flex items-center gap-3 rounded-lg border bg-emerald-50/40 border-emerald-200 px-4 py-3">
+              <ShieldCheck className="h-8 w-8 text-emerald-500 shrink-0" />
+              <div>
+                <p className="text-sm font-semibold text-emerald-700">No anomalies detected in the last 30 days</p>
+                <p className="text-[11px] text-muted-foreground">All signals within normal ranges — system scanned pricing, compliance, and transaction patterns daily.</p>
+              </div>
             </div>
-          ))}
-        </div>
+
+            {/* What was checked */}
+            <div className="grid grid-cols-1 gap-2">
+              {[
+                {
+                  icon: "bg-amber-500",
+                  label: "Pricing Patterns",
+                  desc: "All product prices within ±15% of 90-day median. No below-market or extreme drop transactions detected.",
+                  result: "Clear",
+                  resultColor: "text-emerald-600 bg-emerald-50 border-emerald-200",
+                },
+                {
+                  icon: "bg-red-500",
+                  label: "Compliance Events",
+                  desc: "No price ceiling violations, suspended clearances, or suspicious activity markers logged in the audit trail.",
+                  result: "Clear",
+                  resultColor: "text-emerald-600 bg-emerald-50 border-emerald-200",
+                },
+                {
+                  icon: "bg-blue-400",
+                  label: "Transaction Volume",
+                  desc: "Daily transaction counts are consistent with the 30-day rolling average. No unusual drop or spike days detected.",
+                  result: "Clear",
+                  resultColor: "text-emerald-600 bg-emerald-50 border-emerald-200",
+                },
+              ].map(({ icon, label, desc, result, resultColor }) => (
+                <div key={label} className="flex items-start gap-3 rounded-lg border px-3 py-2.5">
+                  <span className={`mt-1 h-2.5 w-2.5 rounded-full shrink-0 ${icon}`} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold">{label}</p>
+                    <p className="text-[10px] text-muted-foreground leading-snug mt-0.5">{desc}</p>
+                  </div>
+                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border shrink-0 ${resultColor}`}>{result}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* Stacked area chart */}
+            <div className="h-56 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={chartData} margin={{ top: 6, right: 8, bottom: 0, left: -16 }}>
+                  <defs>
+                    <linearGradient id="pricingGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.5} />
+                      <stop offset="95%" stopColor="#f59e0b" stopOpacity={0.05} />
+                    </linearGradient>
+                    <linearGradient id="complianceGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#ef4444" stopOpacity={0.5} />
+                      <stop offset="95%" stopColor="#ef4444" stopOpacity={0.05} />
+                    </linearGradient>
+                    <linearGradient id="gapsGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#60a5fa" stopOpacity={0.4} />
+                      <stop offset="95%" stopColor="#60a5fa" stopOpacity={0.02} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                  <XAxis
+                    dataKey="date"
+                    tick={{ fontSize: 9, fill: "hsl(var(--muted-foreground))" }}
+                    axisLine={false}
+                    tickLine={false}
+                    interval={4}
+                  />
+                  <YAxis
+                    tick={{ fontSize: 9, fill: "hsl(var(--muted-foreground))" }}
+                    axisLine={false}
+                    tickLine={false}
+                    allowDecimals={false}
+                  />
+                  {avg > 0 && (
+                    <ReferenceLine
+                      y={avg}
+                      stroke="hsl(var(--muted-foreground))"
+                      strokeDasharray="4 3"
+                      strokeWidth={1}
+                      label={{ value: "avg", position: "insideTopRight", fontSize: 8, fill: "hsl(var(--muted-foreground))" }}
+                    />
+                  )}
+                  <Tooltip content={<AnomalyTooltip />} cursor={{ stroke: "hsl(var(--border))", strokeWidth: 1 }} />
+                  <Area type="monotone" dataKey="complianceFlags" stackId="1" stroke="#ef4444" strokeWidth={1.5} fill="url(#complianceGrad)" name="complianceFlags" />
+                  <Area type="monotone" dataKey="pricingAnomalies" stackId="1" stroke="#f59e0b" strokeWidth={1.5} fill="url(#pricingGrad)" name="pricingAnomalies" />
+                  <Area type="monotone" dataKey="transactionGaps" stackId="1" stroke="#60a5fa" strokeWidth={1} fill="url(#gapsGrad)" name="transactionGaps" />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+
+            {/* Legend */}
+            <div className="flex items-center gap-4 flex-wrap">
+              {[
+                { color: "bg-red-500", label: "Compliance flags" },
+                { color: "bg-amber-500", label: "Pricing anomalies" },
+                { color: "bg-blue-400", label: "Transaction gaps" },
+              ].map(({ color, label }) => (
+                <div key={label} className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                  <span className={`h-2 w-2 rounded-full ${color}`} />
+                  {label}
+                </div>
+              ))}
+            </div>
+          </>
+        )}
       </CardContent>
     </Card>
   );
