@@ -107,9 +107,9 @@ export function SmartAlertsPanel() {
             <Card>
                 <CardContent className="py-8 text-center">
                     <Bell className="h-8 w-8 mx-auto text-emerald-500 mb-2" />
-                    <p className="text-sm font-medium">No active alerts</p>
+                    <p className="text-sm font-medium">No critical alerts at this time</p>
                     <p className="text-xs text-muted-foreground mt-1">
-                        All systems operating normally.
+                        System scans VAT records, stock levels, and transaction patterns — all within normal bounds.
                     </p>
                 </CardContent>
             </Card>
