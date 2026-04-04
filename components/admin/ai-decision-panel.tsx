@@ -5,8 +5,8 @@ import type { DecisionPanelData, DecisionAction } from "@/app/api/ai/decision-pa
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { DecisionPanelSkeleton } from "@/components/admin/loading-skeletons";
 import {
-  Loader2,
   BrainCircuit,
   AlertCircle,
   AlertTriangle,
@@ -127,14 +127,7 @@ export function AIDecisionPanel() {
   }, []);
 
   if (loading) {
-    return (
-      <Card>
-        <CardContent className="flex items-center justify-center py-12">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-          <span className="ml-2 text-sm text-muted-foreground">AI generating decision recommendations…</span>
-        </CardContent>
-      </Card>
-    );
+    return <DecisionPanelSkeleton />;
   }
 
   if (!data || data.actions.length === 0) {

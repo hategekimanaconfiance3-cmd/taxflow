@@ -5,7 +5,8 @@ import type { SupplyChainData } from "@/lib/actions/supply-chain-stats.action";
 import { formatCompact } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, GitBranch, AlertTriangle, Inbox } from "lucide-react";
+import { GitBranch, AlertTriangle, Inbox } from "lucide-react";
+import { ListCardSkeleton } from "@/components/admin/loading-skeletons";
 import Link from "next/link";
 
 // ---------------------------------------------------------------------------
@@ -25,16 +26,7 @@ export function SupplyChainSummary() {
       .finally(() => setLoading(false));
   }, []);
 
-  if (loading) {
-    return (
-      <Card>
-        <CardContent className="flex items-center justify-center py-12">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground mr-2" />
-          <span className="text-sm text-muted-foreground">Loading supply chain…</span>
-        </CardContent>
-      </Card>
-    );
-  }
+  if (loading) return <ListCardSkeleton rows={4} />;
 
   if (!data) return null;
 

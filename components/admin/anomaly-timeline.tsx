@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import type { AnomalyTimelineData } from "@/app/api/ai/anomaly-timeline/route";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Activity, TrendingDown, TrendingUp, Minus, ShieldCheck } from "lucide-react";
+import { Activity, TrendingDown, TrendingUp, Minus, ShieldCheck } from "lucide-react";
+import { ChartCardSkeleton } from "@/components/admin/loading-skeletons";
 import {
   ResponsiveContainer,
   AreaChart,
@@ -79,14 +80,7 @@ export function AnomalyTimeline() {
   }, []);
 
   if (loading) {
-    return (
-      <Card>
-        <CardContent className="flex items-center justify-center py-12">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-          <span className="ml-2 text-sm text-muted-foreground">Building anomaly timeline…</span>
-        </CardContent>
-      </Card>
-    );
+    return <ChartCardSkeleton metrics={2} chartHeight="h-48" />;
   }
 
   if (!data) return null;

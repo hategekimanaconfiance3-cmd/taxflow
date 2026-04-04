@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import type { RiskHeatmapData } from "@/lib/actions/risk-heatmap.action";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Loader2, ShieldCheck, Inbox, Trophy, AlertTriangle, TrendingUp, Users } from "lucide-react";
+import { ShieldCheck, Inbox, Trophy, AlertTriangle, TrendingUp, Users } from "lucide-react";
+import { ChartCardSkeleton } from "@/components/admin/loading-skeletons";
 import {
   ResponsiveContainer,
   LineChart,
@@ -100,16 +101,7 @@ export function ComplianceOverview({ from, to }: { from?: string; to?: string } 
       .finally(() => setLoading(false));
   }, [from, to]);
 
-  if (loading) {
-    return (
-      <Card>
-        <CardContent className="flex items-center justify-center py-12">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground mr-2" />
-          <span className="text-sm text-muted-foreground">Loading compliance data…</span>
-        </CardContent>
-      </Card>
-    );
-  }
+  if (loading) return <ChartCardSkeleton metrics={2} chartHeight="h-48" />;
 
   const lastRate = trend[trend.length - 1]?.rate ?? 0;
   const prevRate = trend[trend.length - 2]?.rate ?? lastRate;

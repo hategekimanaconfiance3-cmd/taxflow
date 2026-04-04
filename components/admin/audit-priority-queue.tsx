@@ -7,7 +7,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { RiskScoreBadge } from "@/components/admin/risk-score-badge";
-import { Loader2, Target, CheckCircle2, FileSearch, ChevronDown, ChevronUp, Users, MapPin } from "lucide-react";
+import { Target, CheckCircle2, FileSearch, ChevronDown, ChevronUp, Users, MapPin } from "lucide-react";
+import { ListCardSkeleton } from "@/components/admin/loading-skeletons";
 import Link from "next/link";
 
 // ---------------------------------------------------------------------------
@@ -88,14 +89,7 @@ export function AuditPriorityQueue() {
   }, []);
 
   if (loading) {
-    return (
-      <Card>
-        <CardContent className="flex items-center justify-center py-12">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-          <span className="ml-2 text-sm text-muted-foreground">Building audit priority queue…</span>
-        </CardContent>
-      </Card>
-    );
+    return <ListCardSkeleton rows={6} />;
   }
 
   const allTraders = buildPriorityList(riskData, alertData);
