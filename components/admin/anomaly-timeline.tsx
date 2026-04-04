@@ -95,9 +95,7 @@ export function AnomalyTimeline() {
   const trendColor = data.trend === "increasing" ? "text-red-600" : data.trend === "decreasing" ? "text-emerald-600" : "text-muted-foreground";
   const trendLabel = data.trend === "increasing" ? "Anomalies increasing" : data.trend === "decreasing" ? "Anomalies decreasing" : "Stable";
 
-  // Tick every 5 days
-  const tickIndices = new Set([0, 4, 9, 14, 19, 24, 29]);
-  const chartData = data.timeline.map((p, i) => ({ ...p, showTick: tickIndices.has(i) }));
+  const chartData = data.timeline;
 
   const avg = data.totalAnomalies > 0 ? data.totalAnomalies / data.timeline.length : 0;
 
@@ -165,7 +163,7 @@ export function AnomalyTimeline() {
                 tick={{ fontSize: 9, fill: "hsl(var(--muted-foreground))" }}
                 axisLine={false}
                 tickLine={false}
-                interval={(_, index) => !tickIndices.has(index)}
+                interval={4}
               />
               <YAxis
                 tick={{ fontSize: 9, fill: "hsl(var(--muted-foreground))" }}
