@@ -1,8 +1,6 @@
 import { requireTraderSession } from '@/lib/auth-guard';
-import { DashboardSidebar } from '@/components/dashboard/sidebar/sidebar';
-import { DashboardTopbar } from '@/components/dashboard/topbar/topbar';
 import { SocketProvider } from '@/components/providers/socket-provider';
-import { AIChatWidget } from '@/components/shared/ai-chat-widget';
+import { DashboardLayoutClient } from '@/components/dashboard/dashboard-layout-client';
 import type { TraderRole } from '@/lib/sidebar-config';
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -15,12 +13,14 @@ export default async function DashboardLayout({ children }: { children: React.Re
   return (
     <div className="min-h-screen bg-background">
       <SocketProvider userId={userId}>
-        <DashboardSidebar role={role} businessName={businessName} userName={userName} />
-        <DashboardTopbar role={role} userName={userName} businessName={businessName} userId={userId} />
-        <main className="lg:pl-[260px] pt-0">
-          <div className="p-6">{children}</div>
-        </main>
-        <AIChatWidget role={role} />
+        <DashboardLayoutClient
+          role={role}
+          userName={userName}
+          businessName={businessName}
+          userId={userId}
+        >
+          {children}
+        </DashboardLayoutClient>
       </SocketProvider>
     </div>
   );
