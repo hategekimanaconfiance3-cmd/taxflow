@@ -23,12 +23,11 @@ export default async function AdminDisputesPage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <AdminDisputeActions 
-  disputeId="demo-id"
-  referenceNumber="REF-0000"
-  fileName="document.pdf"
-  counterpart="Trader Profile"
-/>
+          <AdminDisputeActions
+            disputeId="demo-id"
+            referenceNumber="REF-0000"
+            filerName="document.pdf"
+            counterpartyName="Trader Profile" reason={''} counterpartyResponse={''} counterpartyNote={null}          />
 
         </CardContent>
       </Card>
