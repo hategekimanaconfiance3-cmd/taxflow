@@ -23,7 +23,13 @@ export default async function AdminDisputesPage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <AdminDisputeActions />
+          <AdminDisputeActions 
+  disputeId="demo-id"
+  referenceNumber="REF-0000"
+  fileName="document.pdf"
+  counterpart="Trader Profile"
+/>
+
         </CardContent>
       </Card>
     </div>
