@@ -47,7 +47,7 @@ export default async function AdminDisputesPage() {
                   <p className="text-xs text-muted-foreground">
                     Filed by {dispute.filedByName ?? 'Unknown trader'} | Counterparty{' '}
                     {dispute.counterpartyName ?? 'Unknown trader'} | Response:{' '}
-                    {dispute.counterpartyResponse}
+                    {dispute.counterpartyResponse ?? 'pending'}
                   </p>
                 </div>
                 <AdminDisputeActions
@@ -56,7 +56,7 @@ export default async function AdminDisputesPage() {
                   filerName={dispute.filedByName ?? 'Unknown trader'}
                   counterpartyName={dispute.counterpartyName ?? 'Unknown trader'}
                   reason={dispute.reason}
-                  counterpartyResponse={dispute.counterpartyResponse}
+                  counterpartyResponse={dispute.counterpartyResponse ?? 'pending'}
                   counterpartyNote={dispute.counterpartyNote}
                 />
               </div>
