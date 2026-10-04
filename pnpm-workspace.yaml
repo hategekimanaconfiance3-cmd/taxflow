@@ -1,8 +1,6 @@
-ignoredBuiltDependencies:
-  - sharp
-  - unrs-resolver
-
-onlyBuiltDependencies:
-  - core-js
-  - esbuild
-  - msw
+allowBuilds:
+  core-js: true
+  esbuild: true
+  msw: true
+  sharp: true
+  unrs-resolver: true
