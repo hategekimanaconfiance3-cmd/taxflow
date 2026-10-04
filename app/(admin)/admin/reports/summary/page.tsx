@@ -1,178 +1,108 @@
-import { requireRRASession } from "@/lib/auth-guard";
-import { generateComplianceSummary } from "@/lib/actions/admin-scheduled-reports.action";
-import { formatRWF } from "@/components/dashboard/stat-card/stat-card";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { requireRRASession } from '@/lib/auth-guard';
+import { getVATSummaryByMonth } from '@/lib/actions/admin-report.action';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { PrintReportButton } from '@/components/admin/print-report-button';
+import { formatRWF } from '@/components/dashboard/stat-card/stat-card';
+import { FileText, TrendingUp } from 'lucide-react';
 import {
-    Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
-import {
-    Users, DollarSign, ArrowRightLeft, Scale, AlertTriangle, FileText,
-} from "lucide-react";
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 
-export default async function SummaryReportPage() {
-    await requireRRASession("super_admin", "compliance_officer", "reporting_officer");
-    const report = await generateComplianceSummary();
+export default async function AdminReportsSummaryPage() {
+  await requireRRASession();
 
-    return (
-        <div className="space-y-6">
-            <div className="flex items-start justify-between">
-                <div>
-                    <h1 className="text-2xl font-bold tracking-tight">
-                        Compliance Summary Report
-                    </h1>
-                    <p className="text-muted-foreground">{report.period}</p>
-                </div>
-                <Badge variant="outline" className="text-xs">
-                    <FileText className="h-3 w-3 mr-1" />
-                    Generated: {report.generatedAt.toLocaleString()}
-                </Badge>
-            </div>
+  let monthlyData: Awaited<ReturnType<typeof getVATSummaryByMonth>> = [];
+  try {
+    monthlyData = await getVATSummaryByMonth();
+  } catch {
+    // Insufficient permissions (requires reporting_officer)
+  }
 
-            {/* Key Metrics */}
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-                <Card>
-                    <CardContent className="pt-6 flex items-center gap-3">
-                        <Users className="h-8 w-8 text-blue-500" />
-                        <div>
-                            <p className="text-sm text-muted-foreground">Trader Compliance</p>
-                            <p className="text-2xl font-bold">{report.traders.complianceRate}%</p>
-                            <p className="text-xs text-muted-foreground">
-                                {report.traders.compliant}/{report.traders.total} compliant
-                            </p>
-                        </div>
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardContent className="pt-6 flex items-center gap-3">
-                        <DollarSign className="h-8 w-8 text-green-500" />
-                        <div>
-                            <p className="text-sm text-muted-foreground">Revenue Collected</p>
-                            <p className="text-2xl font-bold">{report.revenue.collectionRate}%</p>
-                            <p className="text-xs text-muted-foreground">
-                                {formatRWF(report.revenue.totalCollected)} of {formatRWF(report.revenue.totalOwed)}
-                            </p>
-                        </div>
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardContent className="pt-6 flex items-center gap-3">
-                        <ArrowRightLeft className="h-8 w-8 text-purple-500" />
-                        <div>
-                            <p className="text-sm text-muted-foreground">Transactions</p>
-                            <p className="text-2xl font-bold">{report.transactions.totalCount.toLocaleString()}</p>
-                            <p className="text-xs text-muted-foreground">
-                                {formatRWF(report.transactions.totalValue)} total value
-                            </p>
-                        </div>
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardContent className="pt-6 flex items-center gap-3">
-                        <Scale className="h-8 w-8 text-amber-500" />
-                        <div>
-                            <p className="text-sm text-muted-foreground">Disputes Resolved</p>
-                            <p className="text-2xl font-bold">{report.disputes.resolutionRate}%</p>
-                            <p className="text-xs text-muted-foreground">
-                                {report.disputes.resolved}/{report.disputes.total} resolved
-                            </p>
-                        </div>
-                    </CardContent>
-                </Card>
-            </div>
+  const totalGenerated = monthlyData.reduce((s, r) => s + r.generated, 0);
+  const totalPaid = monthlyData.reduce((s, r) => s + r.paid, 0);
+  const totalNet = monthlyData.reduce((s, r) => s + r.net, 0);
 
-            {/* Detail Sections */}
-            <div className="grid gap-4 md:grid-cols-2">
-                {/* Revenue Breakdown */}
-                <Card>
-                    <CardHeader>
-                        <CardTitle className="text-base font-semibold">Revenue Breakdown</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-2 text-sm">
-                        <div className="flex justify-between">
-                            <span className="text-muted-foreground">Total VAT Owed</span>
-                            <span className="font-mono">{formatRWF(report.revenue.totalOwed)}</span>
-                        </div>
-                        <div className="flex justify-between">
-                            <span className="text-muted-foreground">Total Collected</span>
-                            <span className="font-mono text-green-600">{formatRWF(report.revenue.totalCollected)}</span>
-                        </div>
-                        <div className="flex justify-between border-t pt-2">
-                            <span className="font-medium">Outstanding</span>
-                            <span className="font-mono font-bold text-red-600">{formatRWF(report.revenue.outstanding)}</span>
-                        </div>
-                    </CardContent>
-                </Card>
-
-                {/* Trader Breakdown */}
-                <Card>
-                    <CardHeader>
-                        <CardTitle className="text-base font-semibold">Trader Status</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-2 text-sm">
-                        <div className="flex justify-between">
-                            <span className="text-muted-foreground">Total Traders</span>
-                            <span className="font-mono">{report.traders.total}</span>
-                        </div>
-                        <div className="flex justify-between">
-                            <span className="text-muted-foreground">Compliant (≥95%)</span>
-                            <span className="font-mono text-green-600">{report.traders.compliant}</span>
-                        </div>
-                        <div className="flex justify-between">
-                            <span className="text-muted-foreground">Non-Compliant</span>
-                            <span className="font-mono text-amber-600">{report.traders.nonCompliant}</span>
-                        </div>
-                        <div className="flex justify-between">
-                            <span className="text-muted-foreground">Suspended</span>
-                            <span className="font-mono text-red-600">{report.traders.suspended}</span>
-                        </div>
-                        <div className="flex justify-between">
-                            <span className="text-muted-foreground">Anomalies (30d)</span>
-                            <span className="font-mono">
-                                {report.anomalyCount}
-                                {report.anomalyCount > 0 && (
-                                    <AlertTriangle className="inline h-3 w-3 ml-1 text-amber-500" />
-                                )}
-                            </span>
-                        </div>
-                    </CardContent>
-                </Card>
-            </div>
-
-            {/* Top Arrears */}
-            <Card>
-                <CardHeader>
-                    <CardTitle className="text-base font-semibold">Top 10 Outstanding Arrears</CardTitle>
-                </CardHeader>
-                <CardContent>
-                    {report.topArrears.length === 0 ? (
-                        <p className="text-sm text-muted-foreground text-center py-6">
-                            No outstanding arrears.
-                        </p>
-                    ) : (
-                        <Table>
-                            <TableHeader>
-                                <TableRow>
-                                    <TableHead>#</TableHead>
-                                    <TableHead>Trader</TableHead>
-                                    <TableHead className="text-right">Outstanding</TableHead>
-                                </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                                {report.topArrears.map((t, i) => (
-                                    <TableRow key={i}>
-                                        <TableCell className="font-mono text-muted-foreground">{i + 1}</TableCell>
-                                        <TableCell className="font-medium">{t.traderName}</TableCell>
-                                        <TableCell className="text-right font-mono font-medium text-red-600">
-                                            {formatRWF(t.outstanding)}
-                                        </TableCell>
-                                    </TableRow>
-                                ))}
-                            </TableBody>
-                        </Table>
-                    )}
-                </CardContent>
-            </Card>
+  return (
+    <div className="space-y-6">
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Summary Reports</h1>
+          <p className="text-muted-foreground text-sm mt-1">
+            Monthly VAT generation, collection, and net revenue summary.
+          </p>
         </div>
-    );
+        <PrintReportButton />
+      </div>
+
+      {/* Totals */}
+      <div className="grid gap-4 sm:grid-cols-3">
+        {[
+          { label: 'Total VAT Generated', value: totalGenerated, color: 'text-emerald-600' },
+          { label: 'Total VAT Paid', value: totalPaid, color: 'text-blue-600' },
+          { label: 'Net Outstanding', value: totalNet, color: totalNet > 0 ? 'text-red-600' : 'text-emerald-600' },
+        ].map((item) => (
+          <Card key={item.label}>
+            <CardHeader className="pb-1 pt-3">
+              <CardTitle className="text-xs font-medium text-muted-foreground">{item.label}</CardTitle>
+            </CardHeader>
+            <CardContent className="pb-3">
+              <p className={`text-xl font-bold font-mono ${item.color}`}>
+                {formatRWF(item.value)}
+              </p>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      {/* Monthly breakdown */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base font-semibold flex items-center gap-2">
+            <TrendingUp className="h-4 w-4" />
+            Monthly VAT Breakdown
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Month</TableHead>
+                <TableHead className="text-right">Generated</TableHead>
+                <TableHead className="text-right">Paid (Input)</TableHead>
+                <TableHead className="text-right">Net Due</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {monthlyData.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={4} className="text-center py-8 text-muted-foreground text-sm">
+                    No report data available. Reporting officer access required.
+                  </TableCell>
+                </TableRow>
+              )}
+              {monthlyData.map((row) => (
+                <TableRow key={row.month}>
+                  <TableCell className="font-mono text-xs">{row.month}</TableCell>
+                  <TableCell className="text-right font-mono text-xs text-emerald-600">
+                    {formatRWF(row.generated)}
+                  </TableCell>
+                  <TableCell className="text-right font-mono text-xs text-blue-600">
+                    {formatRWF(row.paid)}
+                  </TableCell>
+                  <TableCell className={`text-right font-mono text-xs font-semibold ${row.net > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                    {formatRWF(row.net)}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+    </div>
+  );
 }

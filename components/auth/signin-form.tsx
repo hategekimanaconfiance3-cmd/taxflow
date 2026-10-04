@@ -209,6 +209,12 @@ export function SignInForm() {
               Register your business
             </Link>
           </p>
+          <p className="text-center text-xs text-gray-400">
+            RRA Staff?{' '}
+            <Link href="/admin-login" className="font-medium text-gray-500 hover:underline hover:text-gray-700">
+              Login here
+            </Link>
+          </p>
         </CardContent>
       </Card>
     </div>

@@ -1,98 +1,76 @@
 import { requireRRASession } from '@/lib/auth-guard';
-import { AdminDashboardSearch } from '@/components/admin/admin-dashboard-search';
-import { AdminRealtimeWrapper } from '@/components/admin/admin-realtime-wrapper';
-import { RevenueForecastChart } from '@/components/admin/revenue-forecast-chart';
-import { AuditRecommendations } from '@/components/admin/audit-recommendations';
-import { SuspiciousPricingCard } from '@/components/admin/suspicious-pricing-card';
-import { SmartAlertsPanel } from '@/components/admin/smart-alerts-panel';
-import { AuditPriorityQueue } from '@/components/admin/audit-priority-queue';
-import { TraderRiskPanel } from '@/components/admin/trader-risk-panel';
-import { AIInsightsFeed } from '@/components/admin/ai-insights-feed';
-import { AnomalyTimeline } from '@/components/admin/anomaly-timeline';
-import { AIDecisionPanel } from '@/components/admin/ai-decision-panel';
-import { BrainCircuit } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Bot, Cpu, Sparkles } from 'lucide-react';
 
-function SectionDivider({ label }: { label: string }) {
-  return (
-    <div className="flex items-center gap-3">
-      <span className="h-px flex-1 bg-border" />
-      <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 px-1 shrink-0">
-        {label}
-      </span>
-      <span className="h-px flex-1 bg-border" />
-    </div>
-  );
-}
-
-export default async function TaxflowAIComputePage() {
-  const { user, staff } = await requireRRASession();
+export default async function AiComputePage() {
+  await requireRRASession();
 
   return (
-    <AdminRealtimeWrapper userId={user.id}>
-      <div className="space-y-8">
-
-        {/* ── Header ───────────────────────────────────────────── */}
-        <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-          <div className="flex-1">
-            <div className="flex items-center gap-2.5">
-              <BrainCircuit className="h-5 w-5 text-violet-500" />
-              <h1 className="text-2xl font-bold tracking-tight">TaxFlow AI Compute</h1>
-            </div>
-            <p className="text-sm text-muted-foreground mt-0.5">
-              {staff.department ?? 'General'} department · Active intelligence, decision engine & risk analysis
-            </p>
-          </div>
-          <AdminDashboardSearch />
-        </div>
-
-        {/* ── 0. AI Decision Panel ─────────────────────────────── */}
-        {/* Always first — this is where action happens */}
-        <section className="space-y-3">
-          <SectionDivider label="Suggested Actions" />
-          <AIDecisionPanel />
-        </section>
-
-        {/* ── 1. AI Insights Feed + Anomaly Timeline ───────────── */}
-        <section className="space-y-3">
-          <SectionDivider label="Live Intelligence Feed" />
-          <div className="grid gap-5 lg:grid-cols-2">
-            <AnomalyTimeline />
-            <AIInsightsFeed />
-          </div>
-        </section>
-
-        {/* ── 2. Revenue Forecast (full width) ─────────────────── */}
-        <section className="space-y-3">
-          <SectionDivider label="Revenue Forecast" />
-          <RevenueForecastChart />
-        </section>
-
-        {/* ── 3. Risk Intelligence ─────────────────────────────── */}
-        <section className="space-y-3">
-          <SectionDivider label="Risk Intelligence" />
-          <TraderRiskPanel />
-          <AuditPriorityQueue />
-        </section>
-
-        {/* ── 4. Suspicious Pricing ────────────────────────────── */}
-        <section className="space-y-3">
-          <SectionDivider label="Suspicious Pricing Detection" />
-          <SuspiciousPricingCard />
-        </section>
-
-        {/* ── 5. AI Audit Recommendations ──────────────────────── */}
-        <section className="space-y-3">
-          <SectionDivider label="AI Audit Recommendations" />
-          <AuditRecommendations />
-        </section>
-
-        {/* ── 6. Smart Alerts ──────────────────────────────────── */}
-        <section className="space-y-3">
-          <SectionDivider label="Smart Alerts" />
-          <SmartAlertsPanel />
-        </section>
-
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight">AI Compute</h1>
+        <p className="text-muted-foreground text-sm mt-1">
+          AI-powered batch processing and intelligence tools for the RRA.
+        </p>
       </div>
-    </AdminRealtimeWrapper>
+
+      <div className="grid gap-4 md:grid-cols-3">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
+              <Bot className="h-4 w-4 text-violet-500" />
+              AI Risk Scoring
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-xs text-muted-foreground">
+              Batch-compute AI risk scores for all registered traders using transaction patterns, VAT compliance, and pricing data.
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-amber-500" />
+              Price Floor Analysis
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-xs text-muted-foreground">
+              AI-computed price floors and ceilings by product and district to detect underreporting and price manipulation.
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
+              <Cpu className="h-4 w-4 text-emerald-500" />
+              Anomaly Detection
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-xs text-muted-foreground">
+              Automated detection of high-quantity sales, duplicate transactions, negative stock, and suspicious pricing anomalies.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardContent className="py-10 flex flex-col items-center gap-3 text-center">
+          <Bot className="h-10 w-10 text-violet-400" />
+          <p className="font-semibold text-base">AI Batch Processing Tools</p>
+          <p className="text-sm text-muted-foreground max-w-md">
+            AI batch processing is available via the <span className="font-medium text-violet-600">AI chat widget</span> in the bottom-right corner.
+            Use natural language to run risk analyses, generate reports, and query trader data.
+          </p>
+          <p className="text-xs text-muted-foreground/60 mt-1">
+            Try: &quot;Run risk scores for all manufacturers&quot; or &quot;Show anomalies from last 30 days&quot;
+          </p>
+        </CardContent>
+      </Card>
+    </div>
   );
 }

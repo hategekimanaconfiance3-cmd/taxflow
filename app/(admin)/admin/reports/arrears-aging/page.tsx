@@ -1,131 +1,127 @@
-import { requireRRASession } from "@/lib/auth-guard";
-import { getArrearsAging } from "@/lib/actions/admin-arrears-aging.action";
-import { formatRWF } from "@/components/dashboard/stat-card/stat-card";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { requireRRASession } from '@/lib/auth-guard';
+import { getArrearsAging } from '@/lib/actions/admin-arrears-aging.action';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
-    Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
-import { Clock, AlertCircle, AlertTriangle, XCircle } from "lucide-react";
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { Badge } from '@/components/ui/badge';
+import { Clock } from 'lucide-react';
+import { formatRWF } from '@/components/dashboard/stat-card/stat-card';
 
-const BUCKET_CONFIG = {
-    current: { label: "Current (0–30 days)", color: "text-green-500", icon: Clock, variant: "outline" as const },
-    overdue: { label: "Overdue (31–60 days)", color: "text-amber-500", icon: AlertCircle, variant: "secondary" as const },
-    delinquent: { label: "Delinquent (61–90 days)", color: "text-orange-500", icon: AlertTriangle, variant: "secondary" as const },
-    critical: { label: "Critical (90+ days)", color: "text-red-500", icon: XCircle, variant: "destructive" as const },
+const BUCKET_COLORS: Record<string, string> = {
+  current: 'bg-emerald-100 text-emerald-700',
+  overdue: 'bg-amber-100 text-amber-700',
+  delinquent: 'bg-orange-100 text-orange-700',
+  critical: 'bg-red-100 text-red-700',
 };
 
-export default async function ArrearsAgingPage() {
-    await requireRRASession("compliance_officer", "audit_officer", "reporting_officer");
-    const aging = await getArrearsAging();
+export default async function AdminArrearsAgingPage() {
+  await requireRRASession();
 
-    return (
-        <div className="space-y-6">
-            <div>
-                <h1 className="text-2xl font-bold tracking-tight">
-                    Tax Arrears Aging Report
-                </h1>
-                <p className="text-muted-foreground">
-                    Outstanding tax balances by age bucket.
-                </p>
-            </div>
+  let data: Awaited<ReturnType<typeof getArrearsAging>> | null = null;
+  try {
+    data = await getArrearsAging();
+  } catch {
+    // Insufficient permissions
+  }
 
-            {/* Aging Bucket Summary */}
-            <div className="grid gap-4 md:grid-cols-4">
-                {(Object.entries(BUCKET_CONFIG) as Array<[keyof typeof BUCKET_CONFIG, typeof BUCKET_CONFIG[keyof typeof BUCKET_CONFIG]]>).map(([key, cfg]) => {
-                    const Icon = cfg.icon;
-                    const bucket = aging[key];
-                    return (
-                        <Card key={key}>
-                            <CardContent className="pt-6 flex items-center gap-3">
-                                <Icon className={`h-8 w-8 ${cfg.color}`} />
-                                <div>
-                                    <p className="text-sm text-muted-foreground">{cfg.label}</p>
-                                    <p className="text-2xl font-bold">{bucket.count}</p>
-                                    <p className="text-xs text-muted-foreground">
-                                        {formatRWF(bucket.total)}
-                                    </p>
-                                </div>
-                            </CardContent>
-                        </Card>
-                    );
-                })}
-            </div>
+  const buckets = [
+    { label: 'Current (0–30d)', key: 'current', data: data?.current },
+    { label: 'Overdue (31–60d)', key: 'overdue', data: data?.overdue },
+    { label: 'Delinquent (61–90d)', key: 'delinquent', data: data?.delinquent },
+    { label: 'Critical (90d+)', key: 'critical', data: data?.critical },
+  ];
 
-            {/* Grand Total */}
-            <Card>
-                <CardContent className="pt-6 text-center">
-                    <p className="text-sm text-muted-foreground">Total Outstanding Arrears</p>
-                    <p className="text-3xl font-bold text-red-600">
-                        {formatRWF(aging.grandTotal)}
-                    </p>
-                    <p className="text-sm text-muted-foreground">
-                        across {aging.traders.length} traders
-                    </p>
-                </CardContent>
-            </Card>
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight">Tax Arrears Aging</h1>
+        <p className="text-muted-foreground text-sm mt-1">
+          Outstanding VAT debts grouped by aging buckets: current, overdue, delinquent, and critical.
+        </p>
+      </div>
 
-            {/* Detailed Trader Arrears */}
-            <Card>
-                <CardHeader>
-                    <CardTitle className="text-base font-semibold">
-                        Trader Arrears Detail
-                    </CardTitle>
-                </CardHeader>
-                <CardContent>
-                    {aging.traders.length === 0 ? (
-                        <p className="text-sm text-muted-foreground text-center py-8">
-                            No outstanding arrears.
-                        </p>
-                    ) : (
-                        <Table>
-                            <TableHeader>
-                                <TableRow>
-                                    <TableHead>Trader</TableHead>
-                                    <TableHead>Role</TableHead>
-                                    <TableHead>Aging</TableHead>
-                                    <TableHead className="text-right">Owed</TableHead>
-                                    <TableHead className="text-right">Paid</TableHead>
-                                    <TableHead className="text-right">Outstanding</TableHead>
-                                    <TableHead className="text-right">Days</TableHead>
-                                </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                                {aging.traders.map((t) => {
-                                    const cfg = BUCKET_CONFIG[t.agingBucket];
-                                    return (
-                                        <TableRow key={t.traderId}>
-                                            <TableCell className="font-medium">{t.traderName}</TableCell>
-                                            <TableCell>
-                                                <Badge variant="outline" className="text-[10px] capitalize">
-                                                    {t.role}
-                                                </Badge>
-                                            </TableCell>
-                                            <TableCell>
-                                                <Badge variant={cfg.variant} className="text-[10px]">
-                                                    {t.agingBucket}
-                                                </Badge>
-                                            </TableCell>
-                                            <TableCell className="text-right font-mono text-sm">
-                                                {formatRWF(t.totalOwed)}
-                                            </TableCell>
-                                            <TableCell className="text-right font-mono text-sm">
-                                                {formatRWF(t.totalPaid)}
-                                            </TableCell>
-                                            <TableCell className="text-right font-mono text-sm font-medium text-red-600">
-                                                {formatRWF(t.outstanding)}
-                                            </TableCell>
-                                            <TableCell className="text-right font-mono text-sm">
-                                                {t.daysSinceOldest}d
-                                            </TableCell>
-                                        </TableRow>
-                                    );
-                                })}
-                            </TableBody>
-                        </Table>
-                    )}
-                </CardContent>
-            </Card>
-        </div>
-    );
+      {/* Bucket summary */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {buckets.map((bucket) => (
+          <Card key={bucket.key}>
+            <CardHeader className="pb-1 pt-3">
+              <CardTitle className="text-xs font-medium text-muted-foreground">
+                {bucket.label}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pb-3 space-y-1">
+              <p className="text-xl font-bold font-mono">
+                {formatRWF(bucket.data?.total ?? 0)}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {bucket.data?.count ?? 0} trader{(bucket.data?.count ?? 0) !== 1 ? 's' : ''}
+              </p>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      {/* Detailed table */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base font-semibold flex items-center gap-2">
+            <Clock className="h-4 w-4 text-amber-500" />
+            Arrears Detail ({data?.traders.length ?? 0} traders)
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Trader</TableHead>
+                <TableHead>Role</TableHead>
+                <TableHead className="text-right">Total Owed</TableHead>
+                <TableHead className="text-right">Outstanding</TableHead>
+                <TableHead className="text-right">Days</TableHead>
+                <TableHead>Status</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {(!data || data.traders.length === 0) && (
+                <TableRow>
+                  <TableCell colSpan={6} className="text-center py-8 text-muted-foreground text-sm">
+                    No arrears data or insufficient permissions.
+                  </TableCell>
+                </TableRow>
+              )}
+              {data?.traders.map((trader) => (
+                <TableRow key={trader.traderId}>
+                  <TableCell className="font-medium text-xs">{trader.traderName}</TableCell>
+                  <TableCell className="capitalize text-xs text-muted-foreground">{trader.role}</TableCell>
+                  <TableCell className="text-right font-mono text-xs">
+                    {formatRWF(trader.totalOwed)}
+                  </TableCell>
+                  <TableCell className="text-right font-mono text-xs text-red-600 font-semibold">
+                    {formatRWF(trader.outstanding)}
+                  </TableCell>
+                  <TableCell className="text-right text-xs">
+                    {trader.daysSinceOldest ?? '—'}
+                  </TableCell>
+                  <TableCell>
+                    <Badge
+                      variant="secondary"
+                      className={`text-[10px] capitalize ${BUCKET_COLORS[trader.agingBucket] ?? ''}`}
+                    >
+                      {trader.agingBucket}
+                    </Badge>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+    </div>
+  );
 }
