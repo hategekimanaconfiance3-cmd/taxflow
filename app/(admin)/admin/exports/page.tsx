@@ -1,6 +1,9 @@
 import { requireRRASession } from '@/lib/auth-guard';
-import { ExportDropdown } from '@/components/admin/admin-export';
-import { BulkExportButtons } from '@/components/admin/bulk-export-buttons';
+import {
+  ExportNationalData,
+  ExportTaxpayerDirectory,
+  ExportComplianceDataset,
+} from '@/components/admin/bulk-export-buttons';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Download } from 'lucide-react';
 
@@ -23,9 +26,10 @@ export default async function AdminExportsPage() {
             Export Tools
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <BulkExportButtons />
-          <ExportDropdown />
+        <CardContent className="space-y-3">
+          <ExportNationalData />
+          <ExportTaxpayerDirectory />
+          <ExportComplianceDataset />
         </CardContent>
       </Card>
     </div>
