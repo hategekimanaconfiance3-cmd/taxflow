@@ -12,11 +12,8 @@ function createValkeyClient() {
   }
 
   const client = new Redis(REDIS_URL, {
-    maxRetriesPerRequest: 3,
-    retryStrategy: (times: number) => {
-      if (times > 3) return null; // stop retrying after 3 attempts
-      return Math.min(times * 200, 2000);
-    },
+    maxRetriesPerRequest: null,
+    retryStrategy: (times: number) => Math.min(times * 500, 5000),
     lazyConnect: true,
   });
 

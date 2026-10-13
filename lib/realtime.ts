@@ -24,7 +24,9 @@ export function emitToUser(userId: string, event: string, data: Record<string, u
       event,
       data: { ...data, timestamp: Date.now() },
     });
-    pub.publish(CHANNEL, message);
+    void pub.publish(CHANNEL, message).catch((err: unknown) => {
+      console.warn('[Realtime] Failed to publish event:', err);
+    });
   } catch (err) {
     // Gracefully fail — don't break server actions if Valkey is down
     console.warn('[Realtime] Failed to publish event:', err);
@@ -53,9 +55,10 @@ function getPublisher(): Redis {
 
   if (!publisher) {
     publisher = new Redis(REDIS_URL, {
-      maxRetriesPerRequest: 1,
+      maxRetriesPerRequest: null,
       lazyConnect: true,
-      enableOfflineQueue: true,
+      enableOfflineQueue: false,
+      retryStrategy: (times: number) => Math.min(times * 500, 5000),
     });
     publisher.connect().catch(() => {
       // Will be retried on next call

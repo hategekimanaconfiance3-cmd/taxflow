@@ -33,10 +33,13 @@ export function initSocketServer(httpServer: import('http').Server) {
 
   // Valkey pub/sub adapter for multi-server scaling
   const redisOpts = {
-    maxRetriesPerRequest: 3,
+    // Keep pub/sub clients alive while Valkey is temporarily unavailable.
+    // A finite retry count closes the clients and rejects queued commands,
+    // which can surface as unhandled rejections in the adapter.
+    maxRetriesPerRequest: null,
+    enableOfflineQueue: false,
     retryStrategy: (times: number) => {
-      if (times > 3) return null;
-      return Math.min(times * 200, 2000);
+      return Math.min(times * 500, 5000);
     },
   };
 
