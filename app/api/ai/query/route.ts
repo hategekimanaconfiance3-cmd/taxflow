@@ -12,13 +12,14 @@
 // ---------------------------------------------------------------------------
 
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
-import { streamText, tool } from "ai";
+import { stepCountIs, streamText, type ToolSet } from "ai";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import db from "@/db/drizzle";
 import { rraStaff, auditLog } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { headers } from "next/headers";
+import { createHash } from "node:crypto";
 import { consumeRateLimit, getRequestIdentity } from "@/lib/rate-limit";
 import { createTraderTools } from "@/lib/ai/tools/trader-tools";
 import {
@@ -42,6 +43,44 @@ const google = createGoogleGenerativeAI({
 });
 
 const MODEL = google("gemini-2.0-flash");
+
+const requestSchema = z.object({
+    messages: z.array(z.unknown()).min(1).max(20),
+}).strict();
+
+const messageSchema = z.object({
+    role: z.enum(["user", "assistant"]),
+    parts: z.array(z.unknown()).max(40),
+}).passthrough();
+
+const textPartSchema = z.object({ type: z.literal("text"), text: z.string().max(4_000) }).passthrough();
+
+function parseMessages(input: unknown): { role: "user" | "assistant"; content: string }[] | null {
+    const parsed = requestSchema.safeParse(input);
+    if (!parsed.success) return null;
+
+    const messages: { role: "user" | "assistant"; content: string }[] = [];
+    let totalCharacters = 0;
+    for (const candidate of parsed.data.messages) {
+        const message = messageSchema.safeParse(candidate);
+        if (!message.success) return null;
+
+        // Only forward plain text. Client-supplied tool calls/results, files, and
+        // metadata are deliberately excluded from the model context.
+        const content = message.data.parts
+            .map((part) => textPartSchema.safeParse(part))
+            .filter((part) => part.success)
+            .map((part) => part.data.text)
+            .join("\n")
+            .trim();
+        totalCharacters += content.length;
+        if (totalCharacters > 12_000) return null;
+        if (content) messages.push({ role: message.data.role, content });
+    }
+
+    if (messages.length === 0 || messages.at(-1)?.role !== "user") return null;
+    return messages;
+}
 
 // ---------------------------------------------------------------------------
 // System prompts — role-specific
@@ -151,27 +190,23 @@ export async function POST(request: Request) {
     }
 
     // ── 3. Parse request body ────────────────────────────────────────────────
-    let body: { messages?: unknown };
+    let body: unknown;
     try {
         body = await request.json();
     } catch {
         return new Response("Invalid JSON", { status: 400 });
     }
 
-    // Validate messages array
-    if (!Array.isArray(body.messages) || body.messages.length === 0) {
-        return new Response("No messages provided", { status: 400 });
+    const messages = parseMessages(body);
+    if (!messages) {
+        return Response.json({ error: "Invalid chat request. Please shorten your message and try again." }, { status: 400 });
     }
 
     // Extract the latest user message for audit logging
-    const lastUserMsg = [...(body.messages as { role: string; content: unknown }[])]
+    const lastUserMsg = [...messages]
         .reverse()
         .find((m) => m.role === "user");
-
-    const questionText =
-        typeof lastUserMsg?.content === "string"
-            ? lastUserMsg.content.slice(0, 500)
-            : "[structured message]";
+    const questionText = lastUserMsg?.content ?? "";
 
     // ── 4. Prompt injection guard ────────────────────────────────────────────
     // Reject messages that attempt to override system prompt or exfiltrate data
@@ -185,8 +220,8 @@ export async function POST(request: Request) {
         /repeat.{0,30}everything.{0,30}said/i,
     ];
 
-    for (const pattern of INJECTION_PATTERNS) {
-        if (pattern.test(questionText)) {
+    for (const message of messages) {
+        if (message.role === "user" && INJECTION_PATTERNS.some((pattern) => pattern.test(message.content))) {
             return new Response(
                 JSON.stringify({
                     error: "Message blocked: potential prompt injection detected.",
@@ -205,7 +240,8 @@ export async function POST(request: Request) {
             targetId: null,
             metadata: JSON.stringify({
                 role: isTrader ? userRole : `rra_staff:${staffClearance}`,
-                question: questionText,
+                questionHash: createHash("sha256").update(questionText).digest("hex"),
+                questionLength: questionText.length,
             }),
         });
     } catch (error) {
@@ -217,9 +253,7 @@ export async function POST(request: Request) {
     }
 
     // ── 6. Build tools for this role ──────────────────────────────────────────
-    const tools = isTrader
-        ? createTraderTools(userId)
-        : {
+    const rraTools = {
             lookupTrader,
             getTransactions,
             getStockLevels,
@@ -230,20 +264,31 @@ export async function POST(request: Request) {
             getBehavioralAnalysis,
             traceSupplyChain,
         };
+    const tools: ToolSet = isTrader
+        ? createTraderTools(userId)
+        : staffClearance === "super_admin" || staffClearance === "compliance_officer" || staffClearance === "audit_officer"
+            ? rraTools
+            : staffClearance === "stock_officer" || staffClearance === "correction_officer"
+                ? { lookupTrader, getTransactions, getStockLevels, traceSupplyChain }
+                : staffClearance === "reporting_officer"
+                    ? { getSystemStats, getRevenueForecastTool }
+                    : {};
 
     // ── 7. Stream the response ───────────────────────────────────────────────
     try {
         const result = streamText({
             model: MODEL,
             system: isTrader ? TRADER_SYSTEM_PROMPT : RRA_SYSTEM_PROMPT,
-            messages: body.messages as Parameters<typeof streamText>[0]["messages"],
+            messages,
             tools,
-            maxSteps: 5,           // allow multi-tool chaining
+            stopWhen: stepCountIs(5),
             temperature: 0.1,      // low temperature for factual accuracy
-            maxTokens: 2048,
+            maxOutputTokens: 2048,
+            abortSignal: AbortSignal.timeout(30_000),
+            onError: () => console.error("AI query provider stream failed", { userId }),
         });
 
-        return result.toDataStreamResponse();
+        return result.toUIMessageStreamResponse();
     } catch (err) {
         console.error("[AI Query] streamText error:", err);
 
