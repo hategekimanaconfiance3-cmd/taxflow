@@ -51,7 +51,7 @@ const STAFF: StaffSeed[] = [
     // ── Super Admin ─────────────────────────────
     {
         name: "Jean-Pierre Habimana",
-        email: "jphabimana@rra.gov.rw",
+        email: "hategekimanaconfiance3@gmail.com",
         staffId: "SA-001",
         department: "IT Administration",
         role: "super_admin",
