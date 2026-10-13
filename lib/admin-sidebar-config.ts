@@ -289,6 +289,11 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                         href: "/admin/intelligence/unregistered",
                         icon: UserSearch,
                     },
+                    {
+                        label: "AI Assistant",
+                        href: "/admin/intelligence/assistant",
+                        icon: Brain,
+                    },
                 ],
             },
             {

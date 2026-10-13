@@ -17,6 +17,7 @@ import {
     Bell,
     Ship,
     Shield,
+    Brain,
 } from "lucide-react";
 
 export type TraderRole = "manufacturer" | "wholesaler" | "retailer";
@@ -75,6 +76,12 @@ export const SIDEBAR_GROUPS: SidebarGroup[] = [
                 label: "Notifications",
                 href: "/dashboard/notifications",
                 icon: Bell,
+                roles: "all",
+            },
+            {
+                label: "AI Assistant",
+                href: "/dashboard/assistant",
+                icon: Brain,
                 roles: "all",
             },
         ],
