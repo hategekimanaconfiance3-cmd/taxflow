@@ -24,10 +24,10 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
           </h1>
         </div>
 
-        {/* Illustration — served via proxy route to keep blob token server-side */}
+        {/* Public illustration asset */}
         <div className="absolute bottom-0 left-0 right-0 h-[45%] z-0 pointer-events-none">
           <Image
-            src="/api/assets/bars-svg"
+            src="/bars.svg"
             alt="Finance Illustration"
             priority
             fill
