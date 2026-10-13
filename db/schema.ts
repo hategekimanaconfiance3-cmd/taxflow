@@ -678,3 +678,431 @@ export const supportTicketRelations = relations(supportTicket, ({ one }) => ({
   }),
 }));
 
+
+// ---------------------------------------------------------------------------
+// Production Batches — manufacturers declare production quantities per period
+// ---------------------------------------------------------------------------
+
+export const productionBatch = pgTable(
+  'production_batch',
+  {
+    id: text('id')
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    manufacturerId: text('manufacturer_id')
+      .notNull()
+      .references(() => user.id),
+    productId: text('product_id')
+      .notNull()
+      .references(() => product.id),
+    batchReference: text('batch_reference').notNull().unique(), // e.g. BATCH-SOAP-2026-000123
+    declaredQuantity: real('declared_quantity').notNull(),
+    openingStock: real('opening_stock').default(0),
+    approvedLosses: real('approved_losses').default(0),
+    status: text('status').default('declared'), // 'declared' | 'reconciled' | 'independently_supported'
+    periodStart: timestamp('period_start').notNull(),
+    periodEnd: timestamp('period_end').notNull(),
+    notes: text('notes'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at')
+      .defaultNow()
+      .$onUpdate(() => /* @__PURE__ */ new Date())
+      .notNull(),
+  },
+  (table) => [
+    index('prod_batch_manufacturer_idx').on(table.manufacturerId),
+    index('prod_batch_product_idx').on(table.productId),
+    index('prod_batch_status_idx').on(table.status),
+    uniqueIndex('prod_batch_ref_uniq').on(table.batchReference),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// Stock Adjustments — approved stock corrections with audit trail
+// ---------------------------------------------------------------------------
+
+export const stockAdjustment = pgTable(
+  'stock_adjustment',
+  {
+    id: text('id')
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    businessId: text('business_id')
+      .notNull()
+      .references(() => user.id),
+    productId: text('product_id')
+      .notNull()
+      .references(() => product.id),
+    adjustmentType: text('adjustment_type').notNull(), // 'damage' | 'loss' | 'correction' | 'return' | 'opening_stock'
+    quantityDelta: real('quantity_delta').notNull(), // positive = add, negative = remove
+    reason: text('reason').notNull(),
+    approvedById: text('approved_by_id').references(() => user.id), // nullable
+    batchReference: text('batch_reference'), // nullable, links to productionBatch.batchReference
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('stock_adj_business_idx').on(table.businessId),
+    index('stock_adj_product_idx').on(table.productId),
+    index('stock_adj_type_idx').on(table.adjustmentType),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// AI Findings — persistent AI-detected findings with review lifecycle
+// ---------------------------------------------------------------------------
+
+export const aiFinding = pgTable(
+  'ai_finding',
+  {
+    id: text('id')
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    findingType: text('finding_type').notNull(),
+    // 'inventory_discrepancy' | 'dispatch_mismatch' | 'duplicate_transaction' |
+    // 'unusual_quantity' | 'price_anomaly' | 'tax_inconsistency' |
+    // 'production_discrepancy' | 'data_quality'
+    severity: text('severity').notNull(), // 'info' | 'warning' | 'critical'
+    businessId: text('business_id').references(() => user.id), // nullable — some findings are system-level
+    productId: text('product_id').references(() => product.id), // nullable
+    transactionIds: text('transaction_ids'), // JSON array of related transaction IDs
+    observedValue: real('observed_value'),
+    expectedValue: real('expected_value'),
+    difference: real('difference'),
+    differenceUnit: text('difference_unit'), // 'units' | 'rwf' | 'percent'
+    explanation: text('explanation').notNull(),
+    evidenceRefs: text('evidence_refs'), // JSON: { transactionIds[], batchRef?, stockIds[] }
+    detectionMethod: text('detection_method').notNull(), // 'deterministic' | 'statistical' | 'ai'
+    reviewStatus: text('review_status').default('open'), // 'open' | 'under_review' | 'resolved' | 'dismissed' | 'disputed'
+    assignedReviewerId: text('assigned_reviewer_id').references(() => user.id), // nullable
+    resolutionNotes: text('resolution_notes'),
+    resolvedAt: timestamp('resolved_at'),
+    modelVersion: text('model_version'), // e.g. 'reconciliation-v1'
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at')
+      .defaultNow()
+      .$onUpdate(() => /* @__PURE__ */ new Date())
+      .notNull(),
+  },
+  (table) => [
+    index('ai_finding_business_idx').on(table.businessId),
+    index('ai_finding_type_idx').on(table.findingType),
+    index('ai_finding_severity_idx').on(table.severity),
+    index('ai_finding_review_status_idx').on(table.reviewStatus),
+    index('ai_finding_created_idx').on(table.createdAt),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// Risk Assessments — stored risk scores per trader per period
+// ---------------------------------------------------------------------------
+
+export const riskAssessment = pgTable(
+  'risk_assessment',
+  {
+    id: text('id')
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    businessId: text('business_id')
+      .notNull()
+      .references(() => user.id),
+    assessmentDate: timestamp('assessment_date').notNull(),
+    periodStart: timestamp('period_start').notNull(),
+    periodEnd: timestamp('period_end').notNull(),
+    overallScore: integer('overall_score').notNull(), // 0-100
+    riskLevel: text('risk_level').notNull(), // 'low' | 'medium' | 'high' | 'critical'
+    indicatorScores: text('indicator_scores').notNull(),
+    // JSON: { priceDeviation, taxCompliance, transactionPatterns, stockAccuracy,
+    //         historicalFlags, inventoryDiscrepancy, dispatchMismatch }
+    findingIds: text('finding_ids'), // JSON array of aiFinding IDs that contributed
+    scoringMethod: text('scoring_method').default('rules-v1'),
+    dataCompleteness: integer('data_completeness'), // 0-100%
+    reviewStatus: text('review_status').default('pending'), // 'pending' | 'reviewed' | 'actioned'
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('risk_assessment_business_idx').on(table.businessId),
+    index('risk_assessment_date_idx').on(table.assessmentDate),
+    index('risk_assessment_level_idx').on(table.riskLevel),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// AI Audit Log — AI-specific request/response audit trail
+// ---------------------------------------------------------------------------
+
+export const aiAuditLog = pgTable(
+  'ai_audit_log',
+  {
+    id: text('id')
+      .primaryKey()
+      .$defaultFn(() => crypto.randomUUID()),
+    requestedById: text('requested_by_id')
+      .notNull()
+      .references(() => user.id),
+    taskType: text('task_type').notNull(),
+    // 'risk_score' | 'anomaly_detection' | 'revenue_forecast' |
+    // 'audit_recommendation' | 'assistant_query' | 'reconciliation'
+    referencedBusinessId: text('referenced_business_id'), // nullable
+    referencedEntityIds: text('referenced_entity_ids'), // JSON array
+    modelProvider: text('model_provider'), // e.g. 'anthropic', 'google', 'rules-engine'
+    modelVersion: text('model_version'),
+    findingIds: text('finding_ids'), // JSON array of generated findings
+    reviewStatus: text('review_status').default('pending'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('ai_audit_log_requested_by_idx').on(table.requestedById),
+    index('ai_audit_log_task_type_idx').on(table.taskType),
+    index('ai_audit_log_created_idx').on(table.createdAt),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// Relations for new Phase 2 tables
+// ---------------------------------------------------------------------------
+
+export const productionBatchRelations = relations(productionBatch, ({ one }) => ({
+  manufacturer: one(user, {
+    fields: [productionBatch.manufacturerId],
+    references: [user.id],
+    relationName: 'productionBatchManufacturer',
+  }),
+  product: one(product, {
+    fields: [productionBatch.productId],
+    references: [product.id],
+  }),
+}));
+
+export const stockAdjustmentRelations = relations(stockAdjustment, ({ one }) => ({
+  business: one(user, {
+    fields: [stockAdjustment.businessId],
+    references: [user.id],
+    relationName: 'stockAdjustmentBusiness',
+  }),
+  product: one(product, {
+    fields: [stockAdjustment.productId],
+    references: [product.id],
+  }),
+  approvedBy: one(user, {
+    fields: [stockAdjustment.approvedById],
+    references: [user.id],
+    relationName: 'stockAdjustmentApprover',
+  }),
+}));
+
+export const aiFindingRelations = relations(aiFinding, ({ one }) => ({
+  business: one(user, {
+    fields: [aiFinding.businessId],
+    references: [user.id],
+    relationName: 'aiFindingBusiness',
+  }),
+  product: one(product, {
+    fields: [aiFinding.productId],
+    references: [product.id],
+  }),
+  assignedReviewer: one(user, {
+    fields: [aiFinding.assignedReviewerId],
+    references: [user.id],
+    relationName: 'aiFindingReviewer',
+  }),
+}));
+
+export const riskAssessmentRelations = relations(riskAssessment, ({ one }) => ({
+  business: one(user, {
+    fields: [riskAssessment.businessId],
+    references: [user.id],
+  }),
+}));
+
+export const aiAuditLogRelations = relations(aiAuditLog, ({ one }) => ({
+  requestedBy: one(user, {
+    fields: [aiAuditLog.requestedById],
+    references: [user.id],
+  }),
+}));
+
+// ---------------------------------------------------------------------------
+// Production Batches — Manufacturer declared production per period (§5)
+// ---------------------------------------------------------------------------
+
+export const productionBatch = pgTable(
+  'production_batch',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+    productId: text('product_id').notNull().references(() => product.id),
+    batchReference: text('batch_reference').notNull().unique(), // e.g. BATCH-SOAP-2026-000123
+    declaredQuantity: real('declared_quantity').notNull(),
+    openingStock: real('opening_stock').default(0).notNull(),
+    approvedLosses: real('approved_losses').default(0).notNull(),
+    // 'declared' | 'reconciled' | 'independently_supported'
+    status: text('status').default('declared').notNull(),
+    periodStart: timestamp('period_start').notNull(),
+    periodEnd: timestamp('period_end').notNull(),
+    notes: text('notes'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().$onUpdate(() => new Date()).notNull(),
+  },
+  (t) => [
+    index('prod_batch_manufacturer_idx').on(t.manufacturerId),
+    index('prod_batch_product_idx').on(t.productId),
+    index('prod_batch_status_idx').on(t.status),
+    index('prod_batch_ref_idx').on(t.batchReference),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// Stock Adjustments — Approved corrections with full audit trail (§5, §11)
+// ---------------------------------------------------------------------------
+
+export const stockAdjustment = pgTable(
+  'stock_adjustment',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    businessId: text('business_id').notNull().references(() => user.id),
+    productId: text('product_id').notNull().references(() => product.id),
+    // 'damage' | 'loss' | 'correction' | 'return' | 'opening_stock'
+    adjustmentType: text('adjustment_type').notNull(),
+    quantityDelta: real('quantity_delta').notNull(), // positive = add, negative = remove
+    reason: text('reason').notNull(),
+    approvedById: text('approved_by_id').references(() => user.id),
+    batchReference: text('batch_reference'), // optional link to productionBatch
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (t) => [
+    index('stock_adj_business_idx').on(t.businessId),
+    index('stock_adj_product_idx').on(t.productId),
+    index('stock_adj_type_idx').on(t.adjustmentType),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// AI Findings — Persistent findings with full review lifecycle (§15)
+// ---------------------------------------------------------------------------
+
+export const aiFinding = pgTable(
+  'ai_finding',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    // 'inventory_discrepancy' | 'dispatch_mismatch' | 'duplicate_transaction'
+    // | 'unusual_quantity' | 'price_anomaly' | 'tax_inconsistency'
+    // | 'production_discrepancy' | 'data_quality'
+    findingType: text('finding_type').notNull(),
+    // 'info' | 'warning' | 'critical'
+    severity: text('severity').notNull(),
+    businessId: text('business_id').references(() => user.id), // nullable — some are system-level
+    productId: text('product_id').references(() => product.id),
+    transactionIds: text('transaction_ids'), // JSON array of related txn IDs
+    observedValue: real('observed_value'),
+    expectedValue: real('expected_value'),
+    difference: real('difference'),
+    differenceUnit: text('difference_unit'), // 'units' | 'rwf' | 'percent'
+    explanation: text('explanation').notNull(),
+    evidenceRefs: text('evidence_refs'), // JSON: { transactionIds[], batchRef?, stockIds[] }
+    // 'deterministic' | 'statistical' | 'ai'
+    detectionMethod: text('detection_method').notNull(),
+    // 'open' | 'under_review' | 'resolved' | 'dismissed' | 'disputed'
+    reviewStatus: text('review_status').default('open').notNull(),
+    assignedReviewerId: text('assigned_reviewer_id').references(() => user.id),
+    resolutionNotes: text('resolution_notes'),
+    resolvedAt: timestamp('resolved_at'),
+    modelVersion: text('model_version').default('reconciliation-v1'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().$onUpdate(() => new Date()).notNull(),
+  },
+  (t) => [
+    index('ai_finding_business_idx').on(t.businessId),
+    index('ai_finding_type_idx').on(t.findingType),
+    index('ai_finding_severity_idx').on(t.severity),
+    index('ai_finding_status_idx').on(t.reviewStatus),
+    index('ai_finding_created_idx').on(t.createdAt),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// Risk Assessments — Stored risk scores per trader per period (§15)
+// ---------------------------------------------------------------------------
+
+export const riskAssessment = pgTable(
+  'risk_assessment',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    businessId: text('business_id').notNull().references(() => user.id),
+    assessmentDate: timestamp('assessment_date').notNull(),
+    periodStart: timestamp('period_start').notNull(),
+    periodEnd: timestamp('period_end').notNull(),
+    overallScore: integer('overall_score').notNull(), // 0-100
+    // 'low' | 'medium' | 'high' | 'critical'
+    riskLevel: text('risk_level').notNull(),
+    // JSON: { priceDeviation, taxCompliance, transactionPatterns, stockAccuracy, historicalFlags, inventoryDiscrepancy, dispatchMismatch }
+    indicatorScores: text('indicator_scores').notNull(),
+    findingIds: text('finding_ids'), // JSON array of contributing aiFinding IDs
+    scoringMethod: text('scoring_method').default('rules-v1').notNull(),
+    dataCompleteness: integer('data_completeness').default(100), // 0–100%
+    // 'pending' | 'reviewed' | 'actioned'
+    reviewStatus: text('review_status').default('pending').notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (t) => [
+    index('risk_assessment_business_idx').on(t.businessId),
+    index('risk_assessment_date_idx').on(t.assessmentDate),
+    index('risk_assessment_level_idx').on(t.riskLevel),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// AI Audit Log — Every AI request/output logged (§13)
+// ---------------------------------------------------------------------------
+
+export const aiAuditLog = pgTable(
+  'ai_audit_log',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    requestedById: text('requested_by_id').notNull().references(() => user.id),
+    // 'risk_score' | 'anomaly_detection' | 'revenue_forecast'
+    // | 'audit_recommendation' | 'assistant_query' | 'reconciliation'
+    taskType: text('task_type').notNull(),
+    referencedBusinessId: text('referenced_business_id'),
+    referencedEntityIds: text('referenced_entity_ids'), // JSON array
+    modelProvider: text('model_provider'), // 'anthropic' | 'google' | 'rules-engine'
+    modelVersion: text('model_version'),
+    findingIds: text('finding_ids'), // JSON array of generated finding IDs
+    // 'pending' | 'reviewed'
+    reviewStatus: text('review_status').default('pending').notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (t) => [
+    index('ai_audit_requester_idx').on(t.requestedById),
+    index('ai_audit_task_idx').on(t.taskType),
+    index('ai_audit_created_idx').on(t.createdAt),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// Relations for new tables
+// ---------------------------------------------------------------------------
+
+export const productionBatchRelations = relations(productionBatch, ({ one }) => ({
+  manufacturer: one(user, { fields: [productionBatch.manufacturerId], references: [user.id] }),
+  product: one(product, { fields: [productionBatch.productId], references: [product.id] }),
+}));
+
+export const stockAdjustmentRelations = relations(stockAdjustment, ({ one }) => ({
+  business: one(user, { fields: [stockAdjustment.businessId], references: [user.id] }),
+  product: one(product, { fields: [stockAdjustment.productId], references: [product.id] }),
+  approvedBy: one(user, { fields: [stockAdjustment.approvedById], references: [user.id] }),
+}));
+
+export const aiFindingRelations = relations(aiFinding, ({ one }) => ({
+  business: one(user, { fields: [aiFinding.businessId], references: [user.id] }),
+  product: one(product, { fields: [aiFinding.productId], references: [product.id] }),
+  assignedReviewer: one(user, { fields: [aiFinding.assignedReviewerId], references: [user.id] }),
+}));
+
+export const riskAssessmentRelations = relations(riskAssessment, ({ one }) => ({
+  business: one(user, { fields: [riskAssessment.businessId], references: [user.id] }),
+}));
+
+export const aiAuditLogRelations = relations(aiAuditLog, ({ one }) => ({
+  requestedBy: one(user, { fields: [aiAuditLog.requestedById], references: [user.id] }),
+}));
