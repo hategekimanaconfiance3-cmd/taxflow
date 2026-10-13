@@ -1,4 +1,4 @@
-import { relations } from 'drizzle-orm';
+import { relations, sql } from 'drizzle-orm';
 import { pgTable, text, timestamp, boolean, integer, real, jsonb, index, uniqueIndex, bigint } from 'drizzle-orm/pg-core';
 
 // auth models
@@ -125,7 +125,11 @@ export const rraStaff = pgTable(
       .$onUpdate(() => /* @__PURE__ */ new Date())
       .notNull(),
   },
-  (table) => [index('rra_staff_userId_idx').on(table.userId), index('rra_staff_staffId_idx').on(table.staffId)],
+  (table) => [
+    index('rra_staff_userId_idx').on(table.userId),
+    index('rra_staff_staffId_idx').on(table.staffId),
+    uniqueIndex('rra_staff_staff_id_ci_unique').on(sql`lower(${table.staffId})`),
+  ],
 );
 
 // ---------------------------------------------------------------------------

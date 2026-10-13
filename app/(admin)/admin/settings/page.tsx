@@ -1,14 +1,33 @@
 import { requireRRASession } from '@/lib/auth-guard';
+import { asc, eq } from 'drizzle-orm';
+import db from '@/db/drizzle';
+import { rraStaff, user } from '@/db/schema';
 import { getSystemConfig } from '@/lib/actions/system-config.action';
 import { SystemConfigEditor } from '@/components/admin/system-config-editor';
-import { StaffManagement } from '@/components/admin/staff-management';
+import { StaffManagement, type StaffManagementMember } from '@/components/admin/staff-management';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Settings, Users } from 'lucide-react';
 
 export default async function AdminSettingsPage() {
-  await requireRRASession();
+  const { staff } = await requireRRASession();
 
   const config = await getSystemConfig();
+  let staffMembers: StaffManagementMember[] = [];
+  if (staff.clearanceLevel === 'super_admin') {
+    staffMembers = await db
+      .select({
+        id: rraStaff.id,
+        staffId: rraStaff.staffId,
+        name: user.name,
+        email: user.email,
+        department: rraStaff.department,
+        clearanceLevel: rraStaff.clearanceLevel,
+        isActive: rraStaff.isActive,
+      })
+      .from(rraStaff)
+      .innerJoin(user, eq(rraStaff.userId, user.id))
+      .orderBy(asc(rraStaff.staffId));
+  }
 
   return (
     <div className="space-y-6">
@@ -43,7 +62,11 @@ export default async function AdminSettingsPage() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <StaffManagement />
+          {staff.clearanceLevel === 'super_admin' ? (
+            <StaffManagement staffMembers={staffMembers} />
+          ) : (
+            <p className="text-muted-foreground text-sm">Staff account management is available to Super Admins.</p>
+          )}
         </CardContent>
       </Card>
     </div>

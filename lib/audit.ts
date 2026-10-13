@@ -1,7 +1,8 @@
-'use server';
-
+import 'server-only';
 import db from '@/db/drizzle';
 import { auditLog } from '@/db/schema';
+
+type AuditLogWriter = (entry: typeof auditLog.$inferInsert) => Promise<void>;
 
 /**
  * Log an auditable event.
@@ -15,8 +16,8 @@ export async function logAudit(params: {
   metadata?: Record<string, unknown>;
   beforeState?: Record<string, unknown>;
   afterState?: Record<string, unknown>;
-}): Promise<void> {
-  await db.insert(auditLog).values({
+}, writer?: AuditLogWriter): Promise<void> {
+  const entry: typeof auditLog.$inferInsert = {
     userId: params.userId,
     action: params.action,
     targetType: params.targetType ?? null,
@@ -24,5 +25,12 @@ export async function logAudit(params: {
     metadata: params.metadata ? JSON.stringify(params.metadata) : null,
     beforeState: params.beforeState,
     afterState: params.afterState,
-  });
+  };
+
+  if (writer) {
+    await writer(entry);
+    return;
+  }
+
+  await db.insert(auditLog).values(entry);
 }
