@@ -41,7 +41,14 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
       <div className="relative flex w-full flex-col items-center justify-center bg-gray-50 lg:w-1/2">
         {/* Background Pattern */}
         <div className="absolute inset-0 z-0 opacity-40">
-          <Image src="/dots.png" alt="Background Pattern" fill className="object-cover" />
+          <Image
+            src="/dots.png"
+            alt="Background Pattern"
+            fill
+            sizes="(min-width: 1024px) 50vw, 100vw"
+            loading="eager"
+            className="object-cover"
+          />
         </div>
 
         {/* System Status — top-left of the right panel */}
