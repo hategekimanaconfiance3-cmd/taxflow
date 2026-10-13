@@ -6,6 +6,8 @@ import { citizen, tinRecord } from "@/db/tin-schema";
 import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { consumeRateLimit, getRequestIdentity } from "@/lib/rate-limit";
+import { z } from "zod";
 // ---------------------------------------------------------------------------
 // Auth Server Actions
 // Queries the TIN database (mock government registry) for citizen/business info
@@ -21,13 +23,23 @@ export type IdLookupResult =
  * Queries the tin_db for real records.
  */
 export async function validateId(nationalId: string): Promise<IdLookupResult> {
-    const idRegex = /^\d{16}$/;
-
-    if (!idRegex.test(nationalId)) {
+    const parsedId = z.string().regex(/^\d{16}$/).safeParse(nationalId);
+    if (!parsedId.success) {
         return { success: false, error: "ID must be exactly 16 digits." };
     }
 
     try {
+        const requestHeaders = await headers();
+        const limit = await consumeRateLimit(
+            "national-id-lookup",
+            getRequestIdentity(requestHeaders),
+            5,
+            60,
+        );
+        if (!limit.allowed) {
+            return { success: false, error: "Too many verification attempts. Please try again shortly." };
+        }
+
         // Look up citizen by national ID
         const citizenResult = await tinDb
             .select()

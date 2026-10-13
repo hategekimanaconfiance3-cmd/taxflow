@@ -221,9 +221,11 @@ async function seed(): Promise<void> {
     await db.delete(product);
     console.log("  ✓ Cleared product");
 
-    // Tax payment, audit log, notification (FK to user only)
+    // This guarded development-only reset clears protected audit history explicitly.
+    await db.execute(sql`TRUNCATE TABLE audit_log`);
+
+    // Tax payment and notification (FK to user only)
     await db.delete(taxPayment);
-    await db.delete(auditLog);
     await db.delete(notification);
     console.log("  ✓ Cleared tax_payment, audit_log, notification");
 

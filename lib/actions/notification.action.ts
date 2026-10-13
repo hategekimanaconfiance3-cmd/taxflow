@@ -4,41 +4,6 @@ import db from "@/db/drizzle";
 import { notification } from "@/db/schema";
 import { requireTraderSession } from "@/lib/auth-guard";
 import { eq, desc, and, sql } from "drizzle-orm";
-import { emitToUser } from "@/lib/realtime";
-
-// ---------------------------------------------------------------------------
-// Create a notification
-// ---------------------------------------------------------------------------
-
-export async function createNotification(data: {
-    userId: string;
-    type: string;
-    title: string;
-    message: string;
-    link?: string;
-}) {
-    const [notif] = await db
-        .insert(notification)
-        .values({
-            userId: data.userId,
-            type: data.type,
-            title: data.title,
-            message: data.message,
-            link: data.link ?? null,
-        })
-        .returning();
-
-    // Real-time push
-    emitToUser(data.userId, "notification", {
-        id: notif.id,
-        type: notif.type,
-        title: notif.title,
-        message: notif.message,
-        link: notif.link,
-    });
-
-    return notif;
-}
 
 // ---------------------------------------------------------------------------
 // Get notifications for current user

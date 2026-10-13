@@ -1,7 +1,19 @@
 import { relations } from 'drizzle-orm';
-import { pgTable, text, timestamp, boolean, integer, real, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, boolean, integer, real, jsonb, index, uniqueIndex, bigint } from 'drizzle-orm/pg-core';
 
 // auth models
+
+// Better Auth's database-backed limiter keeps limits shared across instances.
+export const rateLimit = pgTable(
+  'rate_limit',
+  {
+    id: text('id').primaryKey(),
+    key: text('key').notNull().unique(),
+    count: integer('count').notNull(),
+    lastRequest: bigint('last_request', { mode: 'number' }).notNull(),
+  },
+  (table) => [index('rate_limit_last_request_idx').on(table.lastRequest)],
+);
 
 export const user = pgTable(
   'user',
@@ -312,6 +324,8 @@ export const auditLog = pgTable(
     targetType: text('target_type'), // "transaction", "user", "product"
     targetId: text('target_id'),
     metadata: text('metadata'), // JSON string for extra context
+    beforeState: jsonb('before_state').$type<Record<string, unknown>>(),
+    afterState: jsonb('after_state').$type<Record<string, unknown>>(),
     ipAddress: text('ip_address'), // source IP for financial audit trail
     createdAt: timestamp('created_at').defaultNow().notNull(),
   },

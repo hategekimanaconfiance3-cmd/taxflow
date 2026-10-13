@@ -4,7 +4,7 @@
 
 import { eq, and, sql, gte, lte, inArray } from 'drizzle-orm';
 import db from '@/db/drizzle';
-import { transaction, stock, product, user, stockAdjustment, productionBatch, aiFinding } from '@/db/schema';
+import { transaction, stock, product, user, stockAdjustment, productionBatch, aiFinding, aiAuditLog } from '@/db/schema';
 import {
   calculateExpectedClosing,
   calculateDiscrepancy,
@@ -159,44 +159,137 @@ export async function reconcileInventory(
 export async function reconcileAndCreateFindings(
   periodStart: Date,
   periodEnd: Date,
-): Promise<{ scanned: number; findingsCreated: number; findings: string[] }> {
+  requestedById: string,
+): Promise<{ scanned: number; findingsCreated: number; findingsRefreshed: number; findings: string[] }> {
   // Get all active business+product pairs with stock records
   const pairs = await db
     .select({ businessId: stock.businessId, productId: stock.productId })
     .from(stock)
     .limit(500);
 
-  let findingsCreated = 0;
-  const findingIds: string[] = [];
+  const discrepancies: Array<{
+    businessId: string;
+    productId: string;
+    result: FullReconciliationResult;
+  }> = [];
 
   for (const pair of pairs) {
     const result = await reconcileInventory(pair.businessId, pair.productId, periodStart, periodEnd);
     if (!result || !result.hasDiscrepancy) continue;
-
-    // Create a persistent aiFinding
-    const [finding] = await db.insert(aiFinding).values({
-      findingType: 'inventory_discrepancy',
-      severity: Math.abs(result.discrepancyPct) > 25 ? 'critical' : Math.abs(result.discrepancyPct) > 10 ? 'warning' : 'info',
-      businessId: pair.businessId,
-      productId: pair.productId,
-      observedValue: result.recordedClosing,
-      expectedValue: result.expectedClosing,
-      difference: result.discrepancy,
-      differenceUnit: 'units',
-      explanation: result.explanation,
-      evidenceRefs: JSON.stringify({ periodStart, periodEnd }),
-      detectionMethod: 'deterministic',
-      reviewStatus: 'open',
-      modelVersion: 'reconciliation-v1',
-    }).returning({ id: aiFinding.id });
-
-    if (finding) {
-      findingIds.push(finding.id);
-      findingsCreated++;
-    }
+    discrepancies.push({ businessId: pair.businessId, productId: pair.productId, result });
   }
 
-  return { scanned: pairs.length, findingsCreated, findings: findingIds };
+  const findingIds = await db.transaction(async (tx) => {
+    // Serialize reconciliation writers so concurrent scans cannot create duplicate open findings.
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(7056509920059715)`);
+    const createdIds: string[] = [];
+    const refreshedIds: string[] = [];
+    const findingChanges: Array<Record<string, unknown>> = [];
+
+    for (const { businessId, productId, result } of discrepancies) {
+      // Keep one actionable open finding per business/product. Repeated scans
+      // must not flood the officer queue with the same unresolved discrepancy.
+      const [existing] = await tx
+        .select({
+          id: aiFinding.id,
+          observedValue: aiFinding.observedValue,
+          expectedValue: aiFinding.expectedValue,
+          difference: aiFinding.difference,
+          evidenceRefs: aiFinding.evidenceRefs,
+        })
+        .from(aiFinding)
+        .where(and(
+          eq(aiFinding.businessId, businessId),
+          eq(aiFinding.productId, productId),
+          eq(aiFinding.findingType, 'inventory_discrepancy'),
+          eq(aiFinding.reviewStatus, 'open'),
+        ))
+        .limit(1);
+      const severity = Math.abs(result.discrepancyPct) > 25 ? 'critical' : Math.abs(result.discrepancyPct) > 10 ? 'warning' : 'info';
+      const evidenceRefs = JSON.stringify({ periodStart, periodEnd });
+      const nextState = {
+        observedValue: result.recordedClosing,
+        expectedValue: result.expectedClosing,
+        difference: result.discrepancy,
+        explanation: result.explanation,
+        evidenceRefs,
+        severity,
+        updatedAt: new Date(),
+      };
+      const auditState = {
+        observedValue: result.recordedClosing,
+        expectedValue: result.expectedClosing,
+        difference: result.discrepancy,
+        severity,
+        evidenceRefs,
+      };
+
+      if (existing) {
+        await tx.update(aiFinding).set(nextState).where(eq(aiFinding.id, existing.id));
+        refreshedIds.push(existing.id);
+        findingChanges.push({
+          id: existing.id,
+          action: 'refreshed',
+          before: {
+            observedValue: existing.observedValue,
+            expectedValue: existing.expectedValue,
+            difference: existing.difference,
+            evidenceRefs: existing.evidenceRefs,
+          },
+          after: auditState,
+        });
+        continue;
+      }
+
+      const [finding] = await tx.insert(aiFinding).values({
+        findingType: 'inventory_discrepancy',
+        severity,
+        businessId,
+        productId,
+        observedValue: result.recordedClosing,
+        expectedValue: result.expectedClosing,
+        difference: result.discrepancy,
+        differenceUnit: 'units',
+        explanation: result.explanation,
+        evidenceRefs,
+        detectionMethod: 'deterministic',
+        reviewStatus: 'open',
+        modelVersion: 'reconciliation-v1',
+      }).returning({ id: aiFinding.id });
+
+      if (finding) {
+        createdIds.push(finding.id);
+        findingChanges.push({ id: finding.id, action: 'created', after: auditState });
+      }
+    }
+
+    await tx.insert(aiAuditLog).values({
+      requestedById,
+      taskType: 'reconciliation',
+      referencedEntityIds: JSON.stringify({
+        scanned: pairs.length,
+        discrepancies: discrepancies.length,
+        createdFindingIds: createdIds,
+        refreshedFindingIds: refreshedIds,
+        changes: findingChanges,
+        periodStart,
+        periodEnd,
+      }),
+      findingIds: JSON.stringify([...createdIds, ...refreshedIds]),
+      modelProvider: 'rules-engine',
+      modelVersion: 'reconciliation-v1',
+      reviewStatus: 'pending',
+    });
+
+    return { createdIds, refreshedIds };
+  });
+
+  return {
+    scanned: pairs.length,
+    findingsCreated: findingIds.createdIds.length,
+    findingsRefreshed: findingIds.refreshedIds.length,
+    findings: [...findingIds.createdIds, ...findingIds.refreshedIds],
+  };
 }
 
 // ---------------------------------------------------------------------------

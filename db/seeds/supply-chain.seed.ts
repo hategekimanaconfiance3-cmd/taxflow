@@ -1,7 +1,7 @@
 import "dotenv/config";
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
-import { eq, inArray, or } from "drizzle-orm";
+import { eq, inArray, or, sql } from "drizzle-orm";
 import { hashPassword } from "better-auth/crypto";
 import {
     user,
@@ -271,10 +271,11 @@ async function seed() {
 
     const hashedPassword = await hashPassword(SEED_PASSWORD);
 
+    await db.execute(sql`TRUNCATE TABLE audit_log`);
+
     // ── 1. Clean existing supply chain data (reverse FK order) ──────────
 
     console.log("  🗑  Clearing existing supply chain data...");
-    await db.delete(auditLog);
     await db.delete(vatRecord);
     await db.delete(transaction);
     await db.delete(stock);

@@ -5,7 +5,7 @@ import db from "@/db/drizzle";
 import { supportTicket, user } from "@/db/schema";
 import { requireRRASession } from "@/lib/auth-guard";
 import { logAudit } from "@/lib/audit";
-import { createNotification } from "@/lib/actions/notification.action";
+import { createNotification } from "@/lib/notifications";
 
 // ---------------------------------------------------------------------------
 // Get all tickets (admin-facing, filterable by status)
@@ -95,7 +95,7 @@ export async function resolveTicket(
     ticketId: string,
     resolution: string,
 ): Promise<{ success: true }> {
-    const { staff, ...session } = await requireRRASession();
+    const { staff, ...session } = await requireRRASession("super_admin", "compliance_officer");
 
     if (!resolution?.trim()) throw new Error("Resolution is required.");
 

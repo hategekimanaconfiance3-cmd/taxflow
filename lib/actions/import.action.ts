@@ -5,7 +5,7 @@ import db from "@/db/drizzle";
 import { importDeclaration, product, stock, user, auditLog } from "@/db/schema";
 import { requireTraderSession, requireRRASession } from "@/lib/auth-guard";
 import { logAudit } from "@/lib/audit";
-import { createNotification } from "@/lib/actions/notification.action";
+import { createNotification } from "@/lib/notifications";
 import { emitToUser } from "@/lib/realtime";
 
 // ---------------------------------------------------------------------------

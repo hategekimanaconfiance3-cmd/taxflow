@@ -13,12 +13,16 @@ export async function logAudit(params: {
   targetType?: string;
   targetId?: string;
   metadata?: Record<string, unknown>;
-}) {
+  beforeState?: Record<string, unknown>;
+  afterState?: Record<string, unknown>;
+}): Promise<void> {
   await db.insert(auditLog).values({
     userId: params.userId,
     action: params.action,
     targetType: params.targetType ?? null,
     targetId: params.targetId ?? null,
     metadata: params.metadata ? JSON.stringify(params.metadata) : null,
+    beforeState: params.beforeState,
+    afterState: params.afterState,
   });
 }

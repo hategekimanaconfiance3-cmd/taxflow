@@ -2,7 +2,7 @@
 
 import { eq, desc, sql, and, inArray } from "drizzle-orm";
 import db from "@/db/drizzle";
-import { notification, user } from "@/db/schema";
+import { notification, rraStaff, user } from "@/db/schema";
 import { requireRRASession } from "@/lib/auth-guard";
 
 // ---------------------------------------------------------------------------
@@ -27,8 +27,10 @@ export async function getAdminNotifications(limit = 50) {
         })
         .from(notification)
         .innerJoin(user, eq(notification.userId, user.id))
+        .innerJoin(rraStaff, eq(rraStaff.userId, user.id))
+        .where(eq(rraStaff.isActive, true))
         .orderBy(desc(notification.createdAt))
-        .limit(limit);
+        .limit(Math.min(Math.max(Math.floor(limit), 1), 100));
 
     return results;
 }
@@ -94,7 +96,7 @@ export async function sendNotificationToTrader(
     message: string,
     link?: string,
 ) {
-    await requireRRASession();
+    await requireRRASession("compliance_officer", "audit_officer");
 
     if (!title.trim() || !message.trim()) {
         throw new Error("Title and message are required.");

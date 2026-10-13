@@ -5,7 +5,7 @@ import db from '@/db/drizzle';
 import { auditLog, vatRecord, taxPayment, user } from '@/db/schema';
 import { requireTraderSession, requireRRASession } from '@/lib/auth-guard';
 import { logAudit } from '@/lib/audit';
-import { createNotification } from '@/lib/actions/notification.action';
+import { createNotification } from '@/lib/notifications';
 import { getSystemConfig } from '@/lib/actions/system-config.action';
 import { taxPaymentSubmissionSchema } from '@/lib/validation/tax-payment.schema';
 
@@ -74,7 +74,7 @@ export async function recordTaxPayment(data: {
   amount: number;
   method: 'mobile_money' | 'bank_transfer' | 'cash';
   reference?: string;
-}, idempotencyKey: string) {
+}, idempotencyKey: string): Promise<typeof taxPayment.$inferSelect> {
   const session = await requireTraderSession();
   const parsed = taxPaymentSubmissionSchema.safeParse({ ...data, idempotencyKey });
   if (!parsed.success) {
@@ -170,6 +170,13 @@ export async function recordTaxPayment(data: {
       action: 'TAX_PAYMENT_SUBMITTED',
       targetType: 'tax_payment',
       targetId: createdPayment.id,
+      beforeState: { status: null },
+      afterState: {
+        status: createdPayment.status,
+        amount: createdPayment.amount,
+        method: createdPayment.method,
+        reference: createdPayment.reference,
+      },
       metadata: JSON.stringify({
         amount: paymentInput.amount,
         method: paymentInput.method,

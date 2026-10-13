@@ -19,6 +19,7 @@ import db from "@/db/drizzle";
 import { rraStaff, auditLog } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { headers } from "next/headers";
+import { consumeRateLimit, getRequestIdentity } from "@/lib/rate-limit";
 import { createTraderTools } from "@/lib/ai/tools/trader-tools";
 import {
     lookupTrader,
@@ -93,6 +94,34 @@ export async function POST(request: Request) {
     }
 
     const userId = session.user.id;
+    try {
+        const limit = await consumeRateLimit(
+            "ai-query",
+            `${userId}:${getRequestIdentity(request.headers)}`,
+            20,
+            60,
+        );
+        if (!limit.allowed) {
+            console.warn("AI query rate limit exceeded", { userId });
+            return new Response(
+                JSON.stringify({ error: "Too many AI requests. Please try again shortly." }),
+                {
+                    status: 429,
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Retry-After": String(limit.retryAfterSeconds),
+                    },
+                },
+            );
+        }
+    } catch (error) {
+        console.error("AI query rate limit unavailable", error);
+        return new Response(
+            JSON.stringify({ error: "The AI service is temporarily unavailable." }),
+            { status: 503, headers: { "Content-Type": "application/json" } },
+        );
+    }
+
     const userRole = session.user.role as string;
 
     // ── 2. Determine role context ─────────────────────────────────────────────
@@ -179,8 +208,12 @@ export async function POST(request: Request) {
                 question: questionText,
             }),
         });
-    } catch {
-        // Non-fatal — don't block the query if audit log fails
+    } catch (error) {
+        console.error("AI query audit logging failed", error);
+        return new Response(
+            JSON.stringify({ error: "The AI service is temporarily unavailable." }),
+            { status: 503, headers: { "Content-Type": "application/json" } },
+        );
     }
 
     // ── 6. Build tools for this role ──────────────────────────────────────────

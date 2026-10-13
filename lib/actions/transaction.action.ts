@@ -11,7 +11,7 @@ import {
 } from '@/lib/auth-guard';
 import { logAudit } from '@/lib/audit';
 import { emitToUser } from '@/lib/realtime';
-import { createNotification } from '@/lib/actions/notification.action';
+import { createNotification } from '@/lib/notifications';
 import { getTaxComplianceStatus, checkAndAlertCompliance } from '@/lib/actions/compliance.action';
 import { getSystemConfig } from '@/lib/actions/system-config.action';
 import { validatePriceFloor } from '@/lib/ai/price-suggestion';
@@ -325,6 +325,17 @@ export async function confirmTransaction(transactionId: string) {
       action: 'TRANSACTION_CONFIRMED',
       targetType: 'transaction',
       targetId: lockedTxn.id,
+      beforeState: {
+        status: 'pending',
+        sellerStockQuantity: sellerStock.quantity,
+        buyerStockQuantity: buyerStock?.quantity ?? 0,
+      },
+      afterState: {
+        status: 'confirmed',
+        sellerStockQuantity: sellerStock.quantity - lockedTxn.quantity,
+        buyerStockQuantity: (buyerStock?.quantity ?? 0) + lockedTxn.quantity,
+        vatAmount: lockedTxn.vatAmount,
+      },
       metadata: JSON.stringify({
         sellerId: lockedTxn.sellerId,
         quantity: lockedTxn.quantity,
@@ -392,6 +403,8 @@ export async function rejectTransaction(transactionId: string) {
       action: 'TRANSACTION_REJECTED',
       targetType: 'transaction',
       targetId: lockedTxn.id,
+      beforeState: { status: 'pending' },
+      afterState: { status: 'rejected' },
       metadata: JSON.stringify({ sellerId: lockedTxn.sellerId }),
     });
 

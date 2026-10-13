@@ -21,6 +21,22 @@ export const auth = betterAuth({
     provider: 'pg',
     schema,
   }),
+  rateLimit: {
+    enabled: true,
+    window: 60,
+    max: 100,
+    storage: 'database',
+    modelName: 'rateLimit',
+    customRules: {
+      '/sign-in/email': { window: 60, max: 5 },
+      '/sign-in/username': { window: 60, max: 5 },
+      '/sign-up/email': { window: 60, max: 5 },
+      '/email-otp/send-verification-otp': { window: 300, max: 3 },
+      '/email-otp/verify-email': { window: 300, max: 5 },
+      '/phone-number/send-otp': { window: 300, max: 3 },
+      '/phone-number/verify': { window: 300, max: 5 },
+    },
+  },
   emailAndPassword: {
     enabled: true,
     requireEmailVerification: true,

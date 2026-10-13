@@ -41,6 +41,7 @@ function severityBadge(severity: string) {
     high:     'bg-orange-100 text-orange-700 border-orange-200',
     medium:   'bg-amber-100 text-amber-700 border-amber-200',
     low:      'bg-blue-100 text-blue-700 border-blue-200',
+    warning:  'bg-amber-100 text-amber-700 border-amber-200',
     info:     'bg-slate-100 text-slate-600 border-slate-200',
   };
   return (
@@ -65,6 +66,7 @@ function statusBadge(status: string) {
 }
 
 const TYPE_LABELS: Record<string, string> = {
+  inventory_discrepancy: 'Inventory Discrepancy',
   stock_discrepancy:     'Stock Discrepancy',
   underreporting:        'Underreporting',
   price_anomaly:         'Price Anomaly',
@@ -86,7 +88,7 @@ export default async function IntelligenceHubPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  await requireRRASession();
+  const { staff } = await requireRRASession();
   const params = await searchParams;
   const activeTab = params.tab ?? 'all';
 
@@ -196,7 +198,7 @@ export default async function IntelligenceHubPage({
           <StatCard
             title="Last Scan"
             value={stats.lastScanAt ? new Date(stats.lastScanAt).toLocaleDateString() : 'Never'}
-            description="Reconciliation scan date"
+            description="Most recent reconciliation run"
             icon={<CalendarDays className="h-4 w-4" />}
           />
         </div>
@@ -215,6 +217,9 @@ export default async function IntelligenceHubPage({
             View all <ChevronRight className="h-3 w-3" />
           </Link>
         </div>
+        <p className="text-xs text-muted-foreground mb-3">
+          Inventory discrepancies are screening signals for officer review. The current scan compares declared movement over 30 days with recorded current stock; it is not a tax assessment.
+        </p>
 
         {/* Tab filter */}
         <div className="flex items-center gap-1 border-b mb-4">
@@ -308,7 +313,10 @@ export default async function IntelligenceHubPage({
         </h2>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {/* Server action buttons live in a client component */}
-          <IntelligenceActionButtons />
+          <IntelligenceActionButtons
+            canRunReconciliation={['super_admin', 'stock_officer', 'compliance_officer', 'audit_officer'].includes(staff.clearanceLevel)}
+            canRunDataQuality={['super_admin', 'compliance_officer', 'audit_officer'].includes(staff.clearanceLevel)}
+          />
 
           {/* Pure link cards */}
           <Link href="/admin/anomalies">

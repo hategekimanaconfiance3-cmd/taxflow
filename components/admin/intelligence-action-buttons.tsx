@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Card, CardContent } from '@/components/ui/card';
 import { ScanSearch, Database, Loader2, CheckCircle2, XCircle } from 'lucide-react';
 import { runReconciliationScan } from '@/lib/actions/ai-finding.action';
@@ -17,7 +18,7 @@ interface ActionCardProps {
   iconBg: string;
   title: string;
   description: string;
-  onAction: () => Promise<void>;
+  onAction: () => Promise<string | void>;
 }
 
 function ActionCard({ icon, iconBg, title, description, onAction }: ActionCardProps) {
@@ -29,9 +30,9 @@ function ActionCard({ icon, iconBg, title, description, onAction }: ActionCardPr
     setState('loading');
     setMsg('');
     try {
-      await onAction();
+      const result = await onAction();
       setState('success');
-      setMsg('Done!');
+      setMsg(result || 'Done!');
     } catch (err) {
       setState('error');
       setMsg(String(err));
@@ -81,20 +82,29 @@ function ActionCard({ icon, iconBg, title, description, onAction }: ActionCardPr
 // These cards call server actions (imported from their respective modules).
 // ---------------------------------------------------------------------------
 
-export function IntelligenceActionButtons() {
+export function IntelligenceActionButtons({
+  canRunReconciliation,
+  canRunDataQuality,
+}: {
+  canRunReconciliation: boolean;
+  canRunDataQuality: boolean;
+}) {
+  const router = useRouter();
   return (
     <>
-      <ActionCard
+      {canRunReconciliation && <ActionCard
         icon={<ScanSearch className="h-4 w-4 text-violet-600" />}
         iconBg="bg-violet-500/10"
         title="Run Reconciliation Scan"
-        description="Compute AI risk scores for all registered traders."
+        description="Compare up to 500 stock records with declared movement from the past 30 days."
         onAction={async () => {
           const result = await runReconciliationScan();
           if (!result.success) throw new Error(result.error ?? 'Scan failed');
+          router.refresh();
+          return `Scanned ${result.scanned} records (500-record cap); ${result.created} new and ${result.refreshed} existing findings updated.`;
         }}
-      />
-      <ActionCard
+      />}
+      {canRunDataQuality && <ActionCard
         icon={<Database className="h-4 w-4 text-emerald-600" />}
         iconBg="bg-emerald-500/10"
         title="Run Data Quality Check"
@@ -103,7 +113,7 @@ export function IntelligenceActionButtons() {
           // getDataQualityMetrics is a server action — calling it validates & returns data
           await getDataQualityMetrics();
         }}
-      />
+      />}
     </>
   );
 }

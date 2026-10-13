@@ -129,6 +129,8 @@ export async function updatePaymentStatus(
             action: status === "confirmed" ? "TAX_PAYMENT_CONFIRMED" : "TAX_PAYMENT_REJECTED",
             targetType: "tax_payment",
             targetId: paymentId,
+            beforeState: { status: payment.status },
+            afterState: { status },
             metadata: JSON.stringify({
                 businessId: payment.businessId,
                 amount: payment.amount,

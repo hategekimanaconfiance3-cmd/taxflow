@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
+import { sql } from 'drizzle-orm';
 import { hashPassword } from 'better-auth/crypto';
 import crypto from 'node:crypto';
 import {
@@ -1867,6 +1868,8 @@ async function seedTaxFlowFull(): Promise<void> {
   try {
     const [staffPass, traderPass] = await Promise.all([hashPassword(SEED_PASSWORD), hashPassword(SEED_PASSWORD)]);
 
+    await db.execute(sql`TRUNCATE TABLE audit_log`);
+
     // ── Step 1: Clean all tables in FK-safe order ────────────────────────
 
     console.log('  🗑  Clearing existing data...');
@@ -1878,7 +1881,6 @@ async function seedTaxFlowFull(): Promise<void> {
     await db.delete(transactionItem);
     await db.delete(transaction);
     await db.delete(taxPayment);
-    await db.delete(auditLog);
     await db.delete(notification);
     await db.delete(systemConfig);
     await db.delete(stock);
