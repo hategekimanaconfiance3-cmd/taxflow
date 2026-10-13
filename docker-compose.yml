@@ -28,6 +28,8 @@ services:
       context: ./docker/valkey
       dockerfile: Dockerfile
     container_name: taxflow_valkey
+    environment:
+      VALKEY_PASSWORD: ${VALKEY_PASSWORD:?Set VALKEY_PASSWORD in your environment}
     ports:
       - "6380:6379"
     volumes:

@@ -1,6 +1,6 @@
 'use server';
 
-import { eq, and, or, desc, lt, sql } from 'drizzle-orm';
+import { eq, and, or, asc, desc, lt, sql } from 'drizzle-orm';
 import db from '@/db/drizzle';
 import { transaction, stock, vatRecord, product, user, auditLog } from '@/db/schema';
 import {
@@ -18,6 +18,23 @@ import { validatePriceFloor } from '@/lib/ai/price-suggestion';
 
 /** Pending transactions expire after 10 minutes (ms). */
 const PENDING_EXPIRY_MS = 10 * 60 * 1000;
+
+function isRetryableTransactionError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return false;
+  return error.code === '40P01' || error.code === '40001';
+}
+
+async function withTransactionRetry<T>(operation: () => Promise<T>): Promise<T> {
+  const maxAttempts = 3;
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (!isRetryableTransactionError(error) || attempt >= maxAttempts) throw error;
+      await new Promise<void>((resolve) => setTimeout(resolve, attempt * 50));
+    }
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Auto-expire stale pending transactions
@@ -150,7 +167,7 @@ export async function createTransaction(data: {
     });
   }
 
-  const txn = await db.transaction(async (tx) => {
+  const txn = await withTransactionRetry(() => db.transaction(async (tx) => {
     const [txn] = await tx
       .insert(transaction)
       .values({
@@ -181,7 +198,7 @@ export async function createTransaction(data: {
     });
 
     return txn;
-  });
+  }));
 
   // Real-time: notify buyer of incoming transaction
   emitToUser(buyer.id, 'txn:incoming', {
@@ -215,7 +232,7 @@ export async function confirmTransaction(transactionId: string) {
     throw new Error(`Your account is ${clearanceStatus}. Cannot confirm transactions.`);
   }
 
-  const txn = await db.transaction(async (tx) => {
+  const txn = await withTransactionRetry(() => db.transaction(async (tx) => {
     // Serialize concurrent confirmations by locking the transaction row first.
     const [lockedTxn] = await tx
       .select()
@@ -228,13 +245,21 @@ export async function confirmTransaction(transactionId: string) {
       throw new Error('Transaction not found or already processed');
     }
 
-    // 1. Deduct seller stock
-    const [sellerStock] = await tx
+    // Lock both stock rows in business ID order so opposing transfers acquire
+    // inventory locks consistently and reduce deadlock risk.
+    const lockedStocks = await tx
       .select()
       .from(stock)
-      .where(and(eq(stock.businessId, lockedTxn.sellerId), eq(stock.productId, lockedTxn.productId)))
-      .for('update')
-      .limit(1);
+      .where(
+        and(
+          or(eq(stock.businessId, lockedTxn.sellerId), eq(stock.businessId, session.user.id)),
+          eq(stock.productId, lockedTxn.productId),
+        ),
+      )
+      .orderBy(asc(stock.businessId))
+      .for('update');
+    const sellerStock = lockedStocks.find((row) => row.businessId === lockedTxn.sellerId);
+    const buyerStock = lockedStocks.find((row) => row.businessId === session.user.id);
 
     if (!sellerStock || sellerStock.quantity < lockedTxn.quantity) {
       throw new Error('Seller no longer has sufficient stock');
@@ -246,24 +271,23 @@ export async function confirmTransaction(transactionId: string) {
       .where(eq(stock.id, sellerStock.id));
 
     // 2. Add/upsert buyer stock
-    const [buyerStock] = await tx
-      .select()
-      .from(stock)
-      .where(and(eq(stock.businessId, session.user.id), eq(stock.productId, lockedTxn.productId)))
-      .for('update')
-      .limit(1);
-
     if (buyerStock) {
       await tx
         .update(stock)
         .set({ quantity: buyerStock.quantity + lockedTxn.quantity })
         .where(eq(stock.id, buyerStock.id));
     } else {
-      await tx.insert(stock).values({
-        businessId: session.user.id,
-        productId: lockedTxn.productId,
-        quantity: lockedTxn.quantity,
-      });
+      await tx
+        .insert(stock)
+        .values({
+          businessId: session.user.id,
+          productId: lockedTxn.productId,
+          quantity: lockedTxn.quantity,
+        })
+        .onConflictDoUpdate({
+          target: [stock.businessId, stock.productId],
+          set: { quantity: sql`${stock.quantity} + ${lockedTxn.quantity}` },
+        });
     }
 
     // 3. Create VAT output record (seller)
@@ -309,7 +333,7 @@ export async function confirmTransaction(transactionId: string) {
     });
 
     return lockedTxn;
-  });
+  }));
 
   // Real-time: notify seller that their sale was confirmed
   emitToUser(txn.sellerId, 'txn:confirmed', {
@@ -344,31 +368,35 @@ export async function confirmTransaction(transactionId: string) {
 export async function rejectTransaction(transactionId: string) {
   const session = await requireTraderSession();
 
-  const [txn] = await db
-    .select()
-    .from(transaction)
-    .where(
-      and(
-        eq(transaction.id, transactionId),
-        eq(transaction.buyerId, session.user.id),
-        eq(transaction.status, 'pending'),
-      ),
-    )
-    .limit(1);
+  const txn = await withTransactionRetry(() => db.transaction(async (tx) => {
+    const [lockedTxn] = await tx
+      .select()
+      .from(transaction)
+      .where(eq(transaction.id, transactionId))
+      .for('update')
+      .limit(1);
 
-  if (!txn) {
-    throw new Error('Transaction not found or already processed');
-  }
+    if (!lockedTxn || lockedTxn.buyerId !== session.user.id || lockedTxn.status !== 'pending') {
+      throw new Error('Transaction not found or already processed');
+    }
 
-  await db.update(transaction).set({ status: 'rejected' }).where(eq(transaction.id, txn.id));
+    const [rejected] = await tx
+      .update(transaction)
+      .set({ status: 'rejected' })
+      .where(and(eq(transaction.id, lockedTxn.id), eq(transaction.status, 'pending')))
+      .returning({ id: transaction.id });
+    if (!rejected) throw new Error('Transaction was already processed');
 
-  await logAudit({
-    userId: session.user.id,
-    action: 'TRANSACTION_REJECTED',
-    targetType: 'transaction',
-    targetId: txn.id,
-    metadata: { sellerId: txn.sellerId },
-  });
+    await tx.insert(auditLog).values({
+      userId: session.user.id,
+      action: 'TRANSACTION_REJECTED',
+      targetType: 'transaction',
+      targetId: lockedTxn.id,
+      metadata: JSON.stringify({ sellerId: lockedTxn.sellerId }),
+    });
+
+    return lockedTxn;
+  }));
 
   // Real-time: notify seller that their sale was rejected
   emitToUser(txn.sellerId, 'txn:rejected', {

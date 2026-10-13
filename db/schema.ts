@@ -279,6 +279,7 @@ export const taxPayment = pgTable(
     amount: integer('amount').notNull(), // RWF
     method: text('method').notNull(), // "mobile_money", "bank_transfer", "cash"
     reference: text('reference').unique(), // payment reference / receipt number
+    idempotencyKey: text('idempotency_key'),
     status: text('status').default('confirmed').notNull(), // "pending", "confirmed", "rejected"
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at')
@@ -286,7 +287,11 @@ export const taxPayment = pgTable(
       .$onUpdate(() => /* @__PURE__ */ new Date())
       .notNull(),
   },
-  (table) => [index('tax_payment_business_idx').on(table.businessId), index('tax_payment_status_idx').on(table.status)],
+  (table) => [
+    index('tax_payment_business_idx').on(table.businessId),
+    index('tax_payment_status_idx').on(table.status),
+    uniqueIndex('tax_payment_business_idempotency_uniq').on(table.businessId, table.idempotencyKey),
+  ],
 );
 
 // ---------------------------------------------------------------------------

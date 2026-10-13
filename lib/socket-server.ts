@@ -4,7 +4,7 @@ import Redis from 'ioredis';
 import { CHANNEL } from './realtime';
 import { auth } from './auth';
 
-const REDIS_URL = process.env.REDIS_URL || 'redis://:Taxflow07857@localhost:6380';
+const REDIS_URL = process.env.REDIS_URL;
 
 let io: SocketIOServer | null = null;
 
@@ -15,6 +15,10 @@ let io: SocketIOServer | null = null;
  */
 export function initSocketServer(httpServer: import('http').Server) {
   if (io) return io;
+
+  if (process.env.NODE_ENV === 'production' && !REDIS_URL) {
+    throw new Error('REDIS_URL is required to start the production Socket.IO server.');
+  }
 
   io = new SocketIOServer(httpServer, {
     path: '/api/socketio',
@@ -36,17 +40,21 @@ export function initSocketServer(httpServer: import('http').Server) {
     },
   };
 
-  const pubClient = new Redis(REDIS_URL, redisOpts);
-  pubClient.on('error', (err) => {
-    console.error('[Socket.IO] Pub client error:', err.message);
-  });
+  if (REDIS_URL) {
+    const pubClient = new Redis(REDIS_URL, redisOpts);
+    pubClient.on('error', (err) => {
+      console.error('[Socket.IO] Pub client error:', err.message);
+    });
 
-  const subClient = pubClient.duplicate();
-  subClient.on('error', (err) => {
-    console.error('[Socket.IO] Sub client error:', err.message);
-  });
+    const subClient = pubClient.duplicate();
+    subClient.on('error', (err) => {
+      console.error('[Socket.IO] Sub client error:', err.message);
+    });
 
-  io.adapter(createAdapter(pubClient, subClient));
+    io.adapter(createAdapter(pubClient, subClient));
+  } else {
+    console.warn('[Socket.IO] REDIS_URL is not set; using single-process development mode.');
+  }
 
   // Authenticate the socket from Better Auth's HTTP-only session cookie.
   // Never trust a user ID supplied in the Socket.IO handshake payload.
@@ -89,29 +97,31 @@ export function initSocketServer(httpServer: import('http').Server) {
   });
 
   // ─── Bridge: subscribe to Valkey channel for server action events ───
-  const realtimeSub = new Redis(REDIS_URL, redisOpts);
-  realtimeSub.on('error', (err) => {
-    console.error('[Socket.IO] Realtime sub error:', err.message);
-  });
-  realtimeSub.subscribe(CHANNEL, (err) => {
-    if (err) {
-      console.error('[Socket.IO] Failed to subscribe to realtime channel:', err);
-      return;
-    }
-    console.log('[Socket.IO] Subscribed to realtime channel');
-  });
-
-  realtimeSub.on('message', (_channel: string, message: string) => {
-    try {
-      const { userId, event, data } = JSON.parse(message);
-      if (userId && event && io) {
-        io.to(`user:${userId}`).emit(event, data);
-        console.log(`[Socket.IO] Forwarded ${event} to user:${userId}`);
+  if (REDIS_URL) {
+    const realtimeSub = new Redis(REDIS_URL, redisOpts);
+    realtimeSub.on('error', (err) => {
+      console.error('[Socket.IO] Realtime sub error:', err.message);
+    });
+    realtimeSub.subscribe(CHANNEL, (err) => {
+      if (err) {
+        console.error('[Socket.IO] Failed to subscribe to realtime channel:', err);
+        return;
       }
-    } catch (err) {
-      console.error('[Socket.IO] Failed to parse realtime message:', err);
-    }
-  });
+      console.log('[Socket.IO] Subscribed to realtime channel');
+    });
+
+    realtimeSub.on('message', (_channel: string, message: string) => {
+      try {
+        const { userId, event, data } = JSON.parse(message);
+        if (userId && event && io) {
+          io.to(`user:${userId}`).emit(event, data);
+          console.log(`[Socket.IO] Forwarded ${event} to user:${userId}`);
+        }
+      } catch (err) {
+        console.error('[Socket.IO] Failed to parse realtime message:', err);
+      }
+    });
+  }
 
   console.log('[Socket.IO] Server initialized with Valkey adapter');
   return io;

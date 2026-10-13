@@ -7,6 +7,7 @@ import { requireTraderSession, requireRRASession } from '@/lib/auth-guard';
 import { logAudit } from '@/lib/audit';
 import { createNotification } from '@/lib/actions/notification.action';
 import { getSystemConfig } from '@/lib/actions/system-config.action';
+import { taxPaymentSubmissionSchema } from '@/lib/validation/tax-payment.schema';
 
 const CRITICAL_THRESHOLD = 0.8; // 80% — also notify RRA admins
 
@@ -73,8 +74,29 @@ export async function recordTaxPayment(data: {
   amount: number;
   method: 'mobile_money' | 'bank_transfer' | 'cash';
   reference?: string;
-}) {
+}, idempotencyKey: string) {
   const session = await requireTraderSession();
+  const parsed = taxPaymentSubmissionSchema.safeParse({ ...data, idempotencyKey });
+  if (!parsed.success) {
+    throw new Error('Payment details are invalid. Please review them and try again.');
+  }
+  const paymentInput = parsed.data;
+
+  const [existingPayment] = await db
+    .select()
+    .from(taxPayment)
+    .where(and(eq(taxPayment.businessId, session.user.id), eq(taxPayment.idempotencyKey, paymentInput.idempotencyKey)))
+    .limit(1);
+  if (existingPayment) {
+    if (
+      existingPayment.amount !== paymentInput.amount ||
+      existingPayment.method !== paymentInput.method ||
+      existingPayment.reference !== (paymentInput.reference || null)
+    ) {
+      throw new Error('This payment request key was already used for different payment details.');
+    }
+    return existingPayment;
+  }
 
   // ── Re-compute outstanding from DB (never trust client) ────────────
   const vatResult = await db
@@ -105,43 +127,58 @@ export async function recordTaxPayment(data: {
     throw new Error('No tax is currently outstanding. Payment not allowed.');
   }
 
-  if (!Number.isInteger(data.amount) || data.amount <= 0) {
-    throw new Error('Payment amount must be a positive whole number.');
-  }
-
-  if (data.amount > outstanding) {
+  if (paymentInput.amount > outstanding) {
     throw new Error(
-      `Payment amount (${data.amount.toLocaleString()} RWF) exceeds outstanding balance of ${outstanding.toLocaleString()} RWF.`,
+      `Payment amount (${paymentInput.amount.toLocaleString()} RWF) exceeds outstanding balance of ${outstanding.toLocaleString()} RWF.`,
     );
   }
 
   // ── Insert payment ─────────────────────────────────────────────────
-  const [payment] = await db.transaction(async (tx) => {
-    const [payment] = await tx
+  const payment = await db.transaction(async (tx) => {
+    const [createdPayment] = await tx
       .insert(taxPayment)
       .values({
         businessId: session.user.id,
-        amount: data.amount,
-        method: data.method,
-        reference: data.reference || null,
+        amount: paymentInput.amount,
+        method: paymentInput.method,
+        reference: paymentInput.reference || null,
+        idempotencyKey: paymentInput.idempotencyKey,
         status: 'pending',
       })
+      .onConflictDoNothing({ target: [taxPayment.businessId, taxPayment.idempotencyKey] })
       .returning();
+
+    if (!createdPayment) {
+      const [retryPayment] = await tx
+        .select()
+        .from(taxPayment)
+        .where(and(eq(taxPayment.businessId, session.user.id), eq(taxPayment.idempotencyKey, paymentInput.idempotencyKey)))
+        .limit(1);
+      if (!retryPayment) throw new Error('Payment retry could not be reconciled. Please contact support.');
+      if (
+        retryPayment.amount !== paymentInput.amount ||
+        retryPayment.method !== paymentInput.method ||
+        retryPayment.reference !== (paymentInput.reference || null)
+      ) {
+        throw new Error('This payment request key was already used for different payment details.');
+      }
+      return retryPayment;
+    }
 
     await tx.insert(auditLog).values({
       userId: session.user.id,
       action: 'TAX_PAYMENT_SUBMITTED',
       targetType: 'tax_payment',
-      targetId: payment.id,
+      targetId: createdPayment.id,
       metadata: JSON.stringify({
-        amount: data.amount,
-        method: data.method,
-        reference: data.reference,
+        amount: paymentInput.amount,
+        method: paymentInput.method,
+        reference: paymentInput.reference,
         outstandingAtSubmission: outstanding,
       }),
     });
 
-    return [payment];
+    return createdPayment;
   });
 
   return payment;

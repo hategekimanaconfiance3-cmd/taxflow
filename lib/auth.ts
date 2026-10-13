@@ -9,6 +9,10 @@ import * as schema from '@/db/schema';
 import { Resend } from 'resend';
 import TaxFlowEmail from '@/components/resend/email-ui';
 
+if (process.env.NODE_ENV === 'production' && (process.env.BETTER_AUTH_SECRET?.length ?? 0) < 32) {
+  throw new Error('BETTER_AUTH_SECRET must contain at least 32 characters in production.');
+}
+
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 export const auth = betterAuth({
@@ -67,10 +71,9 @@ export const auth = betterAuth({
       },
     }),
     phoneNumber({
-      sendOTP: ({ phoneNumber, code }) => {
-        // Mock: log OTP to console for development
-        // In production, integrate with an SMS provider (e.g., Twilio, Africa's Talking)
-        console.log(`📱 OTP for ${phoneNumber}: ${code}`);
+      sendOTP: () => {
+        // Never log authentication codes. Configure a delivery provider to enable this flow.
+        throw new Error('Phone OTP delivery is not configured.');
       },
       otpLength: 6,
       expiresIn: 300, // 5 minutes

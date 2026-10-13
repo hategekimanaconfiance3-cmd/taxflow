@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -33,8 +33,11 @@ interface TaxPaymentFormProps {
     outstanding: number;
 }
 
+const PAYMENT_IDEMPOTENCY_STORAGE_KEY = "taxflow-payment-idempotency-key";
+
 export function TaxPaymentForm({ outstanding }: TaxPaymentFormProps) {
     const router = useRouter();
+    const idempotencyKey = useRef<string | null>(null);
     const noTaxDue = outstanding <= 0;
 
     // Build a schema whose max constraint is tied to current outstanding
@@ -59,12 +62,20 @@ export function TaxPaymentForm({ outstanding }: TaxPaymentFormProps) {
 
     const onSubmit = async (values: TaxPaymentInput) => {
         try {
+            const paymentRequestKey =
+                idempotencyKey.current ??
+                sessionStorage.getItem(PAYMENT_IDEMPOTENCY_STORAGE_KEY) ??
+                crypto.randomUUID();
+            idempotencyKey.current = paymentRequestKey;
+            sessionStorage.setItem(PAYMENT_IDEMPOTENCY_STORAGE_KEY, paymentRequestKey);
             await recordTaxPayment({
                 amount: values.amount,
                 method: values.method,
                 reference: values.reference?.trim() || undefined,
-            });
+            }, paymentRequestKey);
 
+            idempotencyKey.current = null;
+            sessionStorage.removeItem(PAYMENT_IDEMPOTENCY_STORAGE_KEY);
             form.reset();
             // Show success via root-level message
             form.setError("root", {

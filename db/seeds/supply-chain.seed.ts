@@ -18,8 +18,15 @@ import crypto from "node:crypto";
 // TaxFlow Supply Chain Seed — Traders, Products, Transactions, VAT
 // ---------------------------------------------------------------------------
 
-const client = postgres(process.env.DATABASE_URL!);
+if (process.env.NODE_ENV === "production") throw new Error("Demo data seeding is disabled in production.");
+if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is required to seed demo data.");
+if (!process.env.TAXFLOW_SEED_PASSWORD || process.env.TAXFLOW_SEED_PASSWORD.length < 12) {
+    throw new Error("Set TAXFLOW_SEED_PASSWORD to a value of at least 12 characters.");
+}
+
+const client = postgres(process.env.DATABASE_URL);
 const db = drizzle(client);
+const SEED_PASSWORD = process.env.TAXFLOW_SEED_PASSWORD;
 
 const VAT_RATE = 0.18;
 
@@ -262,7 +269,7 @@ const TRANSACTIONS: TxnDef[] = [
 async function seed() {
     console.log("🌱 Seeding TaxFlow supply chain data...\n");
 
-    const hashedPassword = await hashPassword("Trader@123");
+    const hashedPassword = await hashPassword(SEED_PASSWORD);
 
     // ── 1. Clean existing supply chain data (reverse FK order) ──────────
 
@@ -562,7 +569,6 @@ async function seed() {
 
     console.log("\n✅ Supply chain seed complete!\n");
     console.log("  📋 Login Credentials (all traders):");
-    console.log("     Password: Trader@123");
     console.log("");
     for (const trader of TRADERS) {
         console.log(

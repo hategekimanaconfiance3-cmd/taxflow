@@ -19,9 +19,13 @@ export function createTaxPaymentSchema(maxOutstanding: number) {
         method: z.enum(["mobile_money", "bank_transfer", "cash"], {
             message: "Payment method is required",
         }),
-        reference: z.string().trim().optional(),
+        reference: z.string().trim().max(100).optional(),
     });
 }
+
+export const taxPaymentSubmissionSchema = createTaxPaymentSchema(Number.MAX_SAFE_INTEGER).extend({
+    idempotencyKey: z.uuid(),
+});
 
 /** Static type derived from the schema (generic — the `max` constraint is runtime only). */
 export type TaxPaymentInput = z.infer<ReturnType<typeof createTaxPaymentSchema>>;

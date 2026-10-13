@@ -29,8 +29,15 @@ import crypto from "node:crypto";
 // Then seeds: products, stock (Confiance only), transactions, VAT, payments
 // ---------------------------------------------------------------------------
 
-const client = postgres(process.env.DATABASE_URL!);
+if (process.env.NODE_ENV === "production") throw new Error("Demo data seeding is disabled in production.");
+if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is required to seed demo data.");
+if (!process.env.TAXFLOW_SEED_PASSWORD || process.env.TAXFLOW_SEED_PASSWORD.length < 12) {
+    throw new Error("Set TAXFLOW_SEED_PASSWORD to a value of at least 12 characters.");
+}
+
+const client = postgres(process.env.DATABASE_URL);
 const db = drizzle(client);
+const SEED_PASSWORD = process.env.TAXFLOW_SEED_PASSWORD;
 
 const VAT_RATE = 0.18;
 
@@ -255,7 +262,7 @@ async function seed(): Promise<void> {
 
     // ── 2. Insert traders ──────────────────────────────────────────────────
 
-    const hashedPassword = await hashPassword("Trader@123");
+    const hashedPassword = await hashPassword(SEED_PASSWORD);
     console.log("  👥 Creating traders...");
 
     for (const t of TRADERS) {
@@ -498,7 +505,6 @@ async function seed(): Promise<void> {
     // ── Summary ─────────────────────────────────────────────────────────────
 
     console.log("\n✅ Clean reseed complete!\n");
-    console.log("  📋 Trader Login Credentials (Password: Trader@123):\n");
     console.log("  ┌──────────────────────────────┬──────────────┬──────────────┬──────────────┐");
     console.log("  │ Business                     │ Role         │ TIN          │ Status       │");
     console.log("  ├──────────────────────────────┼──────────────┼──────────────┼──────────────┤");

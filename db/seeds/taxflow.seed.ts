@@ -18,14 +18,26 @@ import crypto from "node:crypto";
 //   2 × Correction Officer
 //   2 × Reporting & Analytics Officer
 //
-// All accounts use password: Staff@123
+// Set TAXFLOW_SEED_PASSWORD to a local development password.
 // Login with Staff ID at /admin-login
 // ---------------------------------------------------------------------------
 
-const client = postgres(process.env.DATABASE_URL!);
+if (process.env.NODE_ENV === "production") {
+    throw new Error("The RRA demo seed is disabled in production.");
+}
+
+if (!process.env.DATABASE_URL) {
+    throw new Error("DATABASE_URL is required to run the RRA demo seed.");
+}
+
+if (!process.env.TAXFLOW_SEED_PASSWORD || process.env.TAXFLOW_SEED_PASSWORD.length < 12) {
+    throw new Error("Set TAXFLOW_SEED_PASSWORD to a value of at least 12 characters.");
+}
+
+const client = postgres(process.env.DATABASE_URL);
 const db = drizzle(client);
 
-const PASSWORD = "Staff@123";
+const PASSWORD = process.env.TAXFLOW_SEED_PASSWORD;
 
 interface StaffSeed {
     name: string;
@@ -204,7 +216,7 @@ async function seed() {
 
     console.log("\n✅ RRA Staff seeded successfully!");
     console.log("\n  📋 Login Credentials (all accounts):");
-    console.log("     Password:  Staff@123\n");
+    console.log("     Password:  [provided via TAXFLOW_SEED_PASSWORD]\n");
     console.log("  ┌─────────┬────────────────────────────┬──────────────────────────────┐");
     console.log("  │ Staff ID│ Role                       │ Name                         │");
     console.log("  ├─────────┼────────────────────────────┼──────────────────────────────┤");

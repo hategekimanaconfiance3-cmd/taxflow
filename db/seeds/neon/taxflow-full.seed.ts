@@ -28,6 +28,13 @@ import {
 //         import declarations, disputes, support tickets, staff bulletins
 // ---------------------------------------------------------------------------
 
+if (process.env.NODE_ENV === 'production') throw new Error('Demo data seeding is disabled in production.');
+if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL is required to seed demo data.');
+if (!process.env.TAXFLOW_SEED_PASSWORD || process.env.TAXFLOW_SEED_PASSWORD.length < 12) {
+  throw new Error('Set TAXFLOW_SEED_PASSWORD to a value of at least 12 characters.');
+}
+const SEED_PASSWORD = process.env.TAXFLOW_SEED_PASSWORD;
+
 const VAT_RATE = 0.18;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -1858,7 +1865,7 @@ async function seedTaxFlowFull(): Promise<void> {
   const db = drizzle(client);
 
   try {
-    const [staffPass, traderPass] = await Promise.all([hashPassword('Staff@123'), hashPassword('Trader@123')]);
+    const [staffPass, traderPass] = await Promise.all([hashPassword(SEED_PASSWORD), hashPassword(SEED_PASSWORD)]);
 
     // ── Step 1: Clean all tables in FK-safe order ────────────────────────
 
@@ -2975,16 +2982,7 @@ async function seedTaxFlowFull(): Promise<void> {
 
     console.log('═══════════════════════════════════════════════════════');
     console.log('✅ TaxFlow Full Seed Complete!\n');
-    console.log('  RRA Staff login:  Staff@123  (username = Staff ID, e.g. SA-001)');
-    console.log('  Trader login:     Trader@123 (username = TIN number)\n');
     console.log('  Sample logins:');
-    console.log('    SA-001 / Staff@123         → Super Admin Jean-Pierre Habimana');
-    console.log('    101000001 / Trader@123     → Kigali Beverages Ltd (manufacturer)');
-    console.log('    101000004 / Trader@123     → Gasabo General Supplies (wholesaler)');
-    console.log('    101000005 / Trader@123     → Solange Shop Kimironko (retailer)');
-    console.log('    102000007 / Trader@123     → Volcanoes Trade Center (Musanze)');
-    console.log('    104000005 / Trader@123     → Kayonza Solar Products (manufacturer)');
-    console.log('    105000009 / Trader@123     → Rusizi Sugar Works (manufacturer)');
     console.log('═══════════════════════════════════════════════════════\n');
   } catch (error) {
     console.error('❌ Seed failed:', error);
