@@ -1,0 +1,2 @@
+"""Admin registrations placeholder."""
+

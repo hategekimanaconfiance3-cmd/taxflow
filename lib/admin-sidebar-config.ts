@@ -29,6 +29,8 @@ import {
     LayoutGrid,
     BarChart3,
     Cpu,
+    Brain,
+    Layers,
 } from "lucide-react";
 import type { RRARole } from "@/lib/auth-guard";
 
@@ -261,6 +263,32 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 allowedRoles: [
                     "compliance_officer",
                     "audit_officer",
+                ],
+            },
+            {
+                label: "Intelligence Hub",
+                href: "/admin/intelligence",
+                icon: Brain,
+                allowedRoles: [
+                    "compliance_officer",
+                    "audit_officer",
+                ],
+                children: [
+                    {
+                        label: "Intelligence Hub",
+                        href: "/admin/intelligence",
+                        icon: Brain,
+                    },
+                    {
+                        label: "All Findings",
+                        href: "/admin/intelligence/findings",
+                        icon: Layers,
+                    },
+                    {
+                        label: "Unregistered Taxpayers",
+                        href: "/admin/intelligence/unregistered",
+                        icon: UserSearch,
+                    },
                 ],
             },
             {
