@@ -1,4 +1,5 @@
 import { requireRRASession } from '@/lib/auth-guard';
+import { ExportDropdown } from '@/components/admin/admin-export';
 import {
   ExportNationalData,
   ExportTaxpayerDirectory,
@@ -23,10 +24,22 @@ export default async function AdminExportsPage() {
         <CardHeader className="pb-2">
           <CardTitle className="text-base font-semibold flex items-center gap-2">
             <Download className="h-4 w-4" />
-            Export Tools
+            Quick Exports
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
+          <ExportDropdown />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base font-semibold flex items-center gap-2">
+            <Download className="h-4 w-4" />
+            Bulk Dataset Exports
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
           <ExportNationalData />
           <ExportTaxpayerDirectory />
           <ExportComplianceDataset />
