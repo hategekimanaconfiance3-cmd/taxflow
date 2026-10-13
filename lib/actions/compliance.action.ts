@@ -307,13 +307,17 @@ export async function runSystemComplianceCheck() {
 
   let compliant = 0;
   let nonCompliant = 0;
+  let suspended = 0;
   let alerts = 0;
 
   const complianceConfig = await getSystemConfig();
 
   for (const trader of traders) {
     try {
-      // Direct compliance calculation (no auth guard)
+      // Delegate to checkAndAlertCompliance — includes auto-suspension logic
+      await checkAndAlertCompliance(trader.id);
+
+      // Re-read compliance to classify result for the summary
       const vatResult = await db
         .select({
           vatType: vatRecord.vatType,
@@ -342,19 +346,15 @@ export async function runSystemComplianceCheck() {
       const totalPaid = Number(paymentResult?.totalPaid) || 0;
       const compliancePct = Math.min(100, (totalPaid / netOwed) * 100);
 
-      if (compliancePct >= complianceConfig.complianceThreshold * 100) {
-        compliant++;
-      } else {
+      if (compliancePct < complianceConfig.autoSuspensionThreshold * 100) {
+        suspended++;
         nonCompliant++;
-        const outstanding = Math.max(0, netOwed - totalPaid);
-        await createNotification({
-          userId: trader.id,
-          type: 'compliance_alert',
-          title: 'Tax Compliance Warning',
-          message: `Your tax compliance is at ${Math.round(compliancePct)}% (minimum: 95%). Outstanding: ${outstanding.toLocaleString()} RWF.`,
-          link: '/dashboard/payments',
-        });
         alerts++;
+      } else if (compliancePct < complianceConfig.complianceThreshold * 100) {
+        nonCompliant++;
+        alerts++;
+      } else {
+        compliant++;
       }
     } catch {
       // Skip individual trader errors
@@ -365,6 +365,7 @@ export async function runSystemComplianceCheck() {
     totalChecked: traders.length,
     compliant,
     nonCompliant,
+    suspended,
     alerts,
   };
 }

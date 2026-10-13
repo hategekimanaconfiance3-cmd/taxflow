@@ -1,6 +1,10 @@
 import Redis from 'ioredis';
 
-const REDIS_URL = process.env.REDIS_URL || 'redis://:Taxflow07857@localhost:6380';
+const REDIS_URL = process.env.REDIS_URL;
+
+if (!REDIS_URL) {
+  console.warn('[Realtime] REDIS_URL is not set. Real-time events will be disabled.');
+}
 const CHANNEL = 'taxflow:realtime';
 
 /**
@@ -12,6 +16,7 @@ const CHANNEL = 'taxflow:realtime';
  * to this channel and forwards events to connected clients.
  */
 export function emitToUser(userId: string, event: string, data: Record<string, unknown>) {
+  if (!REDIS_URL) return; // Real-time disabled — REDIS_URL not configured
   try {
     const pub = getPublisher();
     const message = JSON.stringify({

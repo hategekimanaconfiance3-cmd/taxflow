@@ -3,9 +3,14 @@ import Redis from 'ioredis';
 // Valkey/Redis client singleton for server-side use
 // Valkey is 100% Redis-compatible, so ioredis works perfectly
 
-const REDIS_URL = process.env.REDIS_URL || 'redis://:Taxflow07857@localhost:6380';
+const REDIS_URL = process.env.REDIS_URL;
 
 function createValkeyClient() {
+  if (!REDIS_URL) {
+    console.warn('[Valkey] REDIS_URL is not set. Caching and real-time features will be disabled.');
+    return null;
+  }
+
   const client = new Redis(REDIS_URL, {
     maxRetriesPerRequest: 3,
     retryStrategy: (times: number) => {
@@ -28,7 +33,7 @@ function createValkeyClient() {
 
 // Singleton — reuse across hot reloads in dev
 const globalForValkey = globalThis as unknown as {
-  valkey: Redis | undefined;
+  valkey: Redis | null | undefined;
 };
 
 export const valkey = globalForValkey.valkey ?? createValkeyClient();

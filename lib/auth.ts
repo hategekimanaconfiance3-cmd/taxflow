@@ -122,7 +122,7 @@ export const auth = betterAuth({
       clearanceStatus: {
         type: 'string',
         required: false,
-        defaultValue: 'approved',
+        defaultValue: 'pending', // New traders start as pending — RRA staff must approve
       },
       isActive: {
         type: 'boolean',

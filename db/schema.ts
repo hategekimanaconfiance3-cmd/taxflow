@@ -16,8 +16,9 @@ export const user = pgTable(
     phoneNumber: text('phone_number').unique(), // From phoneNumber plugin
     phoneNumberVerified: boolean('phone_number_verified').default(false),
     role: text('role').notNull().default('retailer'), // manufacturer, wholesaler, retailer, rra_staff
-    clearanceStatus: text('clearance_status').default('approved').notNull(),
-    // "approved" | "under_review" | "suspended"
+    clearanceStatus: text('clearance_status').default('pending').notNull(),
+    // "pending" | "approved" | "under_review" | "suspended"
+    // New traders start as "pending" - RRA staff must approve before they can trade
     email: text('email').notNull().unique(),
     emailVerified: boolean('email_verified').default(false).notNull(),
     image: text('image'),
@@ -670,3 +671,4 @@ export const supportTicketRelations = relations(supportTicket, ({ one }) => ({
     relationName: 'ticketAssignee',
   }),
 }));
+
