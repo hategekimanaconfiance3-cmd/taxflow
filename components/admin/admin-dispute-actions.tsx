@@ -6,6 +6,7 @@ import { resolveDispute } from "@/lib/actions/dispute.action";
 import type { RRADisputeAction } from "@/lib/actions/dispute.action";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
     Dialog,
@@ -44,22 +45,22 @@ const ACTION_OPTIONS: {
         {
             value: "undo_transaction",
             label: "Undo Transaction",
-            description: "Reverse the transaction — both parties' records will be corrected.",
+            description: "Reverse inventory and VAT. This is blocked if the buyer has already used the purchased stock.",
         },
         {
             value: "adjust_amount",
             label: "Adjust Amount",
-            description: "Modify the transaction amount or quantities.",
+            description: "Set a corrected unit price; the transaction total and VAT are recalculated.",
         },
         {
             value: "uphold_dispute",
             label: "Uphold Dispute",
-            description: "Rule in favor of the filer — mark dispute as valid.",
+            description: "Rule in favor of the filer and reverse the disputed VAT while leaving inventory unchanged.",
         },
         {
             value: "dismiss",
             label: "Dismiss",
-            description: "Dismiss the dispute — no action taken.",
+            description: "Dismiss the dispute and restore the VAT records to the taxpayer's active balance.",
         },
     ];
 
@@ -78,10 +79,12 @@ export function AdminDisputeActions({
     const [action, setAction] = useState<RRADisputeAction | "">("");
     const [resolution, setResolution] = useState("");
     const [officialNote, setOfficialNote] = useState("");
+    const [adjustedUnitPrice, setAdjustedUnitPrice] = useState("");
     const [error, setError] = useState("");
 
     function handleResolve() {
         if (!action || !resolution.trim() || !officialNote.trim()) return;
+        if (action === "adjust_amount" && (!Number.isSafeInteger(Number(adjustedUnitPrice)) || Number(adjustedUnitPrice) <= 0)) return;
 
         startTransition(async () => {
             try {
@@ -90,6 +93,7 @@ export function AdminDisputeActions({
                     action: action as RRADisputeAction,
                     resolution: resolution.trim(),
                     officialNote: officialNote.trim(),
+                    ...(action === "adjust_amount" ? { adjustedUnitPrice: Number(adjustedUnitPrice) } : {}),
                 });
                 setOpen(false);
                 router.refresh();
@@ -115,6 +119,7 @@ export function AdminDisputeActions({
                     setAction("");
                     setResolution("");
                     setOfficialNote("");
+                    setAdjustedUnitPrice("");
                     setError("");
                     setOpen(true);
                 }}
@@ -224,6 +229,20 @@ export function AdminDisputeActions({
                             )}
                         </div>
 
+                        {action === "adjust_amount" && (
+                            <div className="space-y-2">
+                                <Label htmlFor="adjusted-unit-price">Adjusted unit price (RWF)</Label>
+                                <Input
+                                    id="adjusted-unit-price"
+                                    type="number"
+                                    min="1"
+                                    step="1"
+                                    value={adjustedUnitPrice}
+                                    onChange={(event) => setAdjustedUnitPrice(event.target.value)}
+                                />
+                            </div>
+                        )}
+
                         {/* Internal resolution notes */}
                         <div className="space-y-2">
                             <Label>Internal Resolution Notes</Label>
@@ -272,6 +291,7 @@ export function AdminDisputeActions({
                             disabled={
                                 isPending ||
                                 !action ||
+                                (action === "adjust_amount" && (!Number.isSafeInteger(Number(adjustedUnitPrice)) || Number(adjustedUnitPrice) <= 0)) ||
                                 !resolution.trim() ||
                                 !officialNote.trim()
                             }

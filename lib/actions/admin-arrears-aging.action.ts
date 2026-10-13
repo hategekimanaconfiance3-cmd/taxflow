@@ -1,6 +1,6 @@
 "use server";
 
-import { sql, eq } from "drizzle-orm";
+import { sql, eq, and } from "drizzle-orm";
 import db from "@/db/drizzle";
 import { user, vatRecord, taxPayment, transaction } from "@/db/schema";
 import { requireRRASession } from "@/lib/auth-guard";
@@ -71,6 +71,7 @@ export async function getArrearsAging(): Promise<ArrearsAgingSummary> {
             total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`.as("total"),
         })
         .from(vatRecord)
+        .where(eq(vatRecord.isFrozen, false))
         .groupBy(vatRecord.businessId, vatRecord.vatType);
 
     // Get payments per trader
@@ -91,7 +92,7 @@ export async function getArrearsAging(): Promise<ArrearsAgingSummary> {
             oldestDate: sql<Date>`MIN(${vatRecord.createdAt})`.as("oldest_date"),
         })
         .from(vatRecord)
-        .where(eq(vatRecord.vatType, "output"))
+        .where(and(eq(vatRecord.vatType, "output"), eq(vatRecord.isFrozen, false)))
         .groupBy(vatRecord.businessId);
 
     // Build maps

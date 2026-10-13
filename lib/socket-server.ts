@@ -2,6 +2,7 @@ import { Server as SocketIOServer } from 'socket.io';
 import { createAdapter } from '@socket.io/redis-adapter';
 import Redis from 'ioredis';
 import { CHANNEL } from './realtime';
+import { auth } from './auth';
 
 const REDIS_URL = process.env.REDIS_URL || 'redis://:Taxflow07857@localhost:6380';
 
@@ -47,12 +48,39 @@ export function initSocketServer(httpServer: import('http').Server) {
 
   io.adapter(createAdapter(pubClient, subClient));
 
-  // Auth: join user-specific room on connection
+  // Authenticate the socket from Better Auth's HTTP-only session cookie.
+  // Never trust a user ID supplied in the Socket.IO handshake payload.
+  io.use(async (socket, next) => {
+    try {
+      const cookie = socket.handshake.headers.cookie;
+      if (!cookie) {
+        next(new Error('Unauthorized'));
+        return;
+      }
+
+      const session = await auth.api.getSession({
+        headers: new Headers({ cookie }),
+      });
+
+      if (!session?.user) {
+        next(new Error('Unauthorized'));
+        return;
+      }
+
+      (socket.data as { authenticatedUserId?: string }).authenticatedUserId = session.user.id;
+      next();
+    } catch (error) {
+      console.error('[Socket.IO] Session verification failed:', error);
+      next(new Error('Unauthorized'));
+    }
+  });
+
+  // Join only the room belonging to the server-verified session.
   io.on('connection', (socket) => {
-    const userId = socket.handshake.auth?.userId;
+    const userId = (socket.data as { authenticatedUserId?: string }).authenticatedUserId;
     if (userId) {
       socket.join(`user:${userId}`);
-      console.log(`[Socket.IO] User ${userId} connected (${socket.id})`);
+      console.log(`[Socket.IO] Authenticated user connected (${socket.id})`);
     }
 
     socket.on('disconnect', () => {

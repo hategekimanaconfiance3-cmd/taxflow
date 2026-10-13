@@ -63,7 +63,7 @@ export async function getDashboardStats() {
             ),
         })
         .from(vatRecord)
-        .where(eq(vatRecord.businessId, userId))
+        .where(and(eq(vatRecord.businessId, userId), eq(vatRecord.isFrozen, false)))
         .groupBy(vatRecord.vatType);
 
     const taxGenerated =

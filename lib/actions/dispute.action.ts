@@ -2,11 +2,10 @@
 
 import { eq, desc, and, or, sql } from "drizzle-orm";
 import db from "@/db/drizzle";
-import { dispute, transaction, user } from "@/db/schema";
+import { auditLog, dispute, notification, stock, transaction, user, vatRecord } from "@/db/schema";
 import { requireTraderSession, requireRRASession } from "@/lib/auth-guard";
-import { logAudit } from "@/lib/audit";
-import { createNotification } from "@/lib/actions/notification.action";
 import { emitToUser } from "@/lib/realtime";
+import { getSystemConfig } from "@/lib/actions/system-config.action";
 
 const DISPUTE_WINDOW_HOURS = 48;
 
@@ -39,101 +38,82 @@ export async function fileDispute(data: {
         throw new Error("A reason is required to file a dispute");
     }
 
-    // Get the transaction — must involve this user
-    const [txn] = await db
-        .select()
-        .from(transaction)
-        .where(
-            and(
-                eq(transaction.id, data.transactionId),
-                or(
-                    eq(transaction.sellerId, session.user.id),
-                    eq(transaction.buyerId, session.user.id),
-                ),
-            ),
-        )
-        .limit(1);
-
-    if (!txn) {
-        throw new Error("Transaction not found or you are not a party");
-    }
-
-    if (txn.status !== "confirmed" && txn.status !== "completed") {
-        throw new Error("Only confirmed/completed transactions can be disputed");
-    }
-
-    // 48-hour window check
-    const confirmedAt = txn.confirmedAt;
-    if (confirmedAt) {
-        const elapsed = Date.now() - new Date(confirmedAt).getTime();
-        const hoursElapsed = elapsed / (1000 * 60 * 60);
-        if (hoursElapsed > DISPUTE_WINDOW_HOURS) {
-            throw new Error(
-                `Dispute window expired. Disputes must be filed within ${DISPUTE_WINDOW_HOURS} hours of confirmation.`,
-            );
-        }
-    }
-
-    // Check no existing active dispute for this transaction
-    const [existing] = await db
-        .select({ id: dispute.id })
-        .from(dispute)
-        .where(
-            and(
-                eq(dispute.transactionId, data.transactionId),
-                sql`${dispute.status} NOT IN ('resolved', 'dismissed')`,
-            ),
-        )
-        .limit(1);
-
-    if (existing) {
-        throw new Error("An active dispute already exists for this transaction");
-    }
-
-    // Determine the counterparty
-    const counterpartyId =
-        txn.sellerId === session.user.id ? txn.buyerId : txn.sellerId;
-
-    if (!counterpartyId) {
-        throw new Error("Cannot file a dispute — no counterparty found");
-    }
-
     const referenceNumber = generateRefNumber();
+    const { newDispute, counterpartyId } = await db.transaction(async (tx) => {
+        const [txn] = await tx
+            .select()
+            .from(transaction)
+            .where(eq(transaction.id, data.transactionId))
+            .for("update")
+            .limit(1);
 
-    const [newDispute] = await db
-        .insert(dispute)
-        .values({
-            transactionId: data.transactionId,
-            filedById: session.user.id,
-            counterpartyId,
-            referenceNumber,
-            reason: data.reason.trim(),
-            evidence: data.evidence?.trim() || null,
-            status: "filed",
-            counterpartyResponse: "pending",
-        })
-        .returning();
+        if (!txn || (txn.sellerId !== session.user.id && txn.buyerId !== session.user.id)) {
+            throw new Error("Transaction not found or you are not a party");
+        }
+        if (txn.status !== "confirmed" && txn.status !== "completed") {
+            throw new Error("Only confirmed/completed transactions can be disputed");
+        }
 
-    await logAudit({
-        userId: session.user.id,
-        action: "DISPUTE_FILED",
-        targetType: "dispute",
-        targetId: newDispute.id,
-        metadata: {
-            transactionId: data.transactionId,
-            referenceNumber,
-            counterpartyId,
-            reason: data.reason.trim(),
-        },
-    });
+        const confirmedAt = txn.confirmedAt;
+        if (!confirmedAt || Date.now() - confirmedAt.getTime() > DISPUTE_WINDOW_HOURS * 60 * 60 * 1000) {
+            throw new Error(`Disputes must be filed within ${DISPUTE_WINDOW_HOURS} hours of confirmation.`);
+        }
 
-    // Notify counterparty — they need to acknowledge or contest
-    await createNotification({
-        userId: counterpartyId,
-        type: "system",
-        title: "Dispute Filed Against You",
-        message: `A dispute (${referenceNumber}) has been filed on a transaction you were part of. You must acknowledge or contest this dispute.`,
-        link: "/dashboard/disputes",
+        const [existing] = await tx
+            .select({ id: dispute.id })
+            .from(dispute)
+            .where(and(eq(dispute.transactionId, data.transactionId), sql`${dispute.status} NOT IN ('resolved', 'dismissed')`))
+            .limit(1);
+        if (existing) throw new Error("An active dispute already exists for this transaction");
+
+        const counterpartyId = txn.sellerId === session.user.id ? txn.buyerId : txn.sellerId;
+        if (!counterpartyId) throw new Error("Cannot file a dispute without a counterparty");
+
+        const [newDispute] = await tx
+            .insert(dispute)
+            .values({
+                transactionId: data.transactionId,
+                filedById: session.user.id,
+                counterpartyId,
+                referenceNumber,
+                reason: data.reason.trim(),
+                evidence: data.evidence?.trim() || null,
+                status: "filed",
+                counterpartyResponse: "pending",
+            })
+            .returning();
+
+        const frozenRecords = await tx.update(vatRecord)
+            .set({ isFrozen: true })
+            .where(eq(vatRecord.transactionId, data.transactionId))
+            .returning({ id: vatRecord.id });
+        if (frozenRecords.length === 0) {
+            throw new Error("Transaction VAT records are missing; dispute tax cannot be frozen.");
+        }
+
+        await tx.insert(auditLog).values({
+            userId: session.user.id,
+            action: "DISPUTE_FILED",
+            targetType: "dispute",
+            targetId: newDispute.id,
+            metadata: JSON.stringify({
+                transactionId: data.transactionId,
+                referenceNumber,
+                counterpartyId,
+                reason: data.reason.trim(),
+                frozenVatRecordCount: frozenRecords.length,
+            }),
+        });
+
+        await tx.insert(notification).values({
+            userId: counterpartyId,
+            type: "system",
+            title: "Dispute Filed Against You",
+            message: `A dispute (${referenceNumber}) has been filed on a transaction you were part of. You must acknowledge or contest this dispute.`,
+            link: "/dashboard/disputes",
+        });
+
+        return { newDispute, counterpartyId };
     });
 
     emitToUser(counterpartyId, "dispute:filed", {
@@ -155,53 +135,37 @@ export async function acknowledgeDispute(
 ) {
     const session = await requireTraderSession();
 
-    const [d] = await db
-        .select()
-        .from(dispute)
-        .where(
-            and(
-                eq(dispute.id, disputeId),
-                eq(dispute.counterpartyId, session.user.id),
-            ),
-        )
-        .limit(1);
+    const d = await db.transaction(async (tx) => {
+        const [d] = await tx
+            .select()
+            .from(dispute)
+            .where(and(eq(dispute.id, disputeId), eq(dispute.counterpartyId, session.user.id)))
+            .for("update")
+            .limit(1);
+        if (!d) throw new Error("Dispute not found or you are not the counterparty");
+        if (d.counterpartyResponse !== "pending") throw new Error("You have already responded to this dispute");
 
-    if (!d) {
-        throw new Error("Dispute not found or you are not the counterparty");
-    }
+        const [updated] = await tx.update(dispute)
+            .set({ counterpartyResponse: "acknowledged", counterpartyNote: note?.trim() || null, status: "under_review" })
+            .where(and(eq(dispute.id, disputeId), eq(dispute.counterpartyResponse, "pending")))
+            .returning({ id: dispute.id });
+        if (!updated) throw new Error("Dispute response was already recorded");
 
-    if (d.counterpartyResponse !== "pending") {
-        throw new Error("You have already responded to this dispute");
-    }
-
-    // Both parties agree there's a dispute → escalate to under_review
-    await db
-        .update(dispute)
-        .set({
-            counterpartyResponse: "acknowledged",
-            counterpartyNote: note?.trim() || null,
-            status: "under_review",
-        })
-        .where(eq(dispute.id, disputeId));
-
-    await logAudit({
-        userId: session.user.id,
-        action: "DISPUTE_ACKNOWLEDGED",
-        targetType: "dispute",
-        targetId: disputeId,
-        metadata: {
-            referenceNumber: d.referenceNumber,
-            note: note?.trim(),
-        },
-    });
-
-    // Notify filer
-    await createNotification({
-        userId: d.filedById,
-        type: "system",
-        title: "Dispute Acknowledged",
-        message: `The counterparty has acknowledged dispute ${d.referenceNumber}. It has been escalated to RRA for review.`,
-        link: "/dashboard/disputes",
+        await tx.insert(auditLog).values({
+            userId: session.user.id,
+            action: "DISPUTE_ACKNOWLEDGED",
+            targetType: "dispute",
+            targetId: disputeId,
+            metadata: JSON.stringify({ referenceNumber: d.referenceNumber, note: note?.trim() }),
+        });
+        await tx.insert(notification).values({
+            userId: d.filedById,
+            type: "system",
+            title: "Dispute Acknowledged",
+            message: `The counterparty has acknowledged dispute ${d.referenceNumber}. It has been escalated to RRA for review.`,
+            link: "/dashboard/disputes",
+        });
+        return d;
     });
 
     emitToUser(d.filedById, "dispute:acknowledged", {
@@ -227,53 +191,37 @@ export async function contestDispute(
         throw new Error("A note explaining your position is required when contesting");
     }
 
-    const [d] = await db
-        .select()
-        .from(dispute)
-        .where(
-            and(
-                eq(dispute.id, disputeId),
-                eq(dispute.counterpartyId, session.user.id),
-            ),
-        )
-        .limit(1);
+    const d = await db.transaction(async (tx) => {
+        const [d] = await tx
+            .select()
+            .from(dispute)
+            .where(and(eq(dispute.id, disputeId), eq(dispute.counterpartyId, session.user.id)))
+            .for("update")
+            .limit(1);
+        if (!d) throw new Error("Dispute not found or you are not the counterparty");
+        if (d.counterpartyResponse !== "pending") throw new Error("You have already responded to this dispute");
 
-    if (!d) {
-        throw new Error("Dispute not found or you are not the counterparty");
-    }
+        const [updated] = await tx.update(dispute)
+            .set({ counterpartyResponse: "contested", counterpartyNote: note.trim(), status: "under_review" })
+            .where(and(eq(dispute.id, disputeId), eq(dispute.counterpartyResponse, "pending")))
+            .returning({ id: dispute.id });
+        if (!updated) throw new Error("Dispute response was already recorded");
 
-    if (d.counterpartyResponse !== "pending") {
-        throw new Error("You have already responded to this dispute");
-    }
-
-    // Contested — still goes to RRA for review
-    await db
-        .update(dispute)
-        .set({
-            counterpartyResponse: "contested",
-            counterpartyNote: note.trim(),
-            status: "under_review",
-        })
-        .where(eq(dispute.id, disputeId));
-
-    await logAudit({
-        userId: session.user.id,
-        action: "DISPUTE_CONTESTED",
-        targetType: "dispute",
-        targetId: disputeId,
-        metadata: {
-            referenceNumber: d.referenceNumber,
-            note: note.trim(),
-        },
-    });
-
-    // Notify filer
-    await createNotification({
-        userId: d.filedById,
-        type: "system",
-        title: "Dispute Contested",
-        message: `The counterparty has contested dispute ${d.referenceNumber}. It has been escalated to RRA for review.`,
-        link: "/dashboard/disputes",
+        await tx.insert(auditLog).values({
+            userId: session.user.id,
+            action: "DISPUTE_CONTESTED",
+            targetType: "dispute",
+            targetId: disputeId,
+            metadata: JSON.stringify({ referenceNumber: d.referenceNumber, note: note.trim() }),
+        });
+        await tx.insert(notification).values({
+            userId: d.filedById,
+            type: "system",
+            title: "Dispute Contested",
+            message: `The counterparty has contested dispute ${d.referenceNumber}. It has been escalated to RRA for review.`,
+            link: "/dashboard/disputes",
+        });
+        return d;
     });
 
     emitToUser(d.filedById, "dispute:contested", {
@@ -400,6 +348,7 @@ export async function resolveDispute(
         action: RRADisputeAction;
         resolution: string;
         officialNote: string;
+        adjustedUnitPrice?: number;
     },
 ) {
     const { staff, ...session } = await requireRRASession("compliance_officer", "audit_officer");
@@ -412,60 +361,149 @@ export async function resolveDispute(
         throw new Error("An official communication to both parties is required");
     }
 
-    const [existingDispute] = await db
-        .select()
-        .from(dispute)
-        .where(eq(dispute.id, disputeId))
-        .limit(1);
-
-    if (!existingDispute) {
-        throw new Error("Dispute not found");
+    const validActions: RRADisputeAction[] = ["undo_transaction", "adjust_amount", "uphold_dispute", "dismiss"];
+    if (!validActions.includes(data.action)) throw new Error("Invalid dispute resolution action");
+    if (data.action === "adjust_amount" && (!Number.isSafeInteger(data.adjustedUnitPrice) || (data.adjustedUnitPrice ?? 0) <= 0)) {
+        throw new Error("A positive whole-number adjusted unit price is required");
     }
 
-    if (existingDispute.status === "resolved" || existingDispute.status === "dismissed") {
-        throw new Error("This dispute has already been finalized");
-    }
+    const config = data.action === "adjust_amount" ? await getSystemConfig() : null;
+    const { existingDispute, partyIds } = await db.transaction(async (tx) => {
+        const [existingDispute] = await tx
+            .select()
+            .from(dispute)
+            .where(eq(dispute.id, disputeId))
+            .for("update")
+            .limit(1);
 
-    const finalStatus = data.action === "dismiss" ? "dismissed" : "resolved";
+        if (!existingDispute) throw new Error("Dispute not found");
+        if (existingDispute.status === "resolved" || existingDispute.status === "dismissed") {
+            throw new Error("This dispute has already been finalized");
+        }
 
-    await db
-        .update(dispute)
-        .set({
+        const [txn] = await tx
+            .select()
+            .from(transaction)
+            .where(eq(transaction.id, existingDispute.transactionId))
+            .for("update")
+            .limit(1);
+        if (!txn) throw new Error("Disputed transaction not found");
+
+        const frozenRecords = await tx
+            .select()
+            .from(vatRecord)
+            .where(and(eq(vatRecord.transactionId, txn.id), eq(vatRecord.isFrozen, true)));
+        if (frozenRecords.length === 0) throw new Error("Frozen VAT records are missing; dispute requires manual review.");
+
+        let financialEffect: Record<string, number | string> = {};
+        if (data.action === "undo_transaction") {
+            if (txn.buyerId) {
+                const [buyerStock] = await tx
+                    .select()
+                    .from(stock)
+                    .where(and(eq(stock.businessId, txn.buyerId), eq(stock.productId, txn.productId)))
+                    .for("update")
+                    .limit(1);
+                if (!buyerStock || buyerStock.quantity < txn.quantity) {
+                    throw new Error("Transaction cannot be undone because the buyer no longer has the purchased stock.");
+                }
+                await tx.update(stock)
+                    .set({ quantity: buyerStock.quantity - txn.quantity })
+                    .where(eq(stock.id, buyerStock.id));
+            }
+
+            const [sellerStock] = await tx
+                .select()
+                .from(stock)
+                .where(and(eq(stock.businessId, txn.sellerId), eq(stock.productId, txn.productId)))
+                .for("update")
+                .limit(1);
+            if (sellerStock) {
+                await tx.update(stock)
+                    .set({ quantity: sellerStock.quantity + txn.quantity })
+                    .where(eq(stock.id, sellerStock.id));
+            } else {
+                await tx.insert(stock).values({ businessId: txn.sellerId, productId: txn.productId, quantity: txn.quantity });
+            }
+
+            await tx.update(transaction)
+                .set({ status: "rejected", rejectedAt: new Date() })
+                .where(eq(transaction.id, txn.id));
+        }
+
+        if (data.action === "undo_transaction" || data.action === "uphold_dispute") {
+            await tx.insert(vatRecord).values(frozenRecords.map((record) => ({
+                transactionId: txn.id,
+                businessId: record.businessId,
+                vatType: record.vatType,
+                amount: -record.amount,
+                period: record.period,
+            })));
+            financialEffect = { vatReversed: frozenRecords.reduce((sum, record) => sum + record.amount, 0) };
+        }
+
+        if (data.action === "adjust_amount") {
+            const adjustedTotal = Math.round(txn.quantity * (data.adjustedUnitPrice as number));
+            const adjustedVat = Math.round(adjustedTotal * (config?.vatRate ?? 0));
+            await tx.update(transaction).set({
+                unitPrice: data.adjustedUnitPrice as number,
+                totalAmount: adjustedTotal,
+                vatAmount: adjustedVat,
+            }).where(eq(transaction.id, txn.id));
+            await tx.update(vatRecord)
+                .set({ amount: adjustedVat, isFrozen: false })
+                .where(and(eq(vatRecord.transactionId, txn.id), eq(vatRecord.isFrozen, true)));
+            financialEffect = {
+                previousUnitPrice: txn.unitPrice,
+                adjustedUnitPrice: data.adjustedUnitPrice as number,
+                previousTotal: txn.totalAmount,
+                adjustedTotal,
+                previousVat: txn.vatAmount,
+                adjustedVat,
+            };
+        } else {
+            await tx.update(vatRecord)
+                .set({ isFrozen: false })
+                .where(and(eq(vatRecord.transactionId, txn.id), eq(vatRecord.isFrozen, true)));
+        }
+
+        const finalStatus = data.action === "dismiss" ? "dismissed" : "resolved";
+        await tx.update(dispute).set({
             status: finalStatus,
             rraAction: data.action,
             resolution: data.resolution.trim(),
             rraOfficialNote: data.officialNote.trim(),
             resolvedById: session.user.id,
-        })
-        .where(eq(dispute.id, disputeId));
+        }).where(eq(dispute.id, disputeId));
 
-    await logAudit({
-        userId: session.user.id,
-        action: "DISPUTE_RESOLVED_BY_RRA",
-        targetType: "dispute",
-        targetId: disputeId,
-        metadata: {
-            rraAction: data.action,
-            resolution: data.resolution.trim(),
-            resolvedBy: staff.staffId,
-            referenceNumber: existingDispute.referenceNumber,
-        },
-    });
-
-    const actionLabel = ACTION_LABELS[data.action];
-
-    // Notify BOTH parties with the official communication
-    const partyIds = [existingDispute.filedById, existingDispute.counterpartyId];
-
-    for (const partyId of partyIds) {
-        await createNotification({
-            userId: partyId,
+        const actionLabel = ACTION_LABELS[data.action];
+        const partyIds = [existingDispute.filedById, existingDispute.counterpartyId];
+        await tx.insert(notification).values(partyIds.map((userId) => ({
+            userId,
             type: "system",
             title: `Dispute ${existingDispute.referenceNumber} — ${actionLabel}`,
             message: `RRA Official Decision: ${data.officialNote.trim()}`,
             link: "/dashboard/disputes",
+        })));
+
+        await tx.insert(auditLog).values({
+            userId: session.user.id,
+            action: "DISPUTE_RESOLVED_BY_RRA",
+            targetType: "dispute",
+            targetId: disputeId,
+            metadata: JSON.stringify({
+                rraAction: data.action,
+                resolution: data.resolution.trim(),
+                resolvedBy: staff.staffId,
+                referenceNumber: existingDispute.referenceNumber,
+                ...financialEffect,
+            }),
         });
 
+        return { existingDispute, partyIds };
+    });
+
+    for (const partyId of partyIds) {
         emitToUser(partyId, "dispute:resolved", {
             disputeId,
             action: data.action,

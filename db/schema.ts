@@ -252,6 +252,7 @@ export const vatRecord = pgTable(
       .references(() => user.id),
     vatType: text('vat_type').notNull(), // "input" | "output"
     amount: integer('amount').notNull(), // RWF
+    isFrozen: boolean('is_frozen').notNull().default(false),
     period: text('period'), // e.g. "2026-Q1", "2026-03" for period-based filing
     createdAt: timestamp('created_at').defaultNow().notNull(),
   },

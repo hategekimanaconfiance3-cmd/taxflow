@@ -2,7 +2,7 @@
 
 import { eq, sql, desc, and, or, gte, lte, ilike } from "drizzle-orm";
 import db from "@/db/drizzle";
-import { user, transaction, vatRecord, auditLog, stock, product, taxPayment } from "@/db/schema";
+import { dispute, user, transaction, vatRecord, auditLog, stock, product, taxPayment } from "@/db/schema";
 import {
     requireRRASession,
     type RRARole,
@@ -544,36 +544,105 @@ export async function cancelTransaction(
         throw new Error("A reason is required to cancel a transaction.");
     }
 
-    const [txn] = await db
-        .select({
-            id: transaction.id,
-            status: transaction.status,
-        })
-        .from(transaction)
-        .where(eq(transaction.id, transactionId))
-        .limit(1);
+    await db.transaction(async (tx) => {
+        const [txn] = await tx
+            .select()
+            .from(transaction)
+            .where(eq(transaction.id, transactionId))
+            .for("update")
+            .limit(1);
 
-    if (!txn) throw new Error("Transaction not found.");
+        if (!txn) throw new Error("Transaction not found.");
+        if (txn.status === "rejected") throw new Error("Transaction is already rejected.");
+        if (!["pending", "confirmed", "completed"].includes(txn.status)) {
+            throw new Error("Transaction cannot be cancelled from its current status.");
+        }
 
-    if (txn.status === "rejected") {
-        throw new Error("Transaction is already rejected.");
-    }
+        const [activeDispute] = await tx
+            .select({ id: dispute.id })
+            .from(dispute)
+            .where(and(
+                eq(dispute.transactionId, txn.id),
+                sql`${dispute.status} NOT IN ('resolved', 'dismissed')`,
+            ))
+            .limit(1);
+        if (activeDispute) throw new Error("Resolve the active dispute before cancelling this transaction.");
 
-    await db
-        .update(transaction)
-        .set({ status: "rejected" })
-        .where(eq(transaction.id, transactionId));
+        if (txn.status === "confirmed" || txn.status === "completed") {
+            const [sellerStock] = await tx
+                .select()
+                .from(stock)
+                .where(and(eq(stock.businessId, txn.sellerId), eq(stock.productId, txn.productId)))
+                .for("update")
+                .limit(1);
 
-    await logAudit({
-        userId: session.user.id,
-        action: "TRANSACTION_CANCELLED",
-        targetType: "transaction",
-        targetId: transactionId,
-        metadata: {
-            reason: reason.trim(),
-            previousStatus: txn.status,
-            cancelledBy: staff.staffId,
-        },
+            if (sellerStock) {
+                await tx.update(stock)
+                    .set({ quantity: sellerStock.quantity + txn.quantity })
+                    .where(eq(stock.id, sellerStock.id));
+            } else {
+                await tx.insert(stock).values({
+                    businessId: txn.sellerId,
+                    productId: txn.productId,
+                    quantity: txn.quantity,
+                });
+            }
+
+            if (txn.buyerId) {
+                const [buyerStock] = await tx
+                    .select()
+                    .from(stock)
+                    .where(and(eq(stock.businessId, txn.buyerId), eq(stock.productId, txn.productId)))
+                    .for("update")
+                    .limit(1);
+
+                if (!buyerStock || buyerStock.quantity < txn.quantity) {
+                    throw new Error("Transaction cannot be reversed because the buyer no longer has the purchased stock.");
+                }
+
+                await tx.update(stock)
+                    .set({ quantity: buyerStock.quantity - txn.quantity })
+                    .where(eq(stock.id, buyerStock.id));
+            }
+
+            const originalVatRecords = await tx
+                .select()
+                .from(vatRecord)
+                .where(eq(vatRecord.transactionId, txn.id));
+
+            if (originalVatRecords.length === 0) {
+                throw new Error("Transaction VAT records are missing; cancellation requires manual review.");
+            }
+
+            await tx.insert(vatRecord).values(originalVatRecords.map((record) => ({
+                transactionId: txn.id,
+                businessId: record.businessId,
+                vatType: record.vatType,
+                amount: -record.amount,
+                period: record.period,
+            })));
+        }
+
+        const [updated] = await tx.update(transaction)
+            .set({ status: "rejected", rejectedAt: new Date() })
+            .where(and(eq(transaction.id, txn.id), eq(transaction.status, txn.status)))
+            .returning({ id: transaction.id });
+
+        if (!updated) throw new Error("Transaction status changed; cancellation was not applied.");
+
+        await tx.insert(auditLog).values({
+            userId: session.user.id,
+            action: "TRANSACTION_CANCELLED",
+            targetType: "transaction",
+            targetId: transactionId,
+            metadata: JSON.stringify({
+                reason: reason.trim(),
+                previousStatus: txn.status,
+                cancelledBy: staff.staffId,
+                quantity: txn.quantity,
+                vatAmountReversed: txn.status === "confirmed" || txn.status === "completed" ? txn.vatAmount : 0,
+            }),
+        });
     });
 
     return { success: true };

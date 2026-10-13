@@ -1,6 +1,6 @@
 'use server';
 
-import { eq, sql } from 'drizzle-orm';
+import { eq, sql, and } from 'drizzle-orm';
 import db from '@/db/drizzle';
 import { vatRecord, user } from '@/db/schema';
 import { requireTraderSession } from '@/lib/auth-guard';
@@ -13,6 +13,7 @@ import { requireRRASession, type RRARole } from '@/lib/auth-guard';
 export async function getBusinessVAT(businessId?: string) {
   const session = await requireTraderSession();
   const targetId = businessId ?? session.user.id;
+  if (targetId !== session.user.id) throw new Error('You can only view VAT for your own business.');
 
   const result = await db
     .select({
@@ -20,7 +21,7 @@ export async function getBusinessVAT(businessId?: string) {
       total: sql<number>`SUM(${vatRecord.amount})`.as('total'),
     })
     .from(vatRecord)
-    .where(eq(vatRecord.businessId, targetId))
+    .where(and(eq(vatRecord.businessId, targetId), eq(vatRecord.isFrozen, false)))
     .groupBy(vatRecord.vatType);
 
   const vatOutput = result.find((r) => r.vatType === 'output')?.total ?? 0;
@@ -47,6 +48,7 @@ export async function getSystemVAT() {
       total: sql<number>`SUM(${vatRecord.amount})`.as('total'),
     })
     .from(vatRecord)
+    .where(eq(vatRecord.isFrozen, false))
     .groupBy(vatRecord.vatType);
 
   const totalOutput = result.find((r) => r.vatType === 'output')?.total ?? 0;

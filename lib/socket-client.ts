@@ -4,20 +4,32 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { io, Socket } from "socket.io-client";
 
 let globalSocket: Socket | null = null;
+let globalSocketUserId: string | null = null;
 
 function getSocket(userId: string): Socket {
+    if (globalSocket && globalSocketUserId !== userId) {
+        globalSocket.disconnect();
+        globalSocket = null;
+    }
+
     if (!globalSocket) {
         globalSocket = io({
             path: "/api/socketio",
             transports: ["websocket", "polling"],
-            auth: { userId },
             reconnection: true,
             reconnectionAttempts: Infinity,
             reconnectionDelay: 1000,
             reconnectionDelayMax: 5000,
         });
+        globalSocketUserId = userId;
     }
     return globalSocket;
+}
+
+export function disconnectSocket(): void {
+    globalSocket?.disconnect();
+    globalSocket = null;
+    globalSocketUserId = null;
 }
 
 /**

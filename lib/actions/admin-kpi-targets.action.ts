@@ -1,6 +1,6 @@
 "use server";
 
-import { sql, eq } from "drizzle-orm";
+import { sql, eq, and } from "drizzle-orm";
 import db from "@/db/drizzle";
 import { user, vatRecord, taxPayment, transaction, dispute, systemConfig } from "@/db/schema";
 import { requireRRASession } from "@/lib/auth-guard";
@@ -134,7 +134,7 @@ export async function getKPIProgress(): Promise<KPIProgressReport> {
                 total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`.as("total"),
             })
             .from(vatRecord)
-            .where(eq(vatRecord.businessId, trader.id))
+            .where(and(eq(vatRecord.businessId, trader.id), eq(vatRecord.isFrozen, false)))
             .groupBy(vatRecord.vatType);
 
         const output = Number(vatResult.find((r) => r.vatType === "output")?.total) || 0;

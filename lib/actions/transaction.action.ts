@@ -2,7 +2,7 @@
 
 import { eq, and, or, desc, lt, sql } from 'drizzle-orm';
 import db from '@/db/drizzle';
-import { transaction, stock, vatRecord, product, user } from '@/db/schema';
+import { transaction, stock, vatRecord, product, user, auditLog } from '@/db/schema';
 import {
   requireTraderSession,
   requireApprovedClearance,
@@ -150,33 +150,37 @@ export async function createTransaction(data: {
     });
   }
 
-  const [txn] = await db
-    .insert(transaction)
-    .values({
-      sellerId: session.user.id,
-      buyerId: buyer.id,
-      productId: data.productId,
-      quantity: data.quantity,
-      unitPrice: data.unitPrice,
-      totalAmount,
-      vatAmount,
-      status: 'pending',
-    })
-    .returning();
+  const txn = await db.transaction(async (tx) => {
+    const [txn] = await tx
+      .insert(transaction)
+      .values({
+        sellerId: session.user.id,
+        buyerId: buyer.id,
+        productId: data.productId,
+        quantity: data.quantity,
+        unitPrice: data.unitPrice,
+        totalAmount,
+        vatAmount,
+        status: 'pending',
+      })
+      .returning();
 
-  await logAudit({
-    userId: session.user.id,
-    action: 'TRANSACTION_CREATED',
-    targetType: 'transaction',
-    targetId: txn.id,
-    metadata: {
-      buyerId: buyer.id,
-      buyerTin: data.buyerTin,
-      productId: data.productId,
-      quantity: data.quantity,
-      totalAmount,
-      vatAmount,
-    },
+    await tx.insert(auditLog).values({
+      userId: session.user.id,
+      action: 'TRANSACTION_CREATED',
+      targetType: 'transaction',
+      targetId: txn.id,
+      metadata: JSON.stringify({
+        buyerId: buyer.id,
+        buyerTin: data.buyerTin,
+        productId: data.productId,
+        quantity: data.quantity,
+        totalAmount,
+        vatAmount,
+      }),
+    });
+
+    return txn;
   });
 
   // Real-time: notify buyer of incoming transaction
@@ -211,97 +215,100 @@ export async function confirmTransaction(transactionId: string) {
     throw new Error(`Your account is ${clearanceStatus}. Cannot confirm transactions.`);
   }
 
-  // Fetch the pending transaction
-  const [txn] = await db
-    .select()
-    .from(transaction)
-    .where(
-      and(
-        eq(transaction.id, transactionId),
-        eq(transaction.buyerId, session.user.id),
-        eq(transaction.status, 'pending'),
-      ),
-    )
-    .limit(1);
+  const txn = await db.transaction(async (tx) => {
+    // Serialize concurrent confirmations by locking the transaction row first.
+    const [lockedTxn] = await tx
+      .select()
+      .from(transaction)
+      .where(eq(transaction.id, transactionId))
+      .for('update')
+      .limit(1);
 
-  if (!txn) {
-    throw new Error('Transaction not found or already processed');
-  }
+    if (!lockedTxn || lockedTxn.buyerId !== session.user.id || lockedTxn.status !== 'pending') {
+      throw new Error('Transaction not found or already processed');
+    }
 
-  // All of the following happens atomically in a DB transaction
-  await db.transaction(async (tx) => {
     // 1. Deduct seller stock
     const [sellerStock] = await tx
       .select()
       .from(stock)
-      .where(and(eq(stock.businessId, txn.sellerId), eq(stock.productId, txn.productId)))
+      .where(and(eq(stock.businessId, lockedTxn.sellerId), eq(stock.productId, lockedTxn.productId)))
+      .for('update')
       .limit(1);
 
-    if (!sellerStock || sellerStock.quantity < txn.quantity) {
+    if (!sellerStock || sellerStock.quantity < lockedTxn.quantity) {
       throw new Error('Seller no longer has sufficient stock');
     }
 
     await tx
       .update(stock)
-      .set({ quantity: sellerStock.quantity - txn.quantity })
+      .set({ quantity: sellerStock.quantity - lockedTxn.quantity })
       .where(eq(stock.id, sellerStock.id));
 
     // 2. Add/upsert buyer stock
     const [buyerStock] = await tx
       .select()
       .from(stock)
-      .where(and(eq(stock.businessId, session.user.id), eq(stock.productId, txn.productId)))
+      .where(and(eq(stock.businessId, session.user.id), eq(stock.productId, lockedTxn.productId)))
+      .for('update')
       .limit(1);
 
     if (buyerStock) {
       await tx
         .update(stock)
-        .set({ quantity: buyerStock.quantity + txn.quantity })
+        .set({ quantity: buyerStock.quantity + lockedTxn.quantity })
         .where(eq(stock.id, buyerStock.id));
     } else {
       await tx.insert(stock).values({
         businessId: session.user.id,
-        productId: txn.productId,
-        quantity: txn.quantity,
+        productId: lockedTxn.productId,
+        quantity: lockedTxn.quantity,
       });
     }
 
     // 3. Create VAT output record (seller)
     await tx.insert(vatRecord).values({
-      transactionId: txn.id,
-      businessId: txn.sellerId,
+      transactionId: lockedTxn.id,
+      businessId: lockedTxn.sellerId,
       vatType: 'output',
-      amount: txn.vatAmount,
+      amount: lockedTxn.vatAmount,
     });
 
     // 4. Create VAT input record (buyer)
     await tx.insert(vatRecord).values({
-      transactionId: txn.id,
+      transactionId: lockedTxn.id,
       businessId: session.user.id,
       vatType: 'input',
-      amount: txn.vatAmount,
+      amount: lockedTxn.vatAmount,
     });
 
     // 5. Update transaction status
-    await tx
+    const confirmed = await tx
       .update(transaction)
       .set({
         status: 'confirmed',
         confirmedAt: new Date(),
       })
-      .where(eq(transaction.id, txn.id));
-  });
+      .where(and(eq(transaction.id, lockedTxn.id), eq(transaction.status, 'pending')))
+      .returning({ id: transaction.id });
 
-  await logAudit({
-    userId: session.user.id,
-    action: 'TRANSACTION_CONFIRMED',
-    targetType: 'transaction',
-    targetId: txn.id,
-    metadata: {
-      sellerId: txn.sellerId,
-      quantity: txn.quantity,
-      vatAmount: txn.vatAmount,
-    },
+    if (confirmed.length !== 1) {
+      throw new Error('Transaction was already processed');
+    }
+
+    await tx.insert(auditLog).values({
+      userId: session.user.id,
+      action: 'TRANSACTION_CONFIRMED',
+      targetType: 'transaction',
+      targetId: lockedTxn.id,
+      metadata: JSON.stringify({
+        sellerId: lockedTxn.sellerId,
+        quantity: lockedTxn.quantity,
+        vatAmount: lockedTxn.vatAmount,
+      }),
+    });
+
+    return lockedTxn;
   });
 
   // Real-time: notify seller that their sale was confirmed
@@ -322,8 +329,10 @@ export async function confirmTransaction(transactionId: string) {
   });
 
   // Compliance alert auto-detection — check both seller and buyer
-  checkAndAlertCompliance(txn.sellerId);
-  checkAndAlertCompliance(session.user.id);
+  await Promise.all([
+    checkAndAlertCompliance(txn.sellerId),
+    checkAndAlertCompliance(session.user.id),
+  ]);
 
   return { success: true };
 }
@@ -443,6 +452,7 @@ export async function createRetailSale(data: {
       .select()
       .from(stock)
       .where(and(eq(stock.businessId, session.user.id), eq(stock.productId, data.productId)))
+      .for('update')
       .limit(1);
 
     if (!retailerStock || retailerStock.quantity < data.quantity) {
@@ -479,25 +489,24 @@ export async function createRetailSale(data: {
       amount: vatAmount,
     });
 
+    await tx.insert(auditLog).values({
+      userId: session.user.id,
+      action: 'RETAIL_SALE_COMPLETED',
+      targetType: 'transaction',
+      targetId: txn.id,
+      metadata: JSON.stringify({
+        productId: data.productId,
+        quantity: data.quantity,
+        totalAmount,
+        vatAmount,
+      }),
+    });
+
     return txn;
   });
 
-  await logAudit({
-    userId: session.user.id,
-    action: 'RETAIL_SALE_COMPLETED',
-    targetType: 'transaction',
-    targetId: result.id,
-    metadata: {
-      customerName: data.customerName,
-      productId: data.productId,
-      quantity: data.quantity,
-      totalAmount,
-      vatAmount,
-    },
-  });
-
   // Compliance alert auto-detection for retailer
-  checkAndAlertCompliance(session.user.id);
+  await checkAndAlertCompliance(session.user.id);
 
   return result;
 }

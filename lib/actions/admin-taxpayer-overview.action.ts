@@ -62,6 +62,7 @@ export async function getTaxpayerOverview(
                 total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`.as("total"),
             })
             .from(vatRecord)
+        .where(eq(vatRecord.isFrozen, false))
             .groupBy(vatRecord.businessId, vatRecord.vatType),
 
         // Confirmed payments by trader

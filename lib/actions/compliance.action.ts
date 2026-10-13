@@ -1,8 +1,8 @@
 'use server';
 
-import { eq, desc, sql } from 'drizzle-orm';
+import { eq, desc, sql, and } from 'drizzle-orm';
 import db from '@/db/drizzle';
-import { vatRecord, taxPayment, user } from '@/db/schema';
+import { auditLog, vatRecord, taxPayment, user } from '@/db/schema';
 import { requireTraderSession, requireRRASession } from '@/lib/auth-guard';
 import { logAudit } from '@/lib/audit';
 import { createNotification } from '@/lib/actions/notification.action';
@@ -30,7 +30,7 @@ export async function getTaxComplianceStatus(userId?: string) {
       total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`.as('total'),
     })
     .from(vatRecord)
-    .where(eq(vatRecord.businessId, targetId))
+    .where(and(eq(vatRecord.businessId, targetId), eq(vatRecord.isFrozen, false)))
     .groupBy(vatRecord.vatType);
 
   const vatOutput = Number(vatResult.find((r) => r.vatType === 'output')?.total) || 0;
@@ -83,7 +83,7 @@ export async function recordTaxPayment(data: {
       total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`.as('total'),
     })
     .from(vatRecord)
-    .where(eq(vatRecord.businessId, session.user.id))
+    .where(and(eq(vatRecord.businessId, session.user.id), eq(vatRecord.isFrozen, false)))
     .groupBy(vatRecord.vatType);
 
   const vatOutput = Number(vatResult.find((r) => r.vatType === 'output')?.total) || 0;
@@ -116,29 +116,32 @@ export async function recordTaxPayment(data: {
   }
 
   // ── Insert payment ─────────────────────────────────────────────────
-  const [payment] = await db
-    .insert(taxPayment)
-    .values({
-      businessId: session.user.id,
-      amount: data.amount,
-      method: data.method,
-      reference: data.reference || null,
-      status: 'confirmed',
-    })
-    .returning();
+  const [payment] = await db.transaction(async (tx) => {
+    const [payment] = await tx
+      .insert(taxPayment)
+      .values({
+        businessId: session.user.id,
+        amount: data.amount,
+        method: data.method,
+        reference: data.reference || null,
+        status: 'pending',
+      })
+      .returning();
 
-  await logAudit({
-    userId: session.user.id,
-    action: 'TAX_PAYMENT_RECORDED',
-    targetType: 'tax_payment',
-    targetId: payment.id,
-    metadata: {
-      amount: data.amount,
-      method: data.method,
-      reference: data.reference,
-      outstandingBefore: outstanding,
-      outstandingAfter: outstanding - data.amount,
-    },
+    await tx.insert(auditLog).values({
+      userId: session.user.id,
+      action: 'TAX_PAYMENT_SUBMITTED',
+      targetType: 'tax_payment',
+      targetId: payment.id,
+      metadata: JSON.stringify({
+        amount: data.amount,
+        method: data.method,
+        reference: data.reference,
+        outstandingAtSubmission: outstanding,
+      }),
+    });
+
+    return [payment];
   });
 
   return payment;
@@ -179,7 +182,7 @@ export async function checkAndAlertCompliance(traderId: string) {
         total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`.as('total'),
       })
       .from(vatRecord)
-      .where(eq(vatRecord.businessId, traderId))
+      .where(and(eq(vatRecord.businessId, traderId), eq(vatRecord.isFrozen, false)))
       .groupBy(vatRecord.vatType);
 
     const vatOutput = Number(vatResult.find((r) => r.vatType === 'output')?.total) || 0;
@@ -324,7 +327,7 @@ export async function runSystemComplianceCheck() {
           total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`.as('total'),
         })
         .from(vatRecord)
-        .where(eq(vatRecord.businessId, trader.id))
+        .where(and(eq(vatRecord.businessId, trader.id), eq(vatRecord.isFrozen, false)))
         .groupBy(vatRecord.vatType);
 
       const vatOutput = Number(vatResult.find((r) => r.vatType === 'output')?.total) || 0;

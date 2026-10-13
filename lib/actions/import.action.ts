@@ -1,8 +1,8 @@
 "use server";
 
-import { eq, desc, and } from "drizzle-orm";
+import { eq, desc, and, sql } from "drizzle-orm";
 import db from "@/db/drizzle";
-import { importDeclaration, product, stock, user } from "@/db/schema";
+import { importDeclaration, product, stock, user, auditLog } from "@/db/schema";
 import { requireTraderSession, requireRRASession } from "@/lib/auth-guard";
 import { logAudit } from "@/lib/audit";
 import { createNotification } from "@/lib/actions/notification.action";
@@ -144,78 +144,62 @@ export async function submitImportArrival(
 export async function confirmImportArrival(declarationId: string) {
     const { staff, ...session } = await requireRRASession("compliance_officer", "audit_officer");
 
-    const [declaration] = await db
-        .select()
-        .from(importDeclaration)
-        .where(eq(importDeclaration.id, declarationId))
-        .limit(1);
+    const { declaration, actualQuantity, discrepancy } = await db.transaction(async (tx) => {
+        const [declaration] = await tx
+            .select()
+            .from(importDeclaration)
+            .where(eq(importDeclaration.id, declarationId))
+            .for("update")
+            .limit(1);
 
-    if (!declaration) {
-        throw new Error("Import declaration not found");
-    }
+        if (!declaration) throw new Error("Import declaration not found");
+        if (declaration.status !== "submitted") {
+            throw new Error("Only submitted declarations can be confirmed. Current status: " + declaration.status);
+        }
+        if (declaration.actualQuantity == null || !declaration.invoiceRef) {
+            throw new Error("Declaration is missing arrival details / invoice reference");
+        }
 
-    if (declaration.status !== "submitted") {
-        throw new Error("Only submitted declarations can be confirmed. Current status: " + declaration.status);
-    }
+        const actualQuantity = declaration.actualQuantity;
+        const [activated] = await tx
+            .update(importDeclaration)
+            .set({ status: "activated", reviewedById: session.user.id })
+            .where(and(eq(importDeclaration.id, declarationId), eq(importDeclaration.status, "submitted")))
+            .returning({ id: importDeclaration.id });
 
-    if (!declaration.actualQuantity || !declaration.invoiceRef) {
-        throw new Error("Declaration is missing arrival details / invoice reference");
-    }
+        if (!activated) throw new Error("Declaration status changed; import was not activated.");
 
-    const actualQuantity = declaration.actualQuantity;
+        await tx
+            .insert(stock)
+            .values({
+                businessId: declaration.businessId,
+                productId: declaration.productId,
+                quantity: actualQuantity,
+            })
+            .onConflictDoUpdate({
+                target: [stock.businessId, stock.productId],
+                set: { quantity: sql`${stock.quantity} + ${actualQuantity}` },
+            });
 
-    // Update status to activated + record reviewer
-    await db
-        .update(importDeclaration)
-        .set({
-            status: "activated",
-            reviewedById: session.user.id,
-        })
-        .where(eq(importDeclaration.id, declarationId));
+        const discrepancy = declaration.expectedQuantity - actualQuantity;
+        const discrepancyPct = Math.abs(discrepancy) / declaration.expectedQuantity;
 
-    // Add to stock (upsert)
-    const [existingStock] = await db
-        .select()
-        .from(stock)
-        .where(
-            and(
-                eq(stock.businessId, declaration.businessId),
-                eq(stock.productId, declaration.productId),
-            ),
-        )
-        .limit(1);
-
-    if (existingStock) {
-        await db
-            .update(stock)
-            .set({ quantity: existingStock.quantity + actualQuantity })
-            .where(eq(stock.id, existingStock.id));
-    } else {
-        await db.insert(stock).values({
-            businessId: declaration.businessId,
-            productId: declaration.productId,
-            quantity: actualQuantity,
+        await tx.insert(auditLog).values({
+            userId: session.user.id,
+            action: "IMPORT_CONFIRMED_BY_RRA",
+            targetType: "import_declaration",
+            targetId: declarationId,
+            metadata: JSON.stringify({
+                expectedQuantity: declaration.expectedQuantity,
+                actualQuantity,
+                discrepancy,
+                discrepancyPct: Math.round(discrepancyPct * 100),
+                underDeclared: discrepancyPct > 0.1,
+                reviewedBy: staff.staffId,
+            }),
         });
-    }
 
-    // Flag discrepancy in audit
-    const discrepancy = declaration.expectedQuantity - actualQuantity;
-    const discrepancyPct =
-        Math.abs(discrepancy) / declaration.expectedQuantity;
-
-    await logAudit({
-        userId: session.user.id,
-        action: "IMPORT_CONFIRMED_BY_RRA",
-        targetType: "import_declaration",
-        targetId: declarationId,
-        metadata: {
-            expectedQuantity: declaration.expectedQuantity,
-            actualQuantity,
-            discrepancy,
-            discrepancyPct: Math.round(discrepancyPct * 100),
-            underDeclared: discrepancyPct > 0.1,
-            reviewedBy: staff.staffId,
-        },
+        return { declaration, actualQuantity, discrepancy };
     });
 
     // Notify the trader

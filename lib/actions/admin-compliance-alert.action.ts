@@ -48,6 +48,7 @@ export async function generateComplianceAlerts(): Promise<ComplianceAlert[]> {
             inputTotal: sql<number>`COALESCE(SUM(CASE WHEN ${vatRecord.vatType} = 'input' THEN ${vatRecord.amount} ELSE 0 END), 0)::float8`.as("input_total"),
         })
         .from(vatRecord)
+        .where(eq(vatRecord.isFrozen, false))
         .groupBy(vatRecord.businessId);
 
     const vatMap = new Map(

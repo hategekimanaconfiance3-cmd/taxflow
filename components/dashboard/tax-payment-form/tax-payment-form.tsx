@@ -69,7 +69,7 @@ export function TaxPaymentForm({ outstanding }: TaxPaymentFormProps) {
             // Show success via root-level message
             form.setError("root", {
                 type: "success",
-                message: `Payment of ${values.amount.toLocaleString()} RWF recorded successfully`,
+                message: `Payment of ${values.amount.toLocaleString()} RWF submitted for RRA verification`,
             });
             router.refresh();
         } catch (err) {

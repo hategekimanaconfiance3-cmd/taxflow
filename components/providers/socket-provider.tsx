@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, type ReactNode } from "react";
-import { useSocket } from "@/lib/socket-client";
+import { disconnectSocket, useSocket } from "@/lib/socket-client";
 
 interface SocketContextValue {
     connected: boolean;
@@ -42,6 +42,8 @@ export function SocketProvider({ userId, children }: SocketProviderProps) {
                 });
         }
     }, []);
+
+    useEffect(() => () => disconnectSocket(), []);
 
     return (
         <SocketContext.Provider value={{ connected, userId }}>

@@ -184,6 +184,7 @@ async function computeTaxCompliance(
             .where(
                 and(
                     eq(vatRecord.businessId, merchantId),
+                    eq(vatRecord.isFrozen, false),
                     eq(vatRecord.vatType, "output"),
                 ),
             );

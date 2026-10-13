@@ -36,6 +36,7 @@ export async function getTradersWithUnpaidVat(): Promise<UnpaidTrader[]> {
             ),
         })
         .from(vatRecord)
+        .where(eq(vatRecord.isFrozen, false))
         .groupBy(vatRecord.businessId);
 
     // Get trader details

@@ -2,7 +2,7 @@
 
 import { eq, desc, sql, and, ilike } from "drizzle-orm";
 import db from "@/db/drizzle";
-import { taxPayment, user } from "@/db/schema";
+import { auditLog, taxPayment, user, vatRecord } from "@/db/schema";
 import { requireRRASession } from "@/lib/auth-guard";
 
 // ---------------------------------------------------------------------------
@@ -76,12 +76,67 @@ export async function updatePaymentStatus(
     paymentId: string,
     status: "confirmed" | "rejected",
 ) {
-    await requireRRASession("compliance_officer", "audit_officer");
+    const session = await requireRRASession("compliance_officer", "audit_officer");
 
-    await db
-        .update(taxPayment)
-        .set({ status })
-        .where(eq(taxPayment.id, paymentId));
+    await db.transaction(async (tx) => {
+        const [payment] = await tx
+            .select()
+            .from(taxPayment)
+            .where(eq(taxPayment.id, paymentId))
+            .for("update")
+            .limit(1);
+        if (!payment) throw new Error("Payment not found.");
+        if (payment.status !== "pending") throw new Error("Only pending payments can be reviewed.");
+
+        const [lockedUser] = await tx
+            .select({ id: user.id })
+            .from(user)
+            .where(eq(user.id, payment.businessId))
+            .for("update")
+            .limit(1);
+        if (!lockedUser) throw new Error("Taxpayer not found.");
+
+        if (status === "confirmed") {
+            const vatTotals = await tx
+                .select({
+                    vatType: vatRecord.vatType,
+                    total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`.as("total"),
+                })
+                .from(vatRecord)
+                .where(and(eq(vatRecord.businessId, payment.businessId), eq(vatRecord.isFrozen, false)))
+                .groupBy(vatRecord.vatType);
+            const output = Number(vatTotals.find((row) => row.vatType === "output")?.total) || 0;
+            const input = Number(vatTotals.find((row) => row.vatType === "input")?.total) || 0;
+            const [paidRow] = await tx
+                .select({ total: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)::float8`.as("total") })
+                .from(taxPayment)
+                .where(and(eq(taxPayment.businessId, payment.businessId), eq(taxPayment.status, "confirmed")));
+            const outstanding = Math.max(0, output - input - (Number(paidRow?.total) || 0));
+            if (payment.amount > outstanding) {
+                throw new Error("Payment exceeds the taxpayer's current outstanding balance.");
+            }
+        }
+
+        const [updated] = await tx
+            .update(taxPayment)
+            .set({ status })
+            .where(and(eq(taxPayment.id, paymentId), eq(taxPayment.status, "pending")))
+            .returning({ id: taxPayment.id });
+        if (!updated) throw new Error("Payment status changed; review was not applied.");
+
+        await tx.insert(auditLog).values({
+            userId: session.user.id,
+            action: status === "confirmed" ? "TAX_PAYMENT_CONFIRMED" : "TAX_PAYMENT_REJECTED",
+            targetType: "tax_payment",
+            targetId: paymentId,
+            metadata: JSON.stringify({
+                businessId: payment.businessId,
+                amount: payment.amount,
+                previousStatus: payment.status,
+                status,
+            }),
+        });
+    });
 
     return { success: true };
 }
