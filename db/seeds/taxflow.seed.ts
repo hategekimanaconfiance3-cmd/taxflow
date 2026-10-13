@@ -205,7 +205,7 @@ async function seed() {
                 staffId: s.staffId,
                 department: s.department,
                 clearanceLevel: s.role,
-                assignedBy: "SEED",
+                assignedBy: null,
                 isActive: true,
             })
             .onConflictDoNothing();
