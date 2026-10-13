@@ -17,7 +17,6 @@ export default async function AdminImportsPage() {
 
   const declarations = await getAllImportDeclarations();
   const submitted = declarations.filter((d) => d.status === 'submitted');
-  const others    = declarations.filter((d) => d.status !== 'submitted');
 
   return (
     <div className="space-y-6">
@@ -58,6 +57,7 @@ export default async function AdminImportsPage() {
                       {d.customsRef && <span className="ml-2">· Customs: {d.customsRef}</span>}
                     </div>
                   </div>
+                  {/* Correctly mapped component with all required properties */}
                   <AdminImportActions
                     declarationId={d.id}
                     productName={`${d.productName} (${d.productUnit})`}
