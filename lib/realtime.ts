@@ -47,6 +47,10 @@ export function emitToUsers(userIds: string[], event: string, data: Record<strin
 let publisher: Redis | null = null;
 
 function getPublisher(): Redis {
+  if (!REDIS_URL) {
+    throw new Error('REDIS_URL is required to publish real-time events.');
+  }
+
   if (!publisher) {
     publisher = new Redis(REDIS_URL, {
       maxRetriesPerRequest: 1,
