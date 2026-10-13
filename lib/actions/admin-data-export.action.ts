@@ -1,6 +1,6 @@
 "use server";
 
-import { sql, eq, desc } from "drizzle-orm";
+import { sql, eq } from "drizzle-orm";
 import db from "@/db/drizzle";
 import {
     user,
