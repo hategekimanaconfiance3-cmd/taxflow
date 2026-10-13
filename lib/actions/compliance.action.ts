@@ -4,10 +4,12 @@ import { eq, desc, sql, and } from 'drizzle-orm';
 import db from '@/db/drizzle';
 import { auditLog, vatRecord, taxPayment, user } from '@/db/schema';
 import { requireTraderSession, requireRRASession } from '@/lib/auth-guard';
-import { logAudit } from '@/lib/audit';
 import { createNotification } from '@/lib/notifications';
 import { getSystemConfig } from '@/lib/actions/system-config.action';
 import { taxPaymentSubmissionSchema } from '@/lib/validation/tax-payment.schema';
+import { getBusinessComplianceStatus } from '@/lib/compliance-status';
+import { auth } from '@/lib/auth';
+import { headers } from 'next/headers';
 
 const CRITICAL_THRESHOLD = 0.8; // 80% — also notify RRA admins
 
@@ -23,47 +25,10 @@ const CRITICAL_THRESHOLD = 0.8; // 80% — also notify RRA admins
 export async function getTaxComplianceStatus(userId?: string) {
   const session = await requireTraderSession();
   const targetId = userId ?? session.user.id;
-
-  // 1. Get net VAT owed (output - input)
-  const vatResult = await db
-    .select({
-      vatType: vatRecord.vatType,
-      total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`.as('total'),
-    })
-    .from(vatRecord)
-    .where(and(eq(vatRecord.businessId, targetId), eq(vatRecord.isFrozen, false)))
-    .groupBy(vatRecord.vatType);
-
-  const vatOutput = Number(vatResult.find((r) => r.vatType === 'output')?.total) || 0;
-  const vatInput = Number(vatResult.find((r) => r.vatType === 'input')?.total) || 0;
-  const netOwed = Math.max(0, vatOutput - vatInput);
-
-  // 2. Get total confirmed payments
-  const [paymentResult] = await db
-    .select({
-      totalPaid: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)::float8`.as('total_paid'),
-    })
-    .from(taxPayment)
-    .where(sql`${taxPayment.businessId} = ${targetId} AND ${taxPayment.status} = 'confirmed'`);
-
-  const totalPaid = Number(paymentResult?.totalPaid) || 0;
-
-  // 3. Calculate compliance percentage
-  // If nothing is owed, the trader is 100% compliant
-  const config = await getSystemConfig();
-  const compliancePct = netOwed === 0 ? 100 : Math.min(100, (totalPaid / netOwed) * 100);
-  const isCompliant = compliancePct >= config.complianceThreshold * 100;
-
-  return {
-    vatOutput,
-    vatInput,
-    netOwed,
-    totalPaid,
-    outstanding: Math.max(0, netOwed - totalPaid),
-    compliancePct: Math.round(compliancePct * 10) / 10, // 1 decimal
-    isCompliant,
-    threshold: config.complianceThreshold * 100,
-  };
+  if (targetId !== session.user.id) {
+    throw new Error('You can only view tax compliance for your own business.');
+  }
+  return getBusinessComplianceStatus(targetId);
 }
 
 // ---------------------------------------------------------------------------
@@ -218,6 +183,11 @@ export async function getTaxPayments() {
  * - Below auto_suspension_threshold (50%): auto-suspend trader
  */
 export async function checkAndAlertCompliance(traderId: string) {
+  const session = await auth.api.getSession({ headers: await headers() });
+  if (!session?.user) throw new Error('Authentication is required.');
+  if (traderId !== session.user.id) {
+    await requireRRASession('compliance_officer', 'audit_officer');
+  }
   try {
     // Calculate compliance without auth guard (called from server actions)
     const vatResult = await db
@@ -266,19 +236,25 @@ export async function checkAndAlertCompliance(traderId: string) {
     if (compliancePct < config.autoSuspensionThreshold * 100) {
       // Only suspend if not already suspended
       if (trader && trader.clearanceStatus !== 'suspended') {
-        await db.update(user).set({ clearanceStatus: 'suspended' }).where(eq(user.id, traderId));
-
-        await logAudit({
-          userId: traderId,
-          action: 'AUTO_SUSPENDED',
-          targetType: 'user',
-          targetId: traderId,
-          metadata: {
-            compliancePct: Math.round(compliancePct),
-            outstanding,
-            threshold: config.autoSuspensionThreshold * 100,
-            reason: 'Compliance below auto-suspension threshold',
-          },
+        await db.transaction(async (tx) => {
+          const [updatedTrader] = await tx
+            .update(user)
+            .set({ clearanceStatus: 'suspended' })
+            .where(and(eq(user.id, traderId), eq(user.clearanceStatus, trader.clearanceStatus)))
+            .returning({ id: user.id });
+          if (!updatedTrader) return;
+          await tx.insert(auditLog).values({
+            userId: traderId,
+            action: 'AUTO_SUSPENDED',
+            targetType: 'user',
+            targetId: traderId,
+            metadata: JSON.stringify({
+              compliancePct: Math.round(compliancePct),
+              outstanding,
+              threshold: config.autoSuspensionThreshold * 100,
+              reason: 'Compliance below auto-suspension threshold',
+            }),
+          });
         });
 
         // Notify the trader

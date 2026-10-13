@@ -108,6 +108,9 @@ export async function recordProduction(data: { productId: string; quantity: numb
 export async function getInventory(businessId?: string) {
   const session = await requireTraderSession();
   const targetId = businessId ?? session.user.id;
+  if (targetId !== session.user.id) {
+    throw new Error('You can only view inventory for your own business.');
+  }
 
   return db
     .select({

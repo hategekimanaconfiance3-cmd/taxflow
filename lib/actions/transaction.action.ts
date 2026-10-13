@@ -12,7 +12,8 @@ import {
 import { logAudit } from '@/lib/audit';
 import { emitToUser } from '@/lib/realtime';
 import { createNotification } from '@/lib/notifications';
-import { getTaxComplianceStatus, checkAndAlertCompliance } from '@/lib/actions/compliance.action';
+import { checkAndAlertCompliance } from '@/lib/actions/compliance.action';
+import { getBusinessComplianceStatus } from '@/lib/compliance-status';
 import { getSystemConfig } from '@/lib/actions/system-config.action';
 import { validatePriceFloor } from '@/lib/ai/price-suggestion';
 
@@ -109,7 +110,7 @@ export async function createTransaction(data: {
   }
 
   // Tax compliance gate — seller must have paid >= 95% of tax
-  const sellerCompliance = await getTaxComplianceStatus(session.user.id);
+  const sellerCompliance = await getBusinessComplianceStatus(session.user.id);
   if (!sellerCompliance.isCompliant) {
     throw new Error(
       `You must pay at least ${sellerCompliance.threshold}% of your tax to sell. ` +
@@ -118,7 +119,7 @@ export async function createTransaction(data: {
   }
 
   // Tax compliance gate — buyer must have paid >= 95% of tax to restock
-  const buyerCompliance = await getTaxComplianceStatus(buyer.id);
+  const buyerCompliance = await getBusinessComplianceStatus(buyer.id);
   if (!buyerCompliance.isCompliant) {
     throw new Error(
       `Buyer has not met tax compliance (${buyerCompliance.compliancePct}% paid). ` +
@@ -364,10 +365,7 @@ export async function confirmTransaction(transactionId: string) {
   });
 
   // Compliance alert auto-detection — check both seller and buyer
-  await Promise.all([
-    checkAndAlertCompliance(txn.sellerId),
-    checkAndAlertCompliance(session.user.id),
-  ]);
+  await checkAndAlertCompliance(session.user.id);
 
   return { success: true };
 }
@@ -689,7 +687,7 @@ export async function lookupBuyer(buyerTin: string) {
     let buyerCompliancePct = 100;
     let buyerTaxReason = '';
     try {
-      const compliance = await getTaxComplianceStatus(buyer.id);
+      const compliance = await getBusinessComplianceStatus(buyer.id);
       buyerCompliancePct = compliance.compliancePct;
       if (!compliance.isCompliant) {
         isEligible = false;
