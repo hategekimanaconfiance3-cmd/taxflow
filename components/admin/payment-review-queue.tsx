@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { verifyTaxPayment } from "@/lib/actions/compliance.action";
 import { Button } from "@/components/ui/button";
@@ -29,7 +29,7 @@ export function PaymentReviewQueue({ payments }: { payments: PendingPaymentRevie
   const [busyId, setBusyId] = useState<string | null>(null);
   const [message, setMessage] = useState<{ id: string; kind: "success" | "error"; text: string } | null>(null);
 
-  async function submitVerification(event: React.FormEvent<HTMLFormElement>, payment: PendingPaymentReviewItem) {
+  async function submitVerification(event: FormEvent<HTMLFormElement>, payment: PendingPaymentReviewItem) {
     event.preventDefault();
     if (busyId) return;
     setBusyId(payment.id);
