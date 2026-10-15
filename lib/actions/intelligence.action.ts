@@ -1,6 +1,6 @@
 "use server";
 
-import { desc, eq, or } from "drizzle-orm";
+import { desc, eq, or, sql } from "drizzle-orm";
 import db from "@/db/drizzle";
 import { product, stock, taxPayment, transaction } from "@/db/schema";
 import { requireTraderSession } from "@/lib/auth-guard";
@@ -45,6 +45,7 @@ export async function getIntelligenceDashboard(): Promise<IntelligenceDashboardD
         id: transaction.id,
         productId: transaction.productId,
         productName: product.name,
+        direction: sql<"sale" | "purchase">`CASE WHEN ${transaction.sellerId} = ${userId} THEN 'sale' ELSE 'purchase' END`,
         quantity: transaction.quantity,
         unitPrice: transaction.unitPrice,
         totalAmount: transaction.totalAmount,
