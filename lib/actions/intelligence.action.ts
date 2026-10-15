@@ -1,8 +1,8 @@
 "use server";
 
-import { and, desc, eq, or } from "drizzle-orm";
+import { desc, eq, or } from "drizzle-orm";
 import db from "@/db/drizzle";
-import { payment, product, stock, taxPayment, transaction } from "@/db/schema";
+import { product, stock, taxPayment, transaction } from "@/db/schema";
 import { requireTraderSession } from "@/lib/auth-guard";
 import { getBusinessComplianceStatus } from "@/lib/compliance-status";
 import { getSystemConfig } from "@/lib/actions/system-config.action";
