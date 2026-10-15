@@ -14,10 +14,6 @@ export default async function PendingPage() {
   const pendingOutgoing = outgoing.filter((t) => t.status === 'pending');
 
   return (
-    <PendingPageClient
-      userId={session.user.id}
-      initialIncoming={pendingIncoming}
-      initialOutgoing={pendingOutgoing}
-    />
+    <PendingPageClient incoming={pendingIncoming} outgoing={pendingOutgoing} />
   );
 }
