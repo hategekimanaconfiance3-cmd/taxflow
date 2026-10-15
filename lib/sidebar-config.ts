@@ -84,6 +84,12 @@ export const SIDEBAR_GROUPS: SidebarGroup[] = [
                 icon: Brain,
                 roles: "all",
             },
+            {
+                label: "Tax Intelligence",
+                href: "/dashboard/intelligence",
+                icon: Shield,
+                roles: "all",
+            },
         ],
     },
     // ── Operations ───────────────────────────────────────────
