@@ -87,8 +87,8 @@ export async function createTransaction(data: {
     throw new Error('Retailers must use createRetailSale() for consumer sales.');
   }
 
-  if (data.quantity <= 0 || data.unitPrice <= 0) {
-    throw new Error('Quantity and unit price must be positive');
+  if (!Number.isFinite(data.quantity) || data.quantity <= 0 || !Number.isSafeInteger(data.unitPrice) || data.unitPrice <= 0) {
+    throw new Error('Quantity must be positive and finite, and unit price must be a positive whole-RWF amount');
   }
 
   // Look up the buyer by TIN
@@ -473,8 +473,8 @@ export async function createRetailSale(data: {
   // Only retailers can sell to consumers
   await requireTraderSession(['retailer']);
 
-  if (data.quantity <= 0 || data.unitPrice <= 0) {
-    throw new Error('Quantity and unit price must be positive');
+  if (!Number.isFinite(data.quantity) || data.quantity <= 0 || !Number.isSafeInteger(data.unitPrice) || data.unitPrice <= 0) {
+    throw new Error('Quantity must be positive and finite, and unit price must be a positive whole-RWF amount');
   }
 
   if (!data.customerName.trim()) {
