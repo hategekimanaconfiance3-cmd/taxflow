@@ -348,6 +348,26 @@ export async function confirmTransaction(transactionId: string) {
         sellerId: lockedTxn.sellerId,
         quantity: lockedTxn.quantity,
         vatAmount: lockedTxn.vatAmount,
+        stockMovements: [
+          {
+            movementId: `${lockedTxn.id}:seller`,
+            movementType: 'sale',
+            businessId: lockedTxn.sellerId,
+            productId: lockedTxn.productId,
+            quantityDelta: -lockedTxn.quantity,
+            quantityBefore: sellerStock.quantity,
+            quantityAfter: sellerStock.quantity - lockedTxn.quantity,
+          },
+          {
+            movementId: `${lockedTxn.id}:buyer`,
+            movementType: 'purchase',
+            businessId: session.user.id,
+            productId: lockedTxn.productId,
+            quantityDelta: lockedTxn.quantity,
+            quantityBefore: buyerStock?.quantity ?? 0,
+            quantityAfter: (buyerStock?.quantity ?? 0) + lockedTxn.quantity,
+          },
+        ],
       }),
     });
 
@@ -546,8 +566,16 @@ export async function createRetailSale(data: {
       action: 'RETAIL_SALE_COMPLETED',
       targetType: 'transaction',
       targetId: txn.id,
+      beforeState: { stockQuantity: retailerStock.quantity },
+      afterState: { stockQuantity: retailerStock.quantity - data.quantity },
       metadata: JSON.stringify({
+        movementId: `${txn.id}:retail-sale`,
+        movementType: 'sale',
+        businessId: session.user.id,
         productId: data.productId,
+        quantityDelta: -data.quantity,
+        quantityBefore: retailerStock.quantity,
+        quantityAfter: retailerStock.quantity - data.quantity,
         quantity: data.quantity,
         totalAmount,
         vatAmount,
