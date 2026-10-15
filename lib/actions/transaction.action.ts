@@ -16,6 +16,7 @@ import { checkAndAlertCompliance } from '@/lib/actions/compliance.action';
 import { getBusinessComplianceStatus } from '@/lib/compliance-status';
 import { getSystemConfig } from '@/lib/actions/system-config.action';
 import { validatePriceFloor } from '@/lib/ai/price-suggestion';
+import { calculateVat } from '@/lib/intelligence/tax-engine';
 
 /** Pending transactions expire after 10 minutes (ms). */
 const PENDING_EXPIRY_MS = 10 * 60 * 1000;
@@ -139,8 +140,14 @@ export async function createTransaction(data: {
   }
 
   const config = await getSystemConfig();
-  const totalAmount = data.quantity * data.unitPrice;
-  const vatAmount = Math.round(totalAmount * config.vatRate);
+  // Persist whole-RWF amounts consistently with the integer database columns.
+  const totalAmount = Math.round(data.quantity * data.unitPrice);
+  const vatCalculation = calculateVat({
+    amountRwf: totalAmount,
+    rateBasisPoints: Math.round(config.vatRate * 10_000),
+    pricingMode: 'exclusive',
+  });
+  const vatAmount = vatCalculation.vatAmountRwf;
 
   // AI Price Floor enforcement — blocks underreporting
   const priceCheck = await validatePriceFloor(data.productId, session.user.id, data.unitPrice);
@@ -455,8 +462,14 @@ export async function createRetailSale(data: {
   }
 
   const config = await getSystemConfig();
-  const totalAmount = data.quantity * data.unitPrice;
-  const vatAmount = Math.round(totalAmount * config.vatRate);
+  // Persist whole-RWF amounts consistently with the integer database columns.
+  const totalAmount = Math.round(data.quantity * data.unitPrice);
+  const vatCalculation = calculateVat({
+    amountRwf: totalAmount,
+    rateBasisPoints: Math.round(config.vatRate * 10_000),
+    pricingMode: 'exclusive',
+  });
+  const vatAmount = vatCalculation.vatAmountRwf;
 
   // AI Price Floor enforcement — blocks underreporting
   const priceCheck = await validatePriceFloor(data.productId, session.user.id, data.unitPrice);
