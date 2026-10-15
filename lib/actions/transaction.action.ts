@@ -279,14 +279,20 @@ export async function confirmTransaction(transactionId: string) {
       .set({ quantity: sellerStock.quantity - lockedTxn.quantity })
       .where(eq(stock.id, sellerStock.id));
 
-    // 2. Add/upsert buyer stock
+    // 2. Add/upsert buyer stock and use the database-returned quantity.
+    // The ON CONFLICT path can run when another confirmation creates this row
+    // concurrently, so the initially selected buyerStock may be absent/stale.
+    let buyerQuantityAfter: number;
     if (buyerStock) {
-      await tx
+      const [updatedBuyerStock] = await tx
         .update(stock)
         .set({ quantity: buyerStock.quantity + lockedTxn.quantity })
-        .where(eq(stock.id, buyerStock.id));
+        .where(eq(stock.id, buyerStock.id))
+        .returning({ quantity: stock.quantity });
+      if (!updatedBuyerStock) throw new Error('Unable to update buyer stock');
+      buyerQuantityAfter = updatedBuyerStock.quantity;
     } else {
-      await tx
+      const [upsertedBuyerStock] = await tx
         .insert(stock)
         .values({
           businessId: session.user.id,
@@ -296,8 +302,12 @@ export async function confirmTransaction(transactionId: string) {
         .onConflictDoUpdate({
           target: [stock.businessId, stock.productId],
           set: { quantity: sql`${stock.quantity} + ${lockedTxn.quantity}` },
-        });
+        })
+        .returning({ quantity: stock.quantity });
+      if (!upsertedBuyerStock) throw new Error('Unable to create or update buyer stock');
+      buyerQuantityAfter = upsertedBuyerStock.quantity;
     }
+    const buyerQuantityBefore = buyerQuantityAfter - lockedTxn.quantity;
 
     // 3. Create VAT output record (seller)
     await tx.insert(vatRecord).values({
@@ -337,12 +347,12 @@ export async function confirmTransaction(transactionId: string) {
       beforeState: {
         status: 'pending',
         sellerStockQuantity: sellerStock.quantity,
-        buyerStockQuantity: buyerStock?.quantity ?? 0,
+        buyerStockQuantity: buyerQuantityBefore,
       },
       afterState: {
         status: 'confirmed',
         sellerStockQuantity: sellerStock.quantity - lockedTxn.quantity,
-        buyerStockQuantity: (buyerStock?.quantity ?? 0) + lockedTxn.quantity,
+        buyerStockQuantity: buyerQuantityAfter,
         vatAmount: lockedTxn.vatAmount,
       },
       metadata: JSON.stringify({
@@ -365,8 +375,8 @@ export async function confirmTransaction(transactionId: string) {
             businessId: session.user.id,
             productId: lockedTxn.productId,
             quantityDelta: lockedTxn.quantity,
-            quantityBefore: buyerStock?.quantity ?? 0,
-            quantityAfter: (buyerStock?.quantity ?? 0) + lockedTxn.quantity,
+            quantityBefore: buyerQuantityBefore,
+            quantityAfter: buyerQuantityAfter,
           },
         ],
       }),
