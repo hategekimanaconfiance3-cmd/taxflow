@@ -211,6 +211,33 @@ export async function verifyTaxPayment(input: {
     if (!existing) throw new Error('Payment submission not found.');
     if (existing.status !== 'pending') throw new Error('Only pending payment submissions can be verified.');
 
+    const [lockedTrader] = await tx
+      .select({ id: user.id })
+      .from(user)
+      .where(eq(user.id, existing.businessId))
+      .for('update')
+      .limit(1);
+    if (!lockedTrader) throw new Error('Taxpayer account was not found.');
+
+    const vatTotals = await tx
+      .select({
+        vatType: vatRecord.vatType,
+        total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`.as('total'),
+      })
+      .from(vatRecord)
+      .where(and(eq(vatRecord.businessId, existing.businessId), eq(vatRecord.isFrozen, false)))
+      .groupBy(vatRecord.vatType);
+    const outputVat = Number(vatTotals.find((row) => row.vatType === 'output')?.total) || 0;
+    const inputVat = Number(vatTotals.find((row) => row.vatType === 'input')?.total) || 0;
+    const [paidRow] = await tx
+      .select({ total: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)::float8`.as('total') })
+      .from(taxPayment)
+      .where(and(eq(taxPayment.businessId, existing.businessId), eq(taxPayment.status, 'confirmed')));
+    const outstanding = Math.max(0, outputVat - inputVat - (Number(paidRow?.total) || 0));
+    if (existing.amount > outstanding) {
+      throw new Error("Payment exceeds the taxpayer's current outstanding balance.");
+    }
+
     // If the trader submitted a provider reference, it must match the reviewed evidence.
     if (existing.reference && existing.reference.trim() !== evidenceReference) {
       throw new Error('The evidence reference does not match the reference submitted with this payment.');
