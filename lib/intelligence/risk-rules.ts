@@ -33,6 +33,7 @@ export interface TransactionObservation {
   vatAmount: number;
   status: string;
   createdAt: Date | string;
+  direction?: "sale" | "purchase";
 }
 
 export interface StockObservation {
@@ -161,12 +162,13 @@ export function buildRiskAlerts(input: RiskRuleInput): RiskAlert[] {
   const byProduct = new Map<string, TransactionObservation[]>();
   for (const txn of input.transactions) {
     if (txn.status !== "confirmed" && txn.status !== "completed") continue;
-    const list = byProduct.get(txn.productId) ?? [];
+    const groupKey = `${txn.productId}:${txn.direction ?? "all"}`;
+    const list = byProduct.get(groupKey) ?? [];
     list.push(txn);
-    byProduct.set(txn.productId, list);
+    byProduct.set(groupKey, list);
   }
 
-  for (const [productId, rows] of byProduct) {
+  for (const rows of byProduct.values()) {
     if (rows.length < 5) continue;
     const baseline = median(rows.map((row) => row.unitPrice));
     if (baseline <= 0) continue;
@@ -185,8 +187,6 @@ export function buildRiskAlerts(input: RiskRuleInput): RiskAlert[] {
         createdAt: new Date(row.createdAt).toISOString(),
       });
     }
-    // Product ID is intentionally used only to group records; it is not exposed in the alert.
-    void productId;
   }
 
   const severityRank: Record<RiskSeverity, number> = { high: 0, medium: 1, low: 2 };
