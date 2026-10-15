@@ -8,7 +8,7 @@ import { Banknote, ShieldCheck } from "lucide-react";
 const money = (value: number) => `${Math.round(value).toLocaleString("en-RW")} RWF`;
 
 export default async function AdminPaymentsPage() {
-  const { staff } = await requireRRASession();
+  const { staff } = await requireRRASession("compliance_officer", "audit_officer", "reporting_officer");
   const [payments, summary] = await Promise.all([
     getAllPayments("all"),
     getPaymentSummary(),
@@ -54,7 +54,7 @@ export default async function AdminPaymentsPage() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base"><Banknote className="h-4 w-4" /> Recent payment records</CardTitle>
-          <CardDescription>Latest 100 records returned by the payment service. Status changes require an authorized workflow.</CardDescription>
+          <CardDescription>Latest 100 records are shown. Status changes require an authorized workflow.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           {payments.length === 0 ? (
