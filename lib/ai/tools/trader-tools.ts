@@ -405,6 +405,7 @@ export function createTraderTools(userId: string) {
                         id: transaction.id,
                         productId: transaction.productId,
                         productName: product.name,
+        direction: sql<"sale" | "purchase">`CASE WHEN ${transaction.sellerId} = ${userId} THEN 'sale' ELSE 'purchase' END`,
                         quantity: transaction.quantity,
                         unitPrice: transaction.unitPrice,
                         totalAmount: transaction.totalAmount,
