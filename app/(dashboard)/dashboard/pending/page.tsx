@@ -3,7 +3,7 @@ import { getIncomingTransactions, getOutgoingTransactions } from '@/lib/actions/
 import { PendingPageClient } from '@/components/dashboard/pending-page/pending-page-client';
 
 export default async function PendingPage() {
-  const session = await requireTraderSession();
+  await requireTraderSession();
 
   const [incoming, outgoing] = await Promise.all([
     getIncomingTransactions(),
