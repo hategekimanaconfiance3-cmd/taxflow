@@ -79,6 +79,17 @@ describe("buildRiskAlerts", () => {
     assert.ok(alerts.some((alert) => alert.code === "PRICE_DEVIATION"));
   });
 
+  it("flags invalid numeric transaction records", () => {
+    const alerts = buildRiskAlerts({
+      transactions: [{ ...baseTxn, quantity: Number.NaN }],
+      stock: [],
+      payments: [],
+      vatRate: 0.18,
+      now,
+    });
+    assert.ok(alerts.some((alert) => alert.code === "TRANSACTION_TOTAL_MISMATCH"));
+  });
+
   it("rejects invalid VAT configuration", () => {
     assert.throws(() => buildRiskAlerts({ transactions: [], stock: [], payments: [], vatRate: -0.1 }), RangeError);
   });
