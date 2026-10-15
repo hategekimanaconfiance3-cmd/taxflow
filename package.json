@@ -2,6 +2,7 @@
   "name": "taxflow-platform",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@10.8.1",
   "scripts": {
     "dev": "tsx server.ts",
     "dev:next": "next dev",
