@@ -1,6 +1,7 @@
 import { requireTraderSession } from '@/lib/auth-guard';
 import { SellForm } from '@/components/dashboard/sell-form/sell-form';
 import { getInventory } from '@/lib/actions/stock.action';
+import { getSystemConfig } from '@/lib/actions/system-config.action';
 
 export default async function SellPage() {
   const session = await requireTraderSession();
@@ -12,7 +13,7 @@ export default async function SellPage() {
     redirect('/dashboard/record-sale');
   }
 
-  const inventory = await getInventory();
+  const [inventory, config] = await Promise.all([getInventory(), getSystemConfig()]);
 
   return (
     <div className="space-y-6">
@@ -23,7 +24,7 @@ export default async function SellPage() {
         </p>
       </div>
 
-      <SellForm products={inventory} />
+      <SellForm inventory={inventory} vatRate={config.vatRate} />
     </div>
   );
 }
