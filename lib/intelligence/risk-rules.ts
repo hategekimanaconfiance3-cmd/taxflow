@@ -91,23 +91,28 @@ export function buildRiskAlerts(input: RiskRuleInput): RiskAlert[] {
       });
     }
 
+    const numericValues = [txn.quantity, txn.unitPrice, txn.totalAmount, txn.vatAmount];
+    const invalidNumericData = numericValues.some((value) => !Number.isFinite(value)) ||
+      txn.quantity <= 0 || txn.unitPrice <= 0 || txn.totalAmount < 0 || txn.vatAmount < 0;
     const expectedTotal = Math.round(txn.quantity * txn.unitPrice);
-    if (Number.isFinite(expectedTotal) && Math.abs(expectedTotal - txn.totalAmount) > 1) {
+    if (invalidNumericData || !Number.isFinite(expectedTotal) || Math.abs(expectedTotal - txn.totalAmount) > 1) {
       alerts.push({
         id: `total:${txn.id}`,
         code: "TRANSACTION_TOTAL_MISMATCH",
         severity: "high",
-        title: "Transaction total does not match its line values",
-        message: "Recorded total differs from quantity multiplied by unit price. Review the original invoice and correction history.",
+        title: "Transaction arithmetic or numeric fields need review",
+        message: invalidNumericData
+          ? "One or more quantity or amount fields are invalid, negative, or not finite. Review the original invoice and correction history."
+          : "Recorded total differs from quantity multiplied by unit price. Review the original invoice and correction history.",
         referenceId: txn.id,
         observed: txn.totalAmount,
-        expected: expectedTotal,
+        expected: Number.isFinite(expectedTotal) ? expectedTotal : undefined,
         createdAt: createdAt.toISOString(),
       });
     }
 
     const expectedVat = Math.round(txn.totalAmount * input.vatRate);
-    if (Math.abs(expectedVat - txn.vatAmount) > 1) {
+    if (!invalidNumericData && Math.abs(expectedVat - txn.vatAmount) > 1) {
       alerts.push({
         id: `vat:${txn.id}`,
         code: "VAT_AMOUNT_MISMATCH",
