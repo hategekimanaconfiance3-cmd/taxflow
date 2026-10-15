@@ -10,7 +10,7 @@ import { requireRRASession } from "@/lib/auth-guard";
 // ---------------------------------------------------------------------------
 
 export async function getAllPayments(filter?: "all" | "pending" | "confirmed" | "rejected") {
-    await requireRRASession("compliance_officer", "reporting_officer");
+    await requireRRASession("compliance_officer", "audit_officer", "reporting_officer");
 
     const conditions = [
         sql`${user.role} IN ('manufacturer', 'wholesaler', 'retailer')`,
@@ -29,6 +29,7 @@ export async function getAllPayments(filter?: "all" | "pending" | "confirmed" | 
             createdAt: taxPayment.createdAt,
             businessId: taxPayment.businessId,
             businessName: user.businessName,
+            traderName: user.name,
             tinNumber: user.tinNumber,
             role: user.role,
         })
