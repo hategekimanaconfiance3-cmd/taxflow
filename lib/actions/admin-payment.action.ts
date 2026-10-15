@@ -2,7 +2,7 @@
 
 import { eq, desc, sql, and, ilike } from "drizzle-orm";
 import db from "@/db/drizzle";
-import { auditLog, taxPayment, user, vatRecord } from "@/db/schema";
+import { auditLog, taxPayment, user } from "@/db/schema";
 import { requireRRASession } from "@/lib/auth-guard";
 
 // ---------------------------------------------------------------------------
@@ -75,13 +75,9 @@ export async function getPaymentSummary() {
 
 export async function updatePaymentStatus(
     paymentId: string,
-    status: "confirmed" | "rejected",
+    status: "rejected",
 ) {
     const session = await requireRRASession("compliance_officer", "audit_officer");
-    if (status === "confirmed") {
-        throw new Error("Payment confirmation requires an evidence reference. Use the Tax Payment Verification queue.");
-    }
-
     await db.transaction(async (tx) => {
         const [payment] = await tx
             .select()
@@ -100,27 +96,6 @@ export async function updatePaymentStatus(
             .limit(1);
         if (!lockedUser) throw new Error("Taxpayer not found.");
 
-        if (status === "confirmed") {
-            const vatTotals = await tx
-                .select({
-                    vatType: vatRecord.vatType,
-                    total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`.as("total"),
-                })
-                .from(vatRecord)
-                .where(and(eq(vatRecord.businessId, payment.businessId), eq(vatRecord.isFrozen, false)))
-                .groupBy(vatRecord.vatType);
-            const output = Number(vatTotals.find((row) => row.vatType === "output")?.total) || 0;
-            const input = Number(vatTotals.find((row) => row.vatType === "input")?.total) || 0;
-            const [paidRow] = await tx
-                .select({ total: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)::float8`.as("total") })
-                .from(taxPayment)
-                .where(and(eq(taxPayment.businessId, payment.businessId), eq(taxPayment.status, "confirmed")));
-            const outstanding = Math.max(0, output - input - (Number(paidRow?.total) || 0));
-            if (payment.amount > outstanding) {
-                throw new Error("Payment exceeds the taxpayer's current outstanding balance.");
-            }
-        }
-
         const [updated] = await tx
             .update(taxPayment)
             .set({ status })
@@ -130,7 +105,7 @@ export async function updatePaymentStatus(
 
         await tx.insert(auditLog).values({
             userId: session.user.id,
-            action: status === "confirmed" ? "TAX_PAYMENT_CONFIRMED" : "TAX_PAYMENT_REJECTED",
+            action: "TAX_PAYMENT_REJECTED",
             targetType: "tax_payment",
             targetId: paymentId,
             beforeState: { status: payment.status },
