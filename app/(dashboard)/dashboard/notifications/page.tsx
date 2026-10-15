@@ -17,8 +17,8 @@ export default async function NotificationsPage() {
       </div>
 
       <NotificationsClient
-        userId={session.user.id}
-        initialNotifications={notifications}
+        notifications={notifications}
+        unreadCount={notifications.filter((notification) => !notification.read).length}
       />
     </div>
   );
