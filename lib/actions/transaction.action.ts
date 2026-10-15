@@ -142,6 +142,7 @@ export async function createTransaction(data: {
   const config = await getSystemConfig();
   // Persist whole-RWF amounts consistently with the integer database columns.
   const totalAmount = Math.round(data.quantity * data.unitPrice);
+  if (totalAmount <= 0) throw new Error("Sale total must be at least 1 RWF after rounding");
   const vatCalculation = calculateVat({
     amountRwf: totalAmount,
     rateBasisPoints: Math.round(config.vatRate * 10_000),
@@ -484,6 +485,7 @@ export async function createRetailSale(data: {
   const config = await getSystemConfig();
   // Persist whole-RWF amounts consistently with the integer database columns.
   const totalAmount = Math.round(data.quantity * data.unitPrice);
+  if (totalAmount <= 0) throw new Error("Sale total must be at least 1 RWF after rounding");
   const vatCalculation = calculateVat({
     amountRwf: totalAmount,
     rateBasisPoints: Math.round(config.vatRate * 10_000),
