@@ -78,6 +78,9 @@ export async function updatePaymentStatus(
     status: "confirmed" | "rejected",
 ) {
     const session = await requireRRASession("compliance_officer", "audit_officer");
+    if (status === "confirmed") {
+        throw new Error("Payment confirmation requires an evidence reference. Use the Tax Payment Verification queue.");
+    }
 
     await db.transaction(async (tx) => {
         const [payment] = await tx
