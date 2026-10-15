@@ -3,7 +3,7 @@ import { getNotifications } from '@/lib/actions/notification.action';
 import { NotificationsClient } from '@/components/dashboard/notifications/notifications-client';
 
 export default async function NotificationsPage() {
-  const session = await requireTraderSession();
+  await requireTraderSession();
 
   const notifications = await getNotifications();
 
