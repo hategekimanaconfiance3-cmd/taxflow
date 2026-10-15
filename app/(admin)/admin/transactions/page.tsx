@@ -90,7 +90,7 @@ export default async function AdminTransactionsPage() {
                     {txn.createdAt ? new Date(txn.createdAt).toLocaleDateString() : '—'}
                   </TableCell>
                   <TableCell className="text-right">
-                    <AdminTransactionActions transactionId={txn.id} status={txn.status} />
+                    <AdminTransactionActions transactionId={txn.id} currentStatus={txn.status} />
                   </TableCell>
                 </TableRow>
               ))}

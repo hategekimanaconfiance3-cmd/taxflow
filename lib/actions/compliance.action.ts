@@ -157,6 +157,135 @@ export async function recordTaxPayment(data: {
 }
 
 // ---------------------------------------------------------------------------
+// RRA payment verification queue
+// ---------------------------------------------------------------------------
+
+/** List unverified submissions for authorized compliance/audit staff only. */
+export async function getPendingTaxPaymentsForReview() {
+  await requireRRASession('compliance_officer', 'audit_officer');
+
+  return db
+    .select({
+      id: taxPayment.id,
+      businessId: taxPayment.businessId,
+      businessName: user.businessName,
+      traderName: user.name,
+      tinNumber: user.tinNumber,
+      amount: taxPayment.amount,
+      method: taxPayment.method,
+      reference: taxPayment.reference,
+      status: taxPayment.status,
+      createdAt: taxPayment.createdAt,
+    })
+    .from(taxPayment)
+    .innerJoin(user, eq(taxPayment.businessId, user.id))
+    .where(eq(taxPayment.status, 'pending'))
+    .orderBy(desc(taxPayment.createdAt))
+    .limit(100);
+}
+
+/**
+ * Confirm a payment only after an authorized officer independently checks the
+ * bank/provider/cash evidence. The evidence reference and reviewer are audited.
+ */
+export async function verifyTaxPayment(input: {
+  paymentId: string;
+  evidenceReference: string;
+}) {
+  const session = await requireRRASession('compliance_officer', 'audit_officer');
+  const paymentId = input.paymentId.trim();
+  const evidenceReference = input.evidenceReference.trim();
+
+  if (!paymentId || evidenceReference.length < 5 || evidenceReference.length > 120) {
+    throw new Error('A valid payment and evidence reference (5–120 characters) are required.');
+  }
+
+  const verifiedPayment = await db.transaction(async (tx) => {
+    const [existing] = await tx
+      .select()
+      .from(taxPayment)
+      .where(eq(taxPayment.id, paymentId))
+      .for('update')
+      .limit(1);
+
+    if (!existing) throw new Error('Payment submission not found.');
+    if (existing.status !== 'pending') throw new Error('Only pending payment submissions can be verified.');
+
+    const [lockedTrader] = await tx
+      .select({ id: user.id })
+      .from(user)
+      .where(eq(user.id, existing.businessId))
+      .for('update')
+      .limit(1);
+    if (!lockedTrader) throw new Error('Taxpayer account was not found.');
+
+    const vatTotals = await tx
+      .select({
+        vatType: vatRecord.vatType,
+        total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`.as('total'),
+      })
+      .from(vatRecord)
+      .where(and(eq(vatRecord.businessId, existing.businessId), eq(vatRecord.isFrozen, false)))
+      .groupBy(vatRecord.vatType);
+    const outputVat = Number(vatTotals.find((row) => row.vatType === 'output')?.total) || 0;
+    const inputVat = Number(vatTotals.find((row) => row.vatType === 'input')?.total) || 0;
+    const [paidRow] = await tx
+      .select({ total: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)::float8`.as('total') })
+      .from(taxPayment)
+      .where(and(eq(taxPayment.businessId, existing.businessId), eq(taxPayment.status, 'confirmed')));
+    const outstanding = Math.max(0, outputVat - inputVat - (Number(paidRow?.total) || 0));
+    if (existing.amount > outstanding) {
+      throw new Error("Payment exceeds the taxpayer's current outstanding balance.");
+    }
+
+    // If the trader submitted a provider reference, it must match the reviewed evidence.
+    if (existing.reference && existing.reference.trim() !== evidenceReference) {
+      throw new Error('The evidence reference does not match the reference submitted with this payment.');
+    }
+
+    const [updated] = await tx
+      .update(taxPayment)
+      .set({
+        status: 'confirmed',
+        reference: existing.reference ?? evidenceReference,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(taxPayment.id, existing.id), eq(taxPayment.status, 'pending')))
+      .returning();
+
+    if (!updated) throw new Error('Payment status changed before verification completed.');
+
+    await tx.insert(auditLog).values({
+      userId: session.user.id,
+      action: 'TAX_PAYMENT_VERIFIED',
+      targetType: 'tax_payment',
+      targetId: existing.id,
+      beforeState: {
+        status: existing.status,
+        amount: existing.amount,
+        reference: existing.reference,
+      },
+      afterState: {
+        status: updated.status,
+        amount: updated.amount,
+        reference: updated.reference,
+      },
+      metadata: JSON.stringify({
+        traderId: existing.businessId,
+        method: existing.method,
+        evidenceReference,
+        reviewerUserId: session.user.id,
+        verificationMode: 'manual_authorized_review',
+      }),
+    });
+
+    return updated;
+  });
+
+  return { success: true, payment: verifiedPayment };
+}
+
+// ---------------------------------------------------------------------------
 // Get Payment History
 // ---------------------------------------------------------------------------
 

@@ -2,7 +2,7 @@
 
 ## Scope and status
 
-This document describes a phased implementation plan for TaxFlow's existing application. The accompanying calculation and reconciliation utilities are deterministic building blocks, not proof of a completed production integration. Existing business routes must call these utilities only after validating authorization, transaction status, applicable tax configuration, and database consistency.
+This document describes the current implementation and the remaining production-hardening plan for TaxFlow's existing application. The deterministic VAT engine is now used by B2B and retailer sale creation; the explainable risk rules feed the trader-scoped Tax Intelligence dashboard and the existing AI assistant; production increments and stock changes are recorded with append-only audit evidence; and authorized RRA compliance/audit staff have a manual payment-verification queue. The standalone pair-reconciliation helpers are still building blocks and are not yet wired to a persisted buyer receipt ledger. No live RRA, bank, or payment-provider integration is implied. Existing routes must continue to validate authorization, transaction status, applicable tax configuration, and database consistency.
 
 ## 1. Core principles
 
