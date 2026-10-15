@@ -46,7 +46,7 @@ export async function getAllPayments(filter?: "all" | "pending" | "confirmed" | 
 // ---------------------------------------------------------------------------
 
 export async function getPaymentSummary() {
-    await requireRRASession("compliance_officer", "reporting_officer");
+    await requireRRASession("compliance_officer", "audit_officer", "reporting_officer");
 
     const [totals] = await db
         .select({
