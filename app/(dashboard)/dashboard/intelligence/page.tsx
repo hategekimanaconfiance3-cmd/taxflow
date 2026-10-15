@@ -1,7 +1,7 @@
 import { getIntelligenceDashboard } from "@/lib/actions/intelligence.action";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { AlertTriangle, Activity, CircleCheck, Clock3, CreditCard, ShieldAlert } from "lucide-react";
+import { AlertTriangle, Activity, CircleCheck, Clock3, ShieldAlert } from "lucide-react";
 
 const money = (value: number) => `${Math.round(value).toLocaleString("en-RW")} RWF`;
 
