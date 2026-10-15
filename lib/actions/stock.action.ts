@@ -88,7 +88,6 @@ export async function recordProduction(data: { productId: string; quantity: numb
         target: [stock.businessId, stock.productId],
         set: {
           quantity: sql`${stock.quantity} + ${data.quantity}`,
-          source: 'manufactured',
           updatedAt: new Date(),
         },
       })
