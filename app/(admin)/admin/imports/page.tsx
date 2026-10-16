@@ -8,12 +8,12 @@ import { Ship, Package, ClipboardList } from 'lucide-react';
 const STATUS_BADGE: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
   pending:   { label: 'Pending',   variant: 'secondary' },
   submitted: { label: 'Submitted', variant: 'default' },
-  activated: { label: 'Activated', variant: 'outline' },
+  activated: { label: 'TaxFlow verified', variant: 'outline' },
   rejected:  { label: 'Rejected',  variant: 'destructive' },
 };
 
 export default async function AdminImportsPage() {
-  await requireRRASession();
+  await requireRRASession('compliance_officer', 'audit_officer');
 
   const declarations = await getAllImportDeclarations();
   const submitted = declarations.filter((d) => d.status === 'submitted');
@@ -21,9 +21,9 @@ export default async function AdminImportsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Import Declarations</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Customs Verification</h1>
         <p className="text-muted-foreground text-sm mt-1">
-          Review, activate, and manage all trader import declarations.
+          Review merchant pre-travel declarations and record the quantity physically inspected. This records an RRA officer&apos;s TaxFlow verification; it does not replace any separate legally required customs declaration, duty assessment, or official clearance process.
         </p>
       </div>
 
@@ -54,7 +54,10 @@ export default async function AdminImportsPage() {
                       <span className="font-medium text-foreground">{d.businessName}</span>
                       {d.tinNumber && <span className="ml-2 font-mono">TIN: {d.tinNumber}</span>}
                       {d.originCountry && <span className="ml-2">· {d.originCountry}</span>}
-                      {d.customsRef && <span className="ml-2">· Customs: {d.customsRef}</span>}
+                      {d.supplierName && <span className="ml-2">· Supplier: {d.supplierName}</span>}
+                      {d.expectedReturnDate && <span className="ml-2">· Return: {d.expectedReturnDate}</span>}
+                      {d.estimatedValue != null && <span className="ml-2">· Est. value: {d.estimatedValue.toLocaleString()} {d.currency}</span>}
+                      {d.customsRef && <span className="ml-2">· Ref: {d.customsRef}</span>}
                     </div>
                   </div>
                   {/* Correctly mapped component with all required properties */}
@@ -63,6 +66,11 @@ export default async function AdminImportsPage() {
                     productName={`${d.productName} (${d.productUnit})`}
                     expectedQuantity={d.expectedQuantity}
                     actualQuantity={d.actualQuantity ?? d.expectedQuantity}
+                    supplierName={d.supplierName ?? undefined}
+                    originCountry={d.originCountry ?? undefined}
+                    expectedReturnDate={d.expectedReturnDate ?? undefined}
+                    estimatedValue={d.estimatedValue}
+                    currency={d.currency}
                     invoiceRef={d.invoiceRef ?? ''}
                     supportingDoc={d.supportingDoc ?? ''}
                   />
@@ -98,7 +106,9 @@ export default async function AdminImportsPage() {
                         <p className="text-sm font-medium truncate">{d.productName}</p>
                         <p className="text-xs text-muted-foreground">
                           {d.businessName} · Expected: {d.expectedQuantity.toLocaleString()} {d.productUnit}
-                          {d.actualQuantity != null && ` · Actual: ${d.actualQuantity.toLocaleString()} ${d.productUnit}`}
+                          {d.actualQuantity != null && ` · Merchant reported: ${d.actualQuantity.toLocaleString()} ${d.productUnit}`}
+                          {d.inspectedQuantity != null && ` · Customs inspected: ${d.inspectedQuantity.toLocaleString()} ${d.productUnit}`}
+                          {d.inspectionNote && ` · Review note: ${d.inspectionNote}`}
                         </p>
                       </div>
                     </div>

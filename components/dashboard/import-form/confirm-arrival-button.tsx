@@ -39,7 +39,7 @@ export function SubmitArrivalButton({
     const [error, setError] = useState("");
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    const qty = parseInt(actualQuantity) || 0;
+    const qty = Number(actualQuantity) || 0;
     const discrepancy = qty > 0 ? Math.abs(expectedQuantity - qty) / expectedQuantity : 0;
     const hasDiscrepancy = discrepancy > 0.1;
 
@@ -67,7 +67,7 @@ export function SubmitArrivalButton({
             const formData = new FormData();
             formData.append("file", file);
 
-            const res = await fetch("/api/upload/import-invoice", {
+            const res = await fetch("/api/import-invoice", {
                 method: "POST",
                 body: formData,
             });
@@ -156,7 +156,8 @@ export function SubmitArrivalButton({
                         <Input
                             id="actualQty"
                             type="number"
-                            min={1}
+                            min={0.01}
+                            step="any"
                             value={actualQuantity}
                             onChange={(e) => setActualQuantity(e.target.value)}
                             placeholder="Enter actual quantity"

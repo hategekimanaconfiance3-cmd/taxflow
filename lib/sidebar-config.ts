@@ -115,10 +115,10 @@ export const SIDEBAR_GROUPS: SidebarGroup[] = [
                 roles: ["retailer"],
             },
             {
-                label: "Imports",
+                label: "Smart Customs",
                 href: "/dashboard/imports",
                 icon: Ship,
-                roles: ["manufacturer", "wholesaler"],
+                roles: "all",
             },
             {
                 label: "Disputes",
