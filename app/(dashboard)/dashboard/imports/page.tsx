@@ -5,12 +5,14 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { ClipboardList, Ship } from 'lucide-react';
 import { ImportForm } from '@/components/dashboard/import-form/import-form';
+import { getImportDeclarations } from '@/lib/actions/import.action';
+import { CustomsDeclarationHistory } from '@/components/dashboard/import-form/customs-declaration-history';
 import { SubmitArrivalButton } from '@/components/dashboard/import-form/confirm-arrival-button';
 
 export default async function ImportsPage() {
   await requireApprovedClearance();
 
-  const products = await getProducts();
+  const [products, declarations] = await Promise.all([getProducts(), getImportDeclarations()]);
   const declarations = await getImportDeclarations();
   const formProducts = products.map((p) => ({
     id: p.id,
@@ -28,6 +30,7 @@ export default async function ImportsPage() {
       </div>
 
       <ImportForm products={formProducts} />
+      <CustomsDeclarationHistory declarations={declarations} />
 
       <Card>
         <CardHeader className="pb-3">
