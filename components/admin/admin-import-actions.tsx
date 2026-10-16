@@ -37,12 +37,18 @@ export function AdminImportActions({
     const [error, setError] = useState("");
 
     const inspected = Number(inspectedQuantity);
-    const discrepancyPct = expectedQuantity > 0 ? Math.round((Math.abs(expectedQuantity - inspected) / expectedQuantity) * 100) : 0;
+    const expectedDiscrepancyPct = expectedQuantity > 0 ? Math.abs(expectedQuantity - inspected) / expectedQuantity : 0;
+    const reportedDiscrepancyPct = actualQuantity > 0 ? Math.abs(actualQuantity - inspected) / actualQuantity : 0;
+    const discrepancyPct = Math.round(Math.max(expectedDiscrepancyPct, reportedDiscrepancyPct) * 100);
     const hasDiscrepancy = discrepancyPct > 10;
 
     function handleConfirm() {
         if (!Number.isFinite(inspected) || inspected <= 0) {
             setError("Enter the quantity physically inspected by customs.");
+            return;
+        }
+        if (hasDiscrepancy && !inspectionNote.trim()) {
+            setError("A written inspection note is required when the inspected quantity differs by more than 10% from the declaration or merchant-reported quantity.");
             return;
         }
         startTransition(async () => {
@@ -96,7 +102,7 @@ export function AdminImportActions({
                 <div className="space-y-1.5">
                     <Label htmlFor={`inspected-${declarationId}`}>Quantity physically inspected by customs</Label>
                     <Input id={`inspected-${declarationId}`} type="number" min={1} step="any" value={inspectedQuantity} onChange={(e) => setInspectedQuantity(e.target.value)} />
-                    {hasDiscrepancy && <p className="flex items-center gap-1 text-xs text-amber-600"><AlertTriangle className="h-3 w-3" /> Potential quantity discrepancy: {discrepancyPct}%</p>}
+                    {hasDiscrepancy && <p className="flex items-start gap-1 text-xs text-amber-600"><AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" /> Quantity differs by {discrepancyPct}% from the expected or merchant-reported amount. Add an inspection note before confirming.</p>}
                 </div>
                 <div className="space-y-1.5">
                     <Label htmlFor={`inspection-note-${declarationId}`}>Inspection notes (optional)</Label>
@@ -105,7 +111,7 @@ export function AdminImportActions({
 
                 {error && <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</div>}
                 <div className="flex flex-wrap gap-2">
-                    <Button size="sm" className="gap-1" onClick={handleConfirm} disabled={isPending || !inspectedQuantity || inspected <= 0}>
+                    <Button size="sm" className="gap-1" onClick={handleConfirm} disabled={isPending || !inspectedQuantity || inspected <= 0 || (hasDiscrepancy && !inspectionNote.trim())}>
                         {isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle className="h-3.5 w-3.5" />}
                         Confirm inspected goods
                     </Button>
