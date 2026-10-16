@@ -17,11 +17,25 @@ export async function declareImport(data: {
     expectedQuantity: number;
     customsRef?: string;
     originCountry?: string;
+    supplierName?: string;
+    expectedReturnDate?: string;
+    estimatedValue?: number;
+    currency?: string;
 }) {
     const session = await requireTraderSession(["manufacturer", "wholesaler"]);
 
-    if (data.expectedQuantity <= 0) {
+    if (!Number.isFinite(data.expectedQuantity) || data.expectedQuantity <= 0) {
         throw new Error("Expected quantity must be positive");
+    }
+    if (data.estimatedValue !== undefined && (!Number.isFinite(data.estimatedValue) || data.estimatedValue < 0)) {
+        throw new Error("Estimated value must be zero or greater");
+    }
+    if (data.expectedReturnDate && !/^\\d{4}-\\d{2}-\\d{2}$/.test(data.expectedReturnDate)) {
+        throw new Error("Expected return date must be a valid YYYY-MM-DD date");
+    }
+    const currency = (data.currency || "RWF").trim().toUpperCase();
+    if (!/^[A-Z]{3}$/.test(currency)) {
+        throw new Error("Currency must be a three-letter currency code");
     }
 
     // Verify product exists
@@ -43,6 +57,10 @@ export async function declareImport(data: {
             expectedQuantity: data.expectedQuantity,
             customsRef: data.customsRef?.trim() || null,
             originCountry: data.originCountry?.trim() || null,
+            supplierName: data.supplierName?.trim() || null,
+            expectedReturnDate: data.expectedReturnDate || null,
+            estimatedValue: data.estimatedValue ?? null,
+            currency,
             status: "pending",
         })
         .returning();
@@ -58,6 +76,10 @@ export async function declareImport(data: {
             expectedQuantity: data.expectedQuantity,
             customsRef: data.customsRef,
             originCountry: data.originCountry,
+            supplierName: data.supplierName,
+            expectedReturnDate: data.expectedReturnDate,
+            estimatedValue: data.estimatedValue,
+            currency,
         },
     });
 
@@ -141,8 +163,17 @@ export async function submitImportArrival(
 // RRA: Confirm Import — only RRA officer can approve, activating stock
 // ---------------------------------------------------------------------------
 
-export async function confirmImportArrival(declarationId: string) {
+export async function confirmImportArrival(
+    declarationId: string,
+    inspection: { inspectedQuantity: number; inspectionNote?: string },
+) {
     const { staff, ...session } = await requireRRASession("compliance_officer", "audit_officer");
+    if (!Number.isFinite(inspection.inspectedQuantity) || inspection.inspectedQuantity <= 0) {
+        throw new Error("Inspected quantity must be positive");
+    }
+    if (inspection.inspectionNote && inspection.inspectionNote.length > 2000) {
+        throw new Error("Inspection note must be 2,000 characters or fewer");
+    }
 
     const { declaration, actualQuantity, discrepancy } = await db.transaction(async (tx) => {
         const [declaration] = await tx
@@ -160,10 +191,16 @@ export async function confirmImportArrival(declarationId: string) {
             throw new Error("Declaration is missing arrival details / invoice reference");
         }
 
-        const actualQuantity = declaration.actualQuantity;
+        const actualQuantity = inspection.inspectedQuantity;
         const [activated] = await tx
             .update(importDeclaration)
-            .set({ status: "activated", reviewedById: session.user.id })
+            .set({
+                status: "activated",
+                reviewedById: session.user.id,
+                inspectedQuantity: actualQuantity,
+                inspectionNote: inspection.inspectionNote?.trim() || null,
+                inspectedAt: new Date(),
+            })
             .where(and(eq(importDeclaration.id, declarationId), eq(importDeclaration.status, "submitted")))
             .returning({ id: importDeclaration.id });
 
@@ -191,9 +228,11 @@ export async function confirmImportArrival(declarationId: string) {
             targetId: declarationId,
             metadata: JSON.stringify({
                 expectedQuantity: declaration.expectedQuantity,
-                actualQuantity,
+                traderReportedQuantity: declaration.actualQuantity,
+                inspectedQuantity: actualQuantity,
                 discrepancy,
                 discrepancyPct: Math.round(discrepancyPct * 100),
+                inspectionNote: inspection.inspectionNote?.trim() || null,
                 underDeclared: discrepancyPct > 0.1,
                 reviewedBy: staff.staffId,
             }),
