@@ -17,6 +17,10 @@ export async function declareImport(data: {
     expectedQuantity: number;
     customsRef?: string;
     originCountry?: string;
+    supplier?: string;
+    estimatedValue?: number;
+    currency?: string;
+    expectedReturnDate?: Date;
 }) {
     const session = await requireTraderSession(["manufacturer", "wholesaler"]);
 
@@ -35,6 +39,10 @@ export async function declareImport(data: {
         throw new Error("Product not found");
     }
 
+    // Generate a unique declaration reference
+    const refSuffix = crypto.randomUUID().slice(0, 8).toUpperCase();
+    const declarationRef = `DECL-${refSuffix}`;
+
     const [declaration] = await db
         .insert(importDeclaration)
         .values({
@@ -43,6 +51,11 @@ export async function declareImport(data: {
             expectedQuantity: data.expectedQuantity,
             customsRef: data.customsRef?.trim() || null,
             originCountry: data.originCountry?.trim() || null,
+            supplier: data.supplier?.trim() || null,
+            estimatedValue: data.estimatedValue ?? null,
+            currency: data.currency?.trim() || "USD",
+            expectedReturnDate: data.expectedReturnDate ?? null,
+            declarationRef,
             status: "pending",
         })
         .returning();
@@ -53,11 +66,15 @@ export async function declareImport(data: {
         targetType: "import_declaration",
         targetId: declaration.id,
         metadata: {
+            declarationRef,
             productId: data.productId,
             productName: prod.name,
             expectedQuantity: data.expectedQuantity,
             customsRef: data.customsRef,
             originCountry: data.originCountry,
+            supplier: data.supplier,
+            estimatedValue: data.estimatedValue,
+            currency: data.currency,
         },
     });
 
@@ -139,12 +156,17 @@ export async function submitImportArrival(
 
 // ---------------------------------------------------------------------------
 // RRA: Confirm Import — only RRA officer can approve, activating stock
+// Uses a DB transaction with FOR UPDATE lock to prevent TOCTOU races (C2 fix)
 // ---------------------------------------------------------------------------
 
-export async function confirmImportArrival(declarationId: string) {
+export async function confirmImportArrival(
+    declarationId: string,
+    opts?: { inspectedQuantity?: number; reviewerNote?: string },
+) {
     const { staff, ...session } = await requireRRASession("compliance_officer", "audit_officer");
 
-    const { declaration, actualQuantity, discrepancy } = await db.transaction(async (tx) => {
+    const { declaration, quantityToActivate, discrepancy } = await db.transaction(async (tx) => {
+        // Lock the row for the duration of this transaction
         const [declaration] = await tx
             .select()
             .from(importDeclaration)
@@ -160,29 +182,47 @@ export async function confirmImportArrival(declarationId: string) {
             throw new Error("Declaration is missing arrival details / invoice reference");
         }
 
-        const actualQuantity = declaration.actualQuantity;
+        // RRA officer may override with inspected quantity; fall back to trader-declared
+        const quantityToActivate = opts?.inspectedQuantity ?? declaration.actualQuantity;
+        const discrepancy = declaration.expectedQuantity - quantityToActivate;
+        const discrepancyPct = declaration.expectedQuantity > 0
+            ? Math.abs(discrepancy) / declaration.expectedQuantity * 100
+            : 0;
+        const discrepancyFlag = discrepancyPct > 10;
+
+        // Atomic status check + update — prevents double-activation
         const [activated] = await tx
             .update(importDeclaration)
-            .set({ status: "activated", reviewedById: session.user.id })
-            .where(and(eq(importDeclaration.id, declarationId), eq(importDeclaration.status, "submitted")))
+            .set({
+                status: "activated",
+                reviewedById: session.user.id,
+                inspectedQuantity: quantityToActivate,
+                reviewerNote: opts?.reviewerNote?.trim() || null,
+                discrepancyFlag,
+                discrepancyPct,
+            })
+            .where(
+                and(
+                    eq(importDeclaration.id, declarationId),
+                    eq(importDeclaration.status, "submitted"), // second guard
+                ),
+            )
             .returning({ id: importDeclaration.id });
 
-        if (!activated) throw new Error("Declaration status changed; import was not activated.");
+        if (!activated) throw new Error("Declaration status changed concurrently; import was not activated.");
 
+        // Add inspected quantity to stock (upsert within same transaction)
         await tx
             .insert(stock)
             .values({
                 businessId: declaration.businessId,
                 productId: declaration.productId,
-                quantity: actualQuantity,
+                quantity: quantityToActivate,
             })
             .onConflictDoUpdate({
                 target: [stock.businessId, stock.productId],
-                set: { quantity: sql`${stock.quantity} + ${actualQuantity}` },
+                set: { quantity: sql`${stock.quantity} + ${quantityToActivate}` },
             });
-
-        const discrepancy = declaration.expectedQuantity - actualQuantity;
-        const discrepancyPct = Math.abs(discrepancy) / declaration.expectedQuantity;
 
         await tx.insert(auditLog).values({
             userId: session.user.id,
@@ -191,41 +231,43 @@ export async function confirmImportArrival(declarationId: string) {
             targetId: declarationId,
             metadata: JSON.stringify({
                 expectedQuantity: declaration.expectedQuantity,
-                actualQuantity,
+                traderDeclaredQuantity: declaration.actualQuantity,
+                inspectedQuantity: quantityToActivate,
                 discrepancy,
-                discrepancyPct: Math.round(discrepancyPct * 100),
-                underDeclared: discrepancyPct > 0.1,
+                discrepancyPct: Math.round(discrepancyPct),
+                discrepancyFlag,
+                reviewerNote: opts?.reviewerNote,
                 reviewedBy: staff.staffId,
             }),
         });
 
-        return { declaration, actualQuantity, discrepancy };
+        return { declaration, quantityToActivate, discrepancy };
     });
 
-    // Notify the trader
+    // Notify the trader (outside transaction — non-critical)
     await createNotification({
         userId: declaration.businessId,
         type: "system",
         title: "Import Approved",
-        message: `Your import declaration has been approved by RRA. ${actualQuantity} units have been added to your stock.`,
+        message: `Your import declaration has been approved by RRA. ${quantityToActivate} units have been added to your stock.`,
         link: "/dashboard/imports",
     });
 
     emitToUser(declaration.businessId, "import:confirmed", {
         declarationId,
-        actualQuantity,
+        quantityToActivate,
     });
 
     return {
         success: true,
-        actualQuantity,
+        quantityToActivate,
         expectedQuantity: declaration.expectedQuantity,
         discrepancy,
     };
 }
 
 // ---------------------------------------------------------------------------
-// RRA: Reject Import
+// RRA: Reject Import — uses DB transaction + FOR UPDATE lock (C2/TOCTOU fix)
 // ---------------------------------------------------------------------------
 
 export async function rejectImportArrival(
@@ -238,40 +280,53 @@ export async function rejectImportArrival(
         throw new Error("A reason is required for rejection");
     }
 
-    const [declaration] = await db
-        .select()
-        .from(importDeclaration)
-        .where(eq(importDeclaration.id, declarationId))
-        .limit(1);
+    // Use a transaction with row-level lock to prevent TOCTOU race
+    const declaration = await db.transaction(async (tx) => {
+        const [declaration] = await tx
+            .select()
+            .from(importDeclaration)
+            .where(eq(importDeclaration.id, declarationId))
+            .for("update")
+            .limit(1);
 
-    if (!declaration) {
-        throw new Error("Import declaration not found");
-    }
+        if (!declaration) throw new Error("Import declaration not found");
+        if (declaration.status !== "submitted") {
+            throw new Error("Only submitted declarations can be rejected. Current status: " + declaration.status);
+        }
 
-    if (declaration.status !== "submitted") {
-        throw new Error("Only submitted declarations can be rejected");
-    }
+        // Atomic status check + update
+        const [rejected] = await tx
+            .update(importDeclaration)
+            .set({
+                status: "rejected",
+                reviewedById: session.user.id,
+                reviewerNote: reason.trim(),
+            })
+            .where(
+                and(
+                    eq(importDeclaration.id, declarationId),
+                    eq(importDeclaration.status, "submitted"), // double guard
+                ),
+            )
+            .returning({ id: importDeclaration.id });
 
-    await db
-        .update(importDeclaration)
-        .set({
-            status: "rejected",
-            reviewedById: session.user.id,
-        })
-        .where(eq(importDeclaration.id, declarationId));
+        if (!rejected) throw new Error("Declaration status changed concurrently; was not rejected.");
 
-    await logAudit({
-        userId: session.user.id,
-        action: "IMPORT_REJECTED_BY_RRA",
-        targetType: "import_declaration",
-        targetId: declarationId,
-        metadata: {
-            reason: reason.trim(),
-            rejectedBy: staff.staffId,
-        },
+        await tx.insert(auditLog).values({
+            userId: session.user.id,
+            action: "IMPORT_REJECTED_BY_RRA",
+            targetType: "import_declaration",
+            targetId: declarationId,
+            metadata: JSON.stringify({
+                reason: reason.trim(),
+                rejectedBy: staff.staffId,
+            }),
+        });
+
+        return declaration;
     });
 
-    // Notify the trader
+    // Notify trader (outside transaction — non-critical)
     await createNotification({
         userId: declaration.businessId,
         type: "compliance_alert",
@@ -298,16 +353,25 @@ export async function getImportDeclarations() {
     return db
         .select({
             id: importDeclaration.id,
+            declarationRef: importDeclaration.declarationRef,
             productId: importDeclaration.productId,
             productName: product.name,
             productUnit: product.unit,
             expectedQuantity: importDeclaration.expectedQuantity,
             actualQuantity: importDeclaration.actualQuantity,
+            inspectedQuantity: importDeclaration.inspectedQuantity,
             status: importDeclaration.status,
             customsRef: importDeclaration.customsRef,
             originCountry: importDeclaration.originCountry,
+            supplier: importDeclaration.supplier,
+            estimatedValue: importDeclaration.estimatedValue,
+            currency: importDeclaration.currency,
+            expectedReturnDate: importDeclaration.expectedReturnDate,
             invoiceRef: importDeclaration.invoiceRef,
             supportingDoc: importDeclaration.supportingDoc,
+            discrepancyFlag: importDeclaration.discrepancyFlag,
+            discrepancyPct: importDeclaration.discrepancyPct,
+            reviewerNote: importDeclaration.reviewerNote,
             createdAt: importDeclaration.createdAt,
         })
         .from(importDeclaration)
@@ -326,16 +390,25 @@ export async function getImportDeclaration(declarationId: string) {
     const [declaration] = await db
         .select({
             id: importDeclaration.id,
+            declarationRef: importDeclaration.declarationRef,
             productId: importDeclaration.productId,
             productName: product.name,
             productUnit: product.unit,
             expectedQuantity: importDeclaration.expectedQuantity,
             actualQuantity: importDeclaration.actualQuantity,
+            inspectedQuantity: importDeclaration.inspectedQuantity,
             status: importDeclaration.status,
             customsRef: importDeclaration.customsRef,
             originCountry: importDeclaration.originCountry,
+            supplier: importDeclaration.supplier,
+            estimatedValue: importDeclaration.estimatedValue,
+            currency: importDeclaration.currency,
+            expectedReturnDate: importDeclaration.expectedReturnDate,
             invoiceRef: importDeclaration.invoiceRef,
             supportingDoc: importDeclaration.supportingDoc,
+            discrepancyFlag: importDeclaration.discrepancyFlag,
+            discrepancyPct: importDeclaration.discrepancyPct,
+            reviewerNote: importDeclaration.reviewerNote,
             createdAt: importDeclaration.createdAt,
         })
         .from(importDeclaration)
@@ -356,24 +429,37 @@ export async function getImportDeclaration(declarationId: string) {
 }
 
 // ---------------------------------------------------------------------------
-// RRA: Get all import declarations (admin view)
+// RRA: Get all import declarations — filtered at DB level (C3 fix)
 // ---------------------------------------------------------------------------
 
 export async function getAllImportDeclarations(statusFilter?: string) {
     await requireRRASession("compliance_officer", "audit_officer");
 
-    const result = await db
+    // Build where clause at DB level instead of JS post-filter
+    const whereClause = statusFilter
+        ? and(eq(importDeclaration.status, statusFilter))
+        : undefined;
+
+    return db
         .select({
             id: importDeclaration.id,
+            declarationRef: importDeclaration.declarationRef,
             productName: product.name,
             productUnit: product.unit,
             expectedQuantity: importDeclaration.expectedQuantity,
             actualQuantity: importDeclaration.actualQuantity,
+            inspectedQuantity: importDeclaration.inspectedQuantity,
             status: importDeclaration.status,
             customsRef: importDeclaration.customsRef,
             originCountry: importDeclaration.originCountry,
+            supplier: importDeclaration.supplier,
+            estimatedValue: importDeclaration.estimatedValue,
+            currency: importDeclaration.currency,
             invoiceRef: importDeclaration.invoiceRef,
             supportingDoc: importDeclaration.supportingDoc,
+            discrepancyFlag: importDeclaration.discrepancyFlag,
+            discrepancyPct: importDeclaration.discrepancyPct,
+            reviewerNote: importDeclaration.reviewerNote,
             createdAt: importDeclaration.createdAt,
             businessName: user.businessName,
             tinNumber: user.tinNumber,
@@ -381,11 +467,6 @@ export async function getAllImportDeclarations(statusFilter?: string) {
         .from(importDeclaration)
         .innerJoin(product, eq(importDeclaration.productId, product.id))
         .innerJoin(user, eq(importDeclaration.businessId, user.id))
+        .where(whereClause)
         .orderBy(desc(importDeclaration.createdAt));
-
-    if (statusFilter) {
-        return result.filter((d) => d.status === statusFilter);
-    }
-
-    return result;
 }
