@@ -104,8 +104,11 @@ export async function submitImportArrival(
 ) {
     const session = await requireTraderSession();
 
-    if (data.actualQuantity <= 0) {
-        throw new Error("Actual quantity must be positive");
+    if (!Number.isFinite(data.actualQuantity) || data.actualQuantity <= 0) {
+        throw new Error("Actual quantity must be a positive number");
+    }
+    if (data.invoiceRef.trim().length > 200 || data.supportingDoc.trim().length > 1000) {
+        throw new Error("Invoice reference must be 200 characters or fewer and supporting document details 1,000 characters or fewer");
     }
 
     if (!data.invoiceRef?.trim()) {
