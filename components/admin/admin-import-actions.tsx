@@ -8,6 +8,8 @@ import {
 } from "@/lib/actions/import.action";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Label } from "@/components/ui/label";
 import {
     Dialog,
@@ -46,6 +48,8 @@ export function AdminImportActions({
     const [isPending, startTransition] = useTransition();
     const [showReject, setShowReject] = useState(false);
     const [rejectReason, setRejectReason] = useState("");
+    const [inspectedQuantity, setInspectedQuantity] = useState(String(actualQuantity));
+    const [inspectionNote, setInspectionNote] = useState("");
     const [error, setError] = useState("");
 
     const discrepancy = Math.abs(expectedQuantity - actualQuantity);
@@ -56,7 +60,10 @@ export function AdminImportActions({
         startTransition(async () => {
             try {
                 setError("");
-                await confirmImportArrival(declarationId);
+                await confirmImportArrival(declarationId, {
+                    inspectedQuantity: Number(inspectedQuantity),
+                    inspectionNote: inspectionNote.trim() || undefined,
+                });
                 router.refresh();
             } catch (err) {
                 setError(
@@ -135,13 +142,41 @@ export function AdminImportActions({
                     <div className="text-[10px] text-red-600">{error}</div>
                 )}
 
+                <div className="grid gap-2 rounded-md border bg-muted/20 p-3 sm:max-w-md">
+                    <div className="space-y-1.5">
+                        <Label htmlFor={`inspected-${declarationId}`}>Quantity physically inspected by Customs</Label>
+                        <Input
+                            id={`inspected-${declarationId}`}
+                            type="number"
+                            min="0.001"
+                            step="any"
+                            value={inspectedQuantity}
+                            onChange={(e) => setInspectedQuantity(e.target.value)}
+                            disabled={isPending}
+                        />
+                    </div>
+                    <div className="space-y-1.5">
+                        <Label htmlFor={`inspection-note-${declarationId}`}>Inspection notes (optional)</Label>
+                        <Textarea
+                            id={`inspection-note-${declarationId}`}
+                            placeholder="Record differences, documents checked, or inspection notes"
+                            value={inspectionNote}
+                            onChange={(e) => setInspectionNote(e.target.value)}
+                            maxLength={2000}
+                            rows={2}
+                            disabled={isPending}
+                        />
+                    </div>
+                    <p className="text-xs text-muted-foreground">The inspected quantity—not the trader's estimate—will be used for the official record and inventory activation.</p>
+                </div>
+
                 <div className="flex gap-1">
                     <Button
                         variant="outline"
                         size="sm"
                         className="gap-1 text-emerald-600"
                         onClick={handleConfirm}
-                        disabled={isPending}
+                        disabled={isPending || !inspectedQuantity || !Number.isFinite(Number(inspectedQuantity)) || Number(inspectedQuantity) <= 0}
                     >
                         {isPending ? (
                             <Loader2 className="h-3.5 w-3.5 animate-spin" />
