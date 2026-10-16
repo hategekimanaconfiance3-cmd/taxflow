@@ -39,7 +39,7 @@ export function SubmitArrivalButton({
     const [error, setError] = useState("");
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    const qty = parseInt(actualQuantity) || 0;
+    const qty = Number(actualQuantity) || 0;
     const discrepancy = qty > 0 ? Math.abs(expectedQuantity - qty) / expectedQuantity : 0;
     const hasDiscrepancy = discrepancy > 0.1;
 
