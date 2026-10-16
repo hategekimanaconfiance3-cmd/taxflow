@@ -101,7 +101,7 @@ export function AdminImportActions({
 
                 <div className="space-y-1.5">
                     <Label htmlFor={`inspected-${declarationId}`}>Quantity physically inspected by customs</Label>
-                    <Input id={`inspected-${declarationId}`} type="number" min={1} step="any" value={inspectedQuantity} onChange={(e) => setInspectedQuantity(e.target.value)} />
+                    <Input id={`inspected-${declarationId}`} type="number" min={0.01} step="any" value={inspectedQuantity} onChange={(e) => setInspectedQuantity(e.target.value)} />
                     {hasDiscrepancy && <p className="flex items-start gap-1 text-xs text-amber-600"><AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" /> Quantity differs by {discrepancyPct}% from the expected or merchant-reported amount. Add an inspection note before confirming.</p>}
                 </div>
                 <div className="space-y-1.5">
