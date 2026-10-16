@@ -403,8 +403,15 @@ export const importDeclaration = pgTable(
     // "pending" → "submitted" → "activated" | "rejected"
     customsRef: text('customs_ref'), // customs reference number
     originCountry: text('origin_country'), // country of origin
+    supplierName: text('supplier_name'),
+    expectedReturnDate: text('expected_return_date'), // ISO date, merchant's expected return date
+    estimatedValue: integer('estimated_value'), // estimated total value in declared currency
+    currency: text('currency').default('RWF').notNull(),
     invoiceRef: text('invoice_ref'), // invoice or import document reference
     supportingDoc: text('supporting_doc'), // description of supporting documents
+    inspectedQuantity: real('inspected_quantity'), // quantity physically verified by authorized RRA officer
+    inspectionNote: text('inspection_note'),
+    inspectedAt: timestamp('inspected_at'),
     reviewedById: text('reviewed_by_id').references(() => user.id), // RRA officer who confirmed/rejected
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at')
