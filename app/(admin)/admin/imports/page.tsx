@@ -8,7 +8,7 @@ import { Ship, Package, ClipboardList } from 'lucide-react';
 const STATUS_BADGE: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
   pending:   { label: 'Pending',   variant: 'secondary' },
   submitted: { label: 'Submitted', variant: 'default' },
-  activated: { label: 'Activated', variant: 'outline' },
+  activated: { label: 'Customs cleared', variant: 'outline' },
   rejected:  { label: 'Rejected',  variant: 'destructive' },
 };
 
@@ -21,9 +21,9 @@ export default async function AdminImportsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Import Declarations</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Customs Verification</h1>
         <p className="text-muted-foreground text-sm mt-1">
-          Review, activate, and manage all trader import declarations.
+          Review merchant pre-travel declarations, record the quantity physically inspected, and confirm customs clearance. Only authorized RRA officers can finalize a declaration.
         </p>
       </div>
 
@@ -54,7 +54,10 @@ export default async function AdminImportsPage() {
                       <span className="font-medium text-foreground">{d.businessName}</span>
                       {d.tinNumber && <span className="ml-2 font-mono">TIN: {d.tinNumber}</span>}
                       {d.originCountry && <span className="ml-2">· {d.originCountry}</span>}
-                      {d.customsRef && <span className="ml-2">· Customs: {d.customsRef}</span>}
+                      {d.supplierName && <span className="ml-2">· Supplier: {d.supplierName}</span>}
+                      {d.expectedReturnDate && <span className="ml-2">· Return: {d.expectedReturnDate}</span>}
+                      {d.estimatedValue != null && <span className="ml-2">· Est. value: {d.estimatedValue.toLocaleString()} {d.currency}</span>}
+                      {d.customsRef && <span className="ml-2">· Ref: {d.customsRef}</span>}
                     </div>
                   </div>
                   {/* Correctly mapped component with all required properties */}
@@ -98,7 +101,8 @@ export default async function AdminImportsPage() {
                         <p className="text-sm font-medium truncate">{d.productName}</p>
                         <p className="text-xs text-muted-foreground">
                           {d.businessName} · Expected: {d.expectedQuantity.toLocaleString()} {d.productUnit}
-                          {d.actualQuantity != null && ` · Actual: ${d.actualQuantity.toLocaleString()} ${d.productUnit}`}
+                          {d.actualQuantity != null && ` · Merchant reported: ${d.actualQuantity.toLocaleString()} ${d.productUnit}`}
+                          {d.inspectedQuantity != null && ` · Customs inspected: ${d.inspectedQuantity.toLocaleString()} ${d.productUnit}`}
                         </p>
                       </div>
                     </div>
