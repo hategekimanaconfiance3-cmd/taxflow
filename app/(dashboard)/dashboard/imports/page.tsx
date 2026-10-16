@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { ClipboardList, Ship } from 'lucide-react';
 import { ImportForm } from '@/components/dashboard/import-form/import-form';
+import { SubmitArrivalButton } from '@/components/dashboard/import-form/confirm-arrival-button';
 
 export default async function ImportsPage() {
   await requireApprovedClearance();
@@ -76,6 +77,15 @@ export default async function ImportsPage() {
                       <p className="pl-6 text-xs font-medium text-emerald-700">Customs-verified quantity: {d.inspectedQuantity.toLocaleString()} {d.productUnit}</p>
                     )}
                     {d.inspectionNote && <p className="pl-6 text-xs text-muted-foreground">Customs note: {d.inspectionNote}</p>}
+                    {d.status === 'pending' && (
+                      <div className="pl-6">
+                        <SubmitArrivalButton
+                          declarationId={d.id}
+                          productName={d.productName}
+                          expectedQuantity={d.expectedQuantity}
+                        />
+                      </div>
+                    )}
                   </div>
                 );
               })}
