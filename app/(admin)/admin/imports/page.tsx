@@ -23,7 +23,7 @@ export default async function AdminImportsPage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Customs Verification</h1>
         <p className="text-muted-foreground text-sm mt-1">
-          Review merchant pre-travel declarations and record the quantity physically inspected. This records an RRA officer's TaxFlow verification; it does not replace any separate legally required customs declaration, duty assessment, or official clearance process.
+          Review merchant pre-travel declarations and record the quantity physically inspected. This records an RRA officer&apos;s TaxFlow verification; it does not replace any separate legally required customs declaration, duty assessment, or official clearance process.
         </p>
       </div>
 
