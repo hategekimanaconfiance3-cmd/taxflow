@@ -27,14 +27,14 @@ export async function declareImport(data: {
     if (!Number.isFinite(data.expectedQuantity) || data.expectedQuantity <= 0) {
         throw new Error("Expected quantity must be positive");
     }
-    if (data.estimatedValue !== undefined && (!Number.isFinite(data.estimatedValue) || data.estimatedValue < 0)) {
-        throw new Error("Estimated value must be zero or greater");
+    if (data.estimatedValue !== undefined && (!Number.isFinite(data.estimatedValue) || data.estimatedValue < 0 || !Number.isInteger(data.estimatedValue))) {
+        throw new Error("Estimated value must be a whole number zero or greater");
     }
     if (!data.expectedReturnDate) {
         throw new Error("Expected return date is required");
     }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(data.expectedReturnDate)) {
-        throw new Error("Expected return date must be a valid YYYY-MM-DD date");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(data.expectedReturnDate) || Number.isNaN(Date.parse(data.expectedReturnDate)) || new Date(data.expectedReturnDate).toISOString().slice(0, 10) !== data.expectedReturnDate) {
+        throw new Error("Expected return date must be a real calendar date in YYYY-MM-DD format");
     }
     const currency = (data.currency || "RWF").trim().toUpperCase();
     if (!/^[A-Z]{3}$/.test(currency)) {
@@ -195,6 +195,13 @@ export async function confirmImportArrival(
         }
 
         const actualQuantity = inspection.inspectedQuantity;
+        const expectedDiscrepancy = Math.abs(declaration.expectedQuantity - actualQuantity) / declaration.expectedQuantity;
+        const reportedDiscrepancy = declaration.actualQuantity > 0
+            ? Math.abs(declaration.actualQuantity - actualQuantity) / declaration.actualQuantity
+            : 0;
+        if ((expectedDiscrepancy > 0.1 || reportedDiscrepancy > 0.1) && !inspection.inspectionNote?.trim()) {
+            throw new Error("A written inspection note is required when the inspected quantity differs by more than 10% from the declaration or merchant-reported quantity.");
+        }
         const [activated] = await tx
             .update(importDeclaration)
             .set({
@@ -279,38 +286,42 @@ export async function rejectImportArrival(
     if (!reason?.trim()) {
         throw new Error("A reason is required for rejection");
     }
-
-    const [declaration] = await db
-        .select()
-        .from(importDeclaration)
-        .where(eq(importDeclaration.id, declarationId))
-        .limit(1);
-
-    if (!declaration) {
-        throw new Error("Import declaration not found");
+    if (reason.trim().length > 2000) {
+        throw new Error("The review reason must be 2,000 characters or fewer");
     }
 
-    if (declaration.status !== "submitted") {
-        throw new Error("Only submitted declarations can be rejected");
-    }
+    const [declaration] = await db.transaction(async (tx) => {
+        const [current] = await tx
+            .select()
+            .from(importDeclaration)
+            .where(eq(importDeclaration.id, declarationId))
+            .for("update")
+            .limit(1);
 
-    await db
-        .update(importDeclaration)
-        .set({
-            status: "rejected",
-            reviewedById: session.user.id,
-        })
-        .where(eq(importDeclaration.id, declarationId));
+        if (!current) throw new Error("Import declaration not found");
+        if (current.status !== "submitted") {
+            throw new Error("Only submitted declarations can be flagged or rejected");
+        }
 
-    await logAudit({
-        userId: session.user.id,
-        action: "IMPORT_REJECTED_BY_RRA",
-        targetType: "import_declaration",
-        targetId: declarationId,
-        metadata: {
-            reason: reason.trim(),
-            rejectedBy: staff.staffId,
-        },
+        const [updated] = await tx
+            .update(importDeclaration)
+            .set({
+                status: "rejected",
+                reviewedById: session.user.id,
+                inspectionNote: reason.trim(),
+            })
+            .where(and(eq(importDeclaration.id, declarationId), eq(importDeclaration.status, "submitted")))
+            .returning();
+
+        if (!updated) throw new Error("Declaration status changed; it was not rejected.");
+        await tx.insert(auditLog).values({
+            userId: session.user.id,
+            action: "IMPORT_REJECTED_BY_RRA",
+            targetType: "import_declaration",
+            targetId: declarationId,
+            metadata: JSON.stringify({ reason: reason.trim(), rejectedBy: staff.staffId }),
+        });
+        return [current];
     });
 
     // Notify the trader
