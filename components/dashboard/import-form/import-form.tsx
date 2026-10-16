@@ -27,6 +27,10 @@ export function ImportForm({ products }: ImportFormProps) {
     const [expectedQuantity, setExpectedQuantity] = useState("");
     const [customsRef, setCustomsRef] = useState("");
     const [originCountry, setOriginCountry] = useState("");
+    const [supplierName, setSupplierName] = useState("");
+    const [expectedReturnDate, setExpectedReturnDate] = useState("");
+    const [estimatedValue, setEstimatedValue] = useState("");
+    const [currency, setCurrency] = useState("RWF");
     const [message, setMessage] = useState<{
         text: string;
         type: "success" | "error";
@@ -44,6 +48,10 @@ export function ImportForm({ products }: ImportFormProps) {
                     expectedQuantity: qty,
                     customsRef: customsRef.trim() || undefined,
                     originCountry: originCountry.trim() || undefined,
+                    supplierName: supplierName.trim() || undefined,
+                    expectedReturnDate: expectedReturnDate || undefined,
+                    estimatedValue: estimatedValue === "" ? undefined : Number(estimatedValue),
+                    currency,
                 });
                 setMessage({
                     text: `Import declaration filed for ${qty.toLocaleString()} units`,
@@ -53,6 +61,10 @@ export function ImportForm({ products }: ImportFormProps) {
                 setExpectedQuantity("");
                 setCustomsRef("");
                 setOriginCountry("");
+                setSupplierName("");
+                setExpectedReturnDate("");
+                setEstimatedValue("");
+                setCurrency("RWF");
                 router.refresh();
             } catch (err) {
                 setMessage({
@@ -71,10 +83,13 @@ export function ImportForm({ products }: ImportFormProps) {
             <CardHeader className="pb-2">
                 <CardTitle className="text-base font-semibold flex items-center gap-2">
                     <Ship className="h-4 w-4" />
-                    Declare Import
+                    Pre-Travel Goods Declaration
                 </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
+                <p className="text-sm text-muted-foreground">
+                    Record the goods you expect to bring into Rwanda. Customs officers will record the quantity they physically inspect before goods are marked as cleared.
+                </p>
                 {message && (
                     <div
                         className={`text-sm rounded-md px-3 py-2 ${message.type === "success"
@@ -138,18 +153,60 @@ export function ImportForm({ products }: ImportFormProps) {
                     </div>
 
                     <div className="space-y-2">
-                        <Label htmlFor="originCountry">
-                            Country of Origin{" "}
-                            <span className="text-muted-foreground font-normal">
-                                (optional)
-                            </span>
-                        </Label>
+                        <Label htmlFor="originCountry">Country of Purchase / Origin</Label>
                         <Input
                             id="originCountry"
                             placeholder="e.g. China, Kenya, UAE"
                             value={originCountry}
                             onChange={(e) => setOriginCountry(e.target.value)}
                         />
+                    </div>
+                    <div className="space-y-2">
+                        <Label htmlFor="supplierName">Supplier / Store Name</Label>
+                        <Input
+                            id="supplierName"
+                            placeholder="Supplier or shop name"
+                            value={supplierName}
+                            onChange={(e) => setSupplierName(e.target.value)}
+                            maxLength={160}
+                        />
+                    </div>
+                    <div className="space-y-2">
+                        <Label htmlFor="expectedReturnDate">Expected Return Date</Label>
+                        <Input
+                            id="expectedReturnDate"
+                            type="date"
+                            value={expectedReturnDate}
+                            onChange={(e) => setExpectedReturnDate(e.target.value)}
+                        />
+                    </div>
+                    <div className="space-y-2">
+                        <Label htmlFor="estimatedValue">Estimated Total Value</Label>
+                        <Input
+                            id="estimatedValue"
+                            type="number"
+                            min={0}
+                            step="1"
+                            placeholder="Estimated purchase value"
+                            value={estimatedValue}
+                            onChange={(e) => setEstimatedValue(e.target.value)}
+                        />
+                    </div>
+                    <div className="space-y-2">
+                        <Label htmlFor="currency">Currency</Label>
+                        <Select value={currency} onValueChange={setCurrency}>
+                            <SelectTrigger id="currency"><SelectValue placeholder="Select currency" /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="RWF">RWF — Rwandan Franc</SelectItem>
+                                <SelectItem value="USD">USD — US Dollar</SelectItem>
+                                <SelectItem value="EUR">EUR — Euro</SelectItem>
+                                <SelectItem value="CNY">CNY — Chinese Yuan</SelectItem>
+                                <SelectItem value="KES">KES — Kenyan Shilling</SelectItem>
+                                <SelectItem value="AED">AED — UAE Dirham</SelectItem>
+                                <SelectItem value="UGX">UGX — Ugandan Shilling</SelectItem>
+                                <SelectItem value="TZS">TZS — Tanzanian Shilling</SelectItem>
+                            </SelectContent>
+                        </Select>
                     </div>
                 </div>
 
