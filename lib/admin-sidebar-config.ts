@@ -149,7 +149,7 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 ],
             },
             {
-                label: "Import Declarations",
+                label: "Customs Verification",
                 href: "/admin/imports",
                 icon: Ship,
                 allowedRoles: [
