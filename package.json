@@ -29,7 +29,8 @@
     "db:seed:neon:all": "tsx db/seeds/neon/seed-all-neon.ts",
     "db:seed:full": "tsx db/seeds/neon/taxflow-full.seed.ts",
     "db:seed:full:tin": "tsx db/seeds/neon/tin-full.seed.ts",
-    "db:seed:full:all": "tsx db/seeds/neon/seed-all-full.ts"
+    "db:seed:full:all": "tsx db/seeds/neon/seed-all-full.ts",
+    "db:seed:test": "tsx db/seeds/test-accounts.seed.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.63",
@@ -87,3 +88,4 @@
   },
   "packageManager": "pnpm@10.8.1"
 }
+
