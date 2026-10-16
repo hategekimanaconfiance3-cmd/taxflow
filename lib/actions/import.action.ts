@@ -107,16 +107,14 @@ export async function submitImportArrival(
     if (!Number.isFinite(data.actualQuantity) || data.actualQuantity <= 0) {
         throw new Error("Actual quantity must be a positive number");
     }
-    if (data.invoiceRef.trim().length > 200 || data.supportingDoc.trim().length > 1000) {
-        throw new Error("Invoice reference must be 200 characters or fewer and supporting document details 1,000 characters or fewer");
-    }
-
-    if (!data.invoiceRef?.trim()) {
+    if (typeof data.invoiceRef !== "string" || !data.invoiceRef.trim()) {
         throw new Error("Invoice / import document reference is required");
     }
-
-    if (!data.supportingDoc?.trim()) {
+    if (typeof data.supportingDoc !== "string" || !data.supportingDoc.trim()) {
         throw new Error("Supporting document description is required");
+    }
+    if (data.invoiceRef.trim().length > 200 || data.supportingDoc.trim().length > 1000) {
+        throw new Error("Invoice reference must be 200 characters or fewer and supporting document details 1,000 characters or fewer");
     }
 
     // Get the declaration — must belong to this user
@@ -139,8 +137,8 @@ export async function submitImportArrival(
         throw new Error("This declaration has already been submitted or processed");
     }
 
-    // Update to "submitted" — awaiting RRA review
-    await db
+    // Use a conditional update so simultaneous submissions cannot overwrite each other.
+    const [submitted] = await db
         .update(importDeclaration)
         .set({
             actualQuantity: data.actualQuantity,
@@ -148,7 +146,16 @@ export async function submitImportArrival(
             supportingDoc: data.supportingDoc.trim(),
             status: "submitted",
         })
-        .where(eq(importDeclaration.id, declarationId));
+        .where(and(
+            eq(importDeclaration.id, declarationId),
+            eq(importDeclaration.businessId, session.user.id),
+            eq(importDeclaration.status, "pending"),
+        ))
+        .returning({ id: importDeclaration.id });
+
+    if (!submitted) {
+        throw new Error("This declaration has already been submitted or processed");
+    }
 
     await logAudit({
         userId: session.user.id,
