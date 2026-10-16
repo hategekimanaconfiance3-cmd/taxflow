@@ -406,13 +406,30 @@ export const importDeclaration = pgTable(
     invoiceRef: text('invoice_ref'), // invoice or import document reference
     supportingDoc: text('supporting_doc'), // description of supporting documents
     reviewedById: text('reviewed_by_id').references(() => user.id), // RRA officer who confirmed/rejected
+
+    // ── Smart Customs enhancement fields ─────────────────────────────────────
+    declarationRef: text('declaration_ref').unique(), // unique pre-travel reference, e.g. DECL-XXXXXXXX
+    supplier: text('supplier'),                        // exporter / supplier name
+    estimatedValue: real('estimated_value'),            // declared value in chosen currency
+    currency: text('currency').default('USD'),          // ISO-4217 currency code
+    expectedReturnDate: timestamp('expected_return_date'), // expected arrival date
+    reviewerNote: text('reviewer_note'),                // RRA officer inspection note
+    inspectedQuantity: real('inspected_quantity'),      // physically verified quantity (set by RRA)
+    discrepancyFlag: boolean('discrepancy_flag').notNull().default(false), // >10% variance detected
+    discrepancyPct: real('discrepancy_pct'),            // |expected - inspected| / expected * 100
+
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at')
       .defaultNow()
       .$onUpdate(() => /* @__PURE__ */ new Date())
       .notNull(),
   },
-  (table) => [index('import_business_idx').on(table.businessId), index('import_status_idx').on(table.status)],
+  (table) => [
+    index('import_business_idx').on(table.businessId),
+    index('import_status_idx').on(table.status),
+    index('import_declaration_ref_idx').on(table.declarationRef),
+    index('import_discrepancy_flag_idx').on(table.discrepancyFlag),
+  ],
 );
 
 // ---------------------------------------------------------------------------
@@ -940,3 +957,4 @@ export const aiAuditLogRelations = relations(aiAuditLog, ({ one }) => ({
 }));
 
 // ---------------------------------------------------------------------------
+
