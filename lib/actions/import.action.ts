@@ -30,7 +30,10 @@ export async function declareImport(data: {
     if (data.estimatedValue !== undefined && (!Number.isFinite(data.estimatedValue) || data.estimatedValue < 0)) {
         throw new Error("Estimated value must be zero or greater");
     }
-    if (data.expectedReturnDate && !/^\\d{4}-\\d{2}-\\d{2}$/.test(data.expectedReturnDate)) {
+    if (!data.expectedReturnDate) {
+        throw new Error("Expected return date is required");
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(data.expectedReturnDate)) {
         throw new Error("Expected return date must be a valid YYYY-MM-DD date");
     }
     const currency = (data.currency || "RWF").trim().toUpperCase();
@@ -74,7 +77,7 @@ export async function declareImport(data: {
             productId: data.productId,
             productName: prod.name,
             expectedQuantity: data.expectedQuantity,
-            customsRef: data.customsRef,
+            customsRef: declaration.customsRef,
             originCountry: data.originCountry,
             supplierName: data.supplierName,
             expectedReturnDate: data.expectedReturnDate,
