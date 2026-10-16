@@ -10,7 +10,6 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Label } from "@/components/ui/label";
 import {
     Dialog,
     DialogContent,
@@ -52,7 +51,7 @@ export function AdminImportActions({
     const [inspectionNote, setInspectionNote] = useState("");
     const [error, setError] = useState("");
 
-    const discrepancy = Math.abs(expectedQuantity - actualQuantity);
+    const discrepancy = Math.abs(expectedQuantity - (Number(inspectedQuantity) || 0));
     const discrepancyPct = Math.round((discrepancy / expectedQuantity) * 100);
     const hasDiscrepancy = discrepancyPct > 10;
 
@@ -103,7 +102,7 @@ export function AdminImportActions({
                         <strong>{productName}</strong>
                     </div>
                     <div className="text-xs font-mono">
-                        Expected: {expectedQuantity.toLocaleString()} → Actual:{" "}
+                        Expected: {expectedQuantity.toLocaleString()} → Merchant reported:{" "}
                         {actualQuantity.toLocaleString()}
                         {hasDiscrepancy && (
                             <span className="text-amber-600 ml-1">
