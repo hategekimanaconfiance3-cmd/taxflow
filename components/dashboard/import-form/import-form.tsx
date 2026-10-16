@@ -176,6 +176,7 @@ export function ImportForm({ products }: ImportFormProps) {
                         <Input
                             id="expectedReturnDate"
                             type="date"
+                            required
                             value={expectedReturnDate}
                             onChange={(e) => setExpectedReturnDate(e.target.value)}
                         />
@@ -216,6 +217,7 @@ export function ImportForm({ products }: ImportFormProps) {
                         isPending ||
                         !productId ||
                         !expectedQuantity ||
+                        !expectedReturnDate ||
                         parseInt(expectedQuantity) <= 0
                     }
                     className="w-full sm:w-auto gap-2"
