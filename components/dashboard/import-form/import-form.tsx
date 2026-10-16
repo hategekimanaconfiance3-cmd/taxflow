@@ -37,7 +37,7 @@ export function ImportForm({ products }: ImportFormProps) {
     } | null>(null);
 
     function handleSubmit() {
-        const qty = parseInt(expectedQuantity) || 0;
+        const qty = Number(expectedQuantity) || 0;
         if (!productId || qty <= 0) return;
 
         startTransition(async () => {
@@ -131,7 +131,8 @@ export function ImportForm({ products }: ImportFormProps) {
                             onChange={(e) =>
                                 setExpectedQuantity(e.target.value)
                             }
-                            min={1}
+                            min={0.01}
+                            step="any"
                             className="font-mono"
                         />
                     </div>
@@ -218,7 +219,7 @@ export function ImportForm({ products }: ImportFormProps) {
                         !productId ||
                         !expectedQuantity ||
                         !expectedReturnDate ||
-                        parseInt(expectedQuantity) <= 0
+                        Number(expectedQuantity) <= 0
                     }
                     className="w-full sm:w-auto gap-2"
                 >
