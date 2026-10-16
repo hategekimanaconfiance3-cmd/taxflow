@@ -8,7 +8,7 @@ import { Ship, Package, ClipboardList } from 'lucide-react';
 const STATUS_BADGE: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
   pending:   { label: 'Pending',   variant: 'secondary' },
   submitted: { label: 'Submitted', variant: 'default' },
-  activated: { label: 'Customs cleared', variant: 'outline' },
+  activated: { label: 'TaxFlow verified', variant: 'outline' },
   rejected:  { label: 'Rejected',  variant: 'destructive' },
 };
 
@@ -23,7 +23,7 @@ export default async function AdminImportsPage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Customs Verification</h1>
         <p className="text-muted-foreground text-sm mt-1">
-          Review merchant pre-travel declarations, record the quantity physically inspected, and confirm customs clearance. Only authorized RRA officers can finalize a declaration.
+          Review merchant pre-travel declarations and record the quantity physically inspected. This records an RRA officer's TaxFlow verification; it does not replace any separate legally required customs declaration, duty assessment, or official clearance process.
         </p>
       </div>
 
@@ -108,6 +108,7 @@ export default async function AdminImportsPage() {
                           {d.businessName} · Expected: {d.expectedQuantity.toLocaleString()} {d.productUnit}
                           {d.actualQuantity != null && ` · Merchant reported: ${d.actualQuantity.toLocaleString()} ${d.productUnit}`}
                           {d.inspectedQuantity != null && ` · Customs inspected: ${d.inspectedQuantity.toLocaleString()} ${d.productUnit}`}
+                          {d.inspectionNote && ` · Review note: ${d.inspectionNote}`}
                         </p>
                       </div>
                     </div>
