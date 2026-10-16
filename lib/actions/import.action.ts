@@ -55,7 +55,7 @@ export async function declareImport(data: {
             businessId: session.user.id,
             productId: data.productId,
             expectedQuantity: data.expectedQuantity,
-            customsRef: data.customsRef?.trim() || null,
+            customsRef: data.customsRef?.trim() || `TSC-${new Date().getUTCFullYear()}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`,
             originCountry: data.originCountry?.trim() || null,
             supplierName: data.supplierName?.trim() || null,
             expectedReturnDate: data.expectedReturnDate || null,
