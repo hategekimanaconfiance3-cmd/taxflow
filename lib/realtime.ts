@@ -1,10 +1,6 @@
 import Redis from 'ioredis';
 
-const REDIS_URL = process.env.REDIS_URL;
-
-if (!REDIS_URL) {
-  console.warn('[Realtime] REDIS_URL is not set. Real-time events will be disabled.');
-}
+const REDIS_URL = process.env.REDIS_URL || 'redis://:Taxflow07857@localhost:6380';
 const CHANNEL = 'taxflow:realtime';
 
 /**
@@ -16,7 +12,6 @@ const CHANNEL = 'taxflow:realtime';
  * to this channel and forwards events to connected clients.
  */
 export function emitToUser(userId: string, event: string, data: Record<string, unknown>) {
-  if (!REDIS_URL) return; // Real-time disabled — REDIS_URL not configured
   try {
     const pub = getPublisher();
     const message = JSON.stringify({
@@ -24,9 +19,7 @@ export function emitToUser(userId: string, event: string, data: Record<string, u
       event,
       data: { ...data, timestamp: Date.now() },
     });
-    void pub.publish(CHANNEL, message).catch((err: unknown) => {
-      console.warn('[Realtime] Failed to publish event:', err);
-    });
+    pub.publish(CHANNEL, message);
   } catch (err) {
     // Gracefully fail — don't break server actions if Valkey is down
     console.warn('[Realtime] Failed to publish event:', err);
@@ -49,19 +42,15 @@ export function emitToUsers(userIds: string[], event: string, data: Record<strin
 let publisher: Redis | null = null;
 
 function getPublisher(): Redis {
-  if (!REDIS_URL) {
-    throw new Error('REDIS_URL is required to publish real-time events.');
-  }
-
   if (!publisher) {
     publisher = new Redis(REDIS_URL, {
-      maxRetriesPerRequest: null,
+      maxRetriesPerRequest: 1,
       lazyConnect: true,
       enableOfflineQueue: false,
-      retryStrategy: (times: number) => Math.min(times * 500, 5000),
+      retryStrategy: () => null,
     });
+    publisher.on('error', () => {});
     publisher.connect().catch(() => {
-      // Will be retried on next call
       publisher = null;
     });
   }
