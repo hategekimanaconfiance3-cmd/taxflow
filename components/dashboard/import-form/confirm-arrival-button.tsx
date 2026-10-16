@@ -67,7 +67,7 @@ export function SubmitArrivalButton({
             const formData = new FormData();
             formData.append("file", file);
 
-            const res = await fetch("/api/upload/import-invoice", {
+            const res = await fetch("/api/import-invoice", {
                 method: "POST",
                 body: formData,
             });
