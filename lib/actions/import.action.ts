@@ -22,7 +22,7 @@ export async function declareImport(data: {
     estimatedValue?: number;
     currency?: string;
 }) {
-    const session = await requireTraderSession(["manufacturer", "wholesaler"]);
+    const session = await requireTraderSession();
 
     if (!Number.isFinite(data.expectedQuantity) || data.expectedQuantity <= 0) {
         throw new Error("Expected quantity must be positive");
@@ -99,7 +99,7 @@ export async function submitImportArrival(
         supportingDoc: string;
     },
 ) {
-    const session = await requireTraderSession(["manufacturer", "wholesaler"]);
+    const session = await requireTraderSession();
 
     if (data.actualQuantity <= 0) {
         throw new Error("Actual quantity must be positive");
@@ -332,7 +332,7 @@ export async function rejectImportArrival(
 // ---------------------------------------------------------------------------
 
 export async function getImportDeclarations() {
-    const session = await requireTraderSession(["manufacturer", "wholesaler"]);
+    const session = await requireTraderSession();
 
     return db
         .select({
@@ -342,6 +342,13 @@ export async function getImportDeclarations() {
             productUnit: product.unit,
             expectedQuantity: importDeclaration.expectedQuantity,
             actualQuantity: importDeclaration.actualQuantity,
+            inspectedQuantity: importDeclaration.inspectedQuantity,
+            inspectionNote: importDeclaration.inspectionNote,
+            inspectedAt: importDeclaration.inspectedAt,
+            supplierName: importDeclaration.supplierName,
+            expectedReturnDate: importDeclaration.expectedReturnDate,
+            estimatedValue: importDeclaration.estimatedValue,
+            currency: importDeclaration.currency,
             status: importDeclaration.status,
             customsRef: importDeclaration.customsRef,
             originCountry: importDeclaration.originCountry,
@@ -360,7 +367,7 @@ export async function getImportDeclarations() {
 // ---------------------------------------------------------------------------
 
 export async function getImportDeclaration(declarationId: string) {
-    const session = await requireTraderSession(["manufacturer", "wholesaler"]);
+    const session = await requireTraderSession();
 
     const [declaration] = await db
         .select({
@@ -370,6 +377,13 @@ export async function getImportDeclaration(declarationId: string) {
             productUnit: product.unit,
             expectedQuantity: importDeclaration.expectedQuantity,
             actualQuantity: importDeclaration.actualQuantity,
+            inspectedQuantity: importDeclaration.inspectedQuantity,
+            inspectionNote: importDeclaration.inspectionNote,
+            inspectedAt: importDeclaration.inspectedAt,
+            supplierName: importDeclaration.supplierName,
+            expectedReturnDate: importDeclaration.expectedReturnDate,
+            estimatedValue: importDeclaration.estimatedValue,
+            currency: importDeclaration.currency,
             status: importDeclaration.status,
             customsRef: importDeclaration.customsRef,
             originCountry: importDeclaration.originCountry,
@@ -408,6 +422,13 @@ export async function getAllImportDeclarations(statusFilter?: string) {
             productUnit: product.unit,
             expectedQuantity: importDeclaration.expectedQuantity,
             actualQuantity: importDeclaration.actualQuantity,
+            inspectedQuantity: importDeclaration.inspectedQuantity,
+            inspectionNote: importDeclaration.inspectionNote,
+            inspectedAt: importDeclaration.inspectedAt,
+            supplierName: importDeclaration.supplierName,
+            expectedReturnDate: importDeclaration.expectedReturnDate,
+            estimatedValue: importDeclaration.estimatedValue,
+            currency: importDeclaration.currency,
             status: importDeclaration.status,
             customsRef: importDeclaration.customsRef,
             originCountry: importDeclaration.originCountry,
