@@ -156,7 +156,8 @@ export function SubmitArrivalButton({
                         <Input
                             id="actualQty"
                             type="number"
-                            min={1}
+                            min={0.01}
+                            step="any"
                             value={actualQuantity}
                             onChange={(e) => setActualQuantity(e.target.value)}
                             placeholder="Enter actual quantity"
