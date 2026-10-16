@@ -13,7 +13,7 @@ const STATUS_BADGE: Record<string, { label: string; variant: 'default' | 'second
 };
 
 export default async function AdminImportsPage() {
-  await requireRRASession();
+  await requireRRASession('compliance_officer', 'audit_officer');
 
   const declarations = await getAllImportDeclarations();
   const submitted = declarations.filter((d) => d.status === 'submitted');
@@ -66,6 +66,11 @@ export default async function AdminImportsPage() {
                     productName={`${d.productName} (${d.productUnit})`}
                     expectedQuantity={d.expectedQuantity}
                     actualQuantity={d.actualQuantity ?? d.expectedQuantity}
+                    supplierName={d.supplierName ?? undefined}
+                    originCountry={d.originCountry ?? undefined}
+                    expectedReturnDate={d.expectedReturnDate ?? undefined}
+                    estimatedValue={d.estimatedValue}
+                    currency={d.currency}
                     invoiceRef={d.invoiceRef ?? ''}
                     supportingDoc={d.supportingDoc ?? ''}
                   />
