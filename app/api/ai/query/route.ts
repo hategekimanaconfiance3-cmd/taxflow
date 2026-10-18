@@ -35,14 +35,15 @@ import {
 } from "@/lib/ai/tools/rra-tools";
 
 // ---------------------------------------------------------------------------
-// Model setup — Google Gemini Flash (fast, cost-effective, 1M context)
+// Model setup — Gemini 3.6 Flash is the current supported Flash model.
 // ---------------------------------------------------------------------------
 
+const GOOGLE_API_KEY = process.env.GOOGLE_GENERATIVE_AI_API_KEY?.trim();
 const google = createGoogleGenerativeAI({
-    apiKey: process.env.GOOGLE_GENERATIVE_AI_API_KEY ?? "",
+    apiKey: GOOGLE_API_KEY ?? "",
 });
 
-const MODEL = google("gemini-2.0-flash");
+const MODEL = google(process.env.GOOGLE_GENERATIVE_AI_MODEL?.trim() || "gemini-3.6-flash");
 
 const requestSchema = z.object({
     messages: z.array(z.unknown()).min(1).max(20),
@@ -134,6 +135,14 @@ export async function POST(request: Request) {
     }
 
     const userId = session.user.id;
+    if (!GOOGLE_API_KEY) {
+        console.error("AI query is unavailable because GOOGLE_GENERATIVE_AI_API_KEY is not configured.");
+        return Response.json(
+            { error: "The AI assistant is not configured. Please contact your administrator." },
+            { status: 503 },
+        );
+    }
+
     try {
         const limit = await consumeRateLimit(
             "ai-query",
@@ -286,10 +295,15 @@ export async function POST(request: Request) {
             temperature: 0.1,      // low temperature for factual accuracy
             maxOutputTokens: 2048,
             abortSignal: AbortSignal.timeout(30_000),
-            onError: () => console.error("AI query provider stream failed", { userId }),
+            onError: ({ error }) => console.error("AI query provider stream failed", {
+                userId,
+                errorName: error instanceof Error ? error.name : typeof error,
+            }),
         });
 
-        return result.toUIMessageStreamResponse();
+        return result.toUIMessageStreamResponse({
+            onError: () => "The AI assistant could not complete this request. Please try again.",
+        });
     } catch (err) {
         console.error("[AI Query] streamText error:", err);
 

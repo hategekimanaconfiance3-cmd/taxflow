@@ -1020,6 +1020,18 @@ Object.assign(translations.fr, {
   'AI chat widget': 'Widget de discussion IA', 'in the bottom-right corner. Use natural language to run risk analyses, generate reports, and query trader data.': 'dans le coin inférieur droit. Utilisez le langage naturel pour analyser les risques, générer des rapports et interroger les données des commerçants.',
 });
 
+Object.assign(translations.kiny, {
+  'The AI assistant could not respond. Please try again in a moment.': 'Umufasha wa AI ntiyashoboye gusubiza. Ongera ugerageze nyuma y’akanya.',
+  'The AI assistant could not complete this request. Please try again.': 'Umufasha wa AI ntiyashoboye kurangiza iki cyifuzo. Ongera ugerageze.',
+  'The AI assistant is not configured. Please contact your administrator.': 'Umufasha wa AI ntiyashyizweho neza. Baza umuyobozi wa sisitemu.',
+});
+
+Object.assign(translations.fr, {
+  'The AI assistant could not respond. Please try again in a moment.': 'L’assistant IA n’a pas pu répondre. Veuillez réessayer dans un instant.',
+  'The AI assistant could not complete this request. Please try again.': 'L’assistant IA n’a pas pu terminer cette demande. Veuillez réessayer.',
+  'The AI assistant is not configured. Please contact your administrator.': 'L’assistant IA n’est pas configuré. Veuillez contacter votre administrateur.',
+});
+
 export function translate(text: string | undefined, language: LangCode): string {
   if (!text || language === 'en') return text ?? '';
   return translations[language][text] ?? text;
