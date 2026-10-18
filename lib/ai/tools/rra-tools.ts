@@ -2,7 +2,7 @@
 
 import { tool } from "ai";
 import { z } from "zod";
-import { eq, sql, desc, and, gte, ilike, inArray } from "drizzle-orm";
+import { eq, sql, desc, and, or, gte, ilike, inArray } from "drizzle-orm";
 import db from "@/db/drizzle";
 import {
     user, transaction, stock, product, vatRecord,
@@ -32,7 +32,6 @@ export const lookupTrader = tool({
                 id: user.id,
                 name: user.name,
                 businessName: user.businessName,
-                email: user.email,
                 tinNumber: user.tinNumber,
                 role: user.role,
                 clearanceStatus: user.clearanceStatus,
@@ -67,25 +66,87 @@ export const lookupTrader = tool({
     },
 });
 
+/** Search the entire registered trader directory, across all business tiers. */
+export const searchTraders = tool({
+    description: "Search or list registered manufacturers, wholesalers, and retailers in the TaxFlow database. Use this for RRA-wide trader discovery. Filters are optional; without a search term it lists traders by recent registration. Returns at most 50 rows per page.",
+    inputSchema: z.object({
+        query: z.string().trim().max(100).optional().describe("Optional TIN, business name, or trader name search"),
+        role: z.enum(["manufacturer", "wholesaler", "retailer"]).optional(),
+        clearanceStatus: z.enum(["pending", "approved", "under_review", "suspended"]).optional(),
+        limit: z.number().int().min(1).max(50).default(25),
+        offset: z.number().int().min(0).max(5000).default(0),
+    }),
+    execute: async ({ query, role, clearanceStatus, limit, offset }) => {
+        const conditions = [sql`${user.role} IN ('manufacturer', 'wholesaler', 'retailer')`];
+        if (role) conditions.push(eq(user.role, role));
+        if (clearanceStatus) conditions.push(eq(user.clearanceStatus, clearanceStatus));
+        const normalizedQuery = query?.trim();
+        if (normalizedQuery) {
+            const pattern = `%${normalizedQuery}%`;
+            conditions.push(or(
+                ilike(user.tinNumber, pattern),
+                ilike(user.businessName, pattern),
+                ilike(user.name, pattern),
+            )!);
+        }
+
+        const traders = await db
+            .select({
+                id: user.id,
+                name: user.name,
+                businessName: user.businessName,
+                tinNumber: user.tinNumber,
+                role: user.role,
+                clearanceStatus: user.clearanceStatus,
+                createdAt: user.createdAt,
+            })
+            .from(user)
+            .where(and(...conditions))
+            .orderBy(desc(user.createdAt))
+            .limit(limit)
+            .offset(offset);
+
+        return { count: traders.length, offset, limit, traders };
+    },
+});
+
 /** Get transaction history for a trader or product. */
 export const getTransactions = tool({
-    description: "Get recent transactions. Can filter by trader TIN, product name, or status. Returns up to 20 transactions with details.",
+    description: "Get recent transactions. Filter by trader TIN (matches buyer or seller), seller TIN, product name, or status. Returns up to 50 transactions.",
     inputSchema: z.object({
+        traderTin: z.string().trim().min(1).max(32).optional().describe("Filter to transactions where this registered trader is buyer or seller"),
         sellerTin: z.string().optional().describe("Filter by seller TIN number"),
         productName: z.string().optional().describe("Filter by product name"),
         status: z.enum(["pending", "confirmed", "completed", "rejected", "expired"]).optional(),
         limit: z.number().min(1).max(50).default(20),
     }),
-    execute: async ({ sellerTin, productName, status, limit }) => {
+    execute: async ({ traderTin, sellerTin, productName, status, limit }) => {
         const conditions = [];
+
+        if (traderTin) {
+            const [trader] = await db
+                .select({ id: user.id })
+                .from(user)
+                .where(and(
+                    eq(user.tinNumber, traderTin),
+                    sql`${user.role} IN ('manufacturer', 'wholesaler', 'retailer')`,
+                ))
+                .limit(1);
+            if (!trader) return { count: 0, transactions: [], summary: { totalValue: 0, totalVat: 0 }, message: "No registered trader found with that TIN." };
+            conditions.push(or(eq(transaction.sellerId, trader.id), eq(transaction.buyerId, trader.id))!);
+        }
 
         if (sellerTin) {
             const [seller] = await db
                 .select({ id: user.id })
                 .from(user)
-                .where(eq(user.tinNumber, sellerTin))
+                .where(and(
+                    eq(user.tinNumber, sellerTin),
+                    sql`${user.role} IN ('manufacturer', 'wholesaler', 'retailer')`,
+                ))
                 .limit(1);
-            if (seller) conditions.push(eq(transaction.sellerId, seller.id));
+            if (!seller) return { count: 0, transactions: [], summary: { totalValue: 0, totalVat: 0 }, message: "No registered seller found with that TIN." };
+            conditions.push(eq(transaction.sellerId, seller.id));
         }
 
         if (status) conditions.push(eq(transaction.status, status));
@@ -138,7 +199,7 @@ export const getStockLevels = tool({
         const [trader] = await db
             .select({ id: user.id, businessName: user.businessName })
             .from(user)
-            .where(eq(user.tinNumber, traderTin))
+            .where(and(eq(user.tinNumber, traderTin), sql`${user.role} IN ('manufacturer', 'wholesaler', 'retailer')`))
             .limit(1);
 
         if (!trader) return { found: false, message: "Trader not found" };
@@ -176,7 +237,7 @@ export const getTaxStatus = tool({
         const [trader] = await db
             .select({ id: user.id, businessName: user.businessName })
             .from(user)
-            .where(eq(user.tinNumber, traderTin))
+            .where(and(eq(user.tinNumber, traderTin), sql`${user.role} IN ('manufacturer', 'wholesaler', 'retailer')`))
             .limit(1);
 
         if (!trader) return { found: false, message: "Trader not found" };
@@ -222,7 +283,7 @@ export const getRiskAssessment = tool({
         const [trader] = await db
             .select({ id: user.id })
             .from(user)
-            .where(eq(user.tinNumber, traderTin))
+            .where(and(eq(user.tinNumber, traderTin), sql`${user.role} IN ('manufacturer', 'wholesaler', 'retailer')`))
             .limit(1);
 
         if (!trader) return { found: false, message: "Trader not found" };
@@ -391,7 +452,7 @@ export const getBehavioralAnalysis = tool({
         const [trader] = await db
             .select({ id: user.id })
             .from(user)
-            .where(eq(user.tinNumber, traderTin))
+            .where(and(eq(user.tinNumber, traderTin), sql`${user.role} IN ('manufacturer', 'wholesaler', 'retailer')`))
             .limit(1);
 
         if (!trader) return { found: false, message: "Trader not found" };
@@ -533,3 +594,4 @@ export const traceSupplyChain = tool({
         };
     },
 });
+

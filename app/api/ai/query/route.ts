@@ -12,7 +12,7 @@
 // ---------------------------------------------------------------------------
 
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
-import { stepCountIs, streamText, type ToolSet } from "ai";
+import { convertToModelMessages, stepCountIs, streamText, validateUIMessages, type ToolSet } from "ai";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import db from "@/db/drizzle";
@@ -22,8 +22,10 @@ import { headers } from "next/headers";
 import { createHash } from "node:crypto";
 import { consumeRateLimit, getRequestIdentity } from "@/lib/rate-limit";
 import { createTraderTools } from "@/lib/ai/tools/trader-tools";
+import { createRraActionTools } from "@/lib/ai/tools/rra-action-tools";
 import {
     lookupTrader,
+    searchTraders,
     getTransactions,
     getStockLevels,
     getTaxStatus,
@@ -56,31 +58,43 @@ const messageSchema = z.object({
 
 const textPartSchema = z.object({ type: z.literal("text"), text: z.string().max(4_000) }).passthrough();
 
-function parseMessages(input: unknown): { role: "user" | "assistant"; content: string }[] | null {
+function parseMessages(input: unknown): { rawMessages: Record<string, unknown>[]; textMessages: { role: "user" | "assistant"; content: string }[] } | null {
     const parsed = requestSchema.safeParse(input);
     if (!parsed.success) return null;
 
     const messages: { role: "user" | "assistant"; content: string }[] = [];
+    const rawMessages: Record<string, unknown>[] = [];
     let totalCharacters = 0;
     for (const candidate of parsed.data.messages) {
         const message = messageSchema.safeParse(candidate);
         if (!message.success) return null;
 
-        // Only forward plain text. Client-supplied tool calls/results, files, and
-        // metadata are deliberately excluded from the model context.
-        const content = message.data.parts
-            .map((part) => textPartSchema.safeParse(part))
-            .filter((part) => part.success)
-            .map((part) => part.data.text)
+        const parsedParts = message.data.parts.map((part) => {
+            const textPart = textPartSchema.safeParse(part);
+            if (textPart.success) return textPart.data;
+            if (typeof part === "object" && part !== null && "type" in part && typeof part.type === "string" && part.type.startsWith("tool-")) return part;
+            return null;
+        });
+        if (parsedParts.some((part) => part === null)) return null;
+        const safeParts = parsedParts.filter((part) => part !== null);
+        const content = safeParts
+            .filter((part) => "text" in part && typeof part.text === "string")
+            .map((part) => part.text as string)
             .join("\n")
             .trim();
         totalCharacters += content.length;
         if (totalCharacters > 12_000) return null;
+        rawMessages.push({ ...message.data, parts: safeParts });
         if (content) messages.push({ role: message.data.role, content });
     }
 
-    if (messages.length === 0 || messages.at(-1)?.role !== "user") return null;
-    return messages;
+    const lastMessage = rawMessages.at(-1);
+    const isApprovalResponse = lastMessage?.role === "assistant" && Array.isArray(lastMessage.parts) && lastMessage.parts.some((part) =>
+        typeof part === "object" && part !== null && "type" in part && typeof part.type === "string" && part.type.startsWith("tool-") &&
+        "approval" in part && typeof part.approval === "object" && part.approval !== null && "approved" in part.approval,
+    );
+    if (messages.length === 0 || (lastMessage?.role !== "user" && !isApprovalResponse)) return null;
+    return { rawMessages, textMessages: messages };
 }
 
 // ---------------------------------------------------------------------------
@@ -109,13 +123,13 @@ const RRA_SYSTEM_PROMPT = `You are TaxFlow Intelligence, an AI assistant for Rwa
 You help compliance officers, audit officers, and other RRA staff investigate trader data, assess risk, and monitor national tax compliance.
 
 CRITICAL RULES:
-1. Always use the available tools to retrieve real, verified data before making any claims.
+1. You may investigate all registered manufacturers, wholesalers, and retailers using the available RRA tools. Always retrieve real, verified data before making claims.
 2. NEVER invent figures, risk scores, or compliance assessments. If data is not available, say so.
-3. You are READ-ONLY. You cannot impose penalties, freeze accounts, change records, or take enforcement actions.
+3. You may propose only a human compliance review, a review flag, or a single-trader operational notice when those tools are available. Each action requires explicit officer approval in the chat and is audited.
 4. When you retrieve risk scores or behavioral analysis, clearly label them as AI-generated estimates — not official determinations.
 5. Taxpayer information is confidential. Only share it in the context of official RRA work.
 6. Always distinguish between: (a) verified database facts, (b) AI-computed indicators, and (c) general explanations.
-7. If asked to take an action (send notice, impose penalty), explain you are read-only and direct the officer to the appropriate module.
+7. Never decide or execute clearance approval/rejection, tax liability, payment confirmation/rejection, import confirmation/rejection, dispute resolution, audit closure, suspension, penalty, account freeze, transaction change/cancellation, or enforcement. Explain that a human officer must make those decisions through the proper process.
 8. All amounts are in Rwandan Francs (RWF).
 9. Be precise, professional, and concise. Use tables for comparative data.
 
@@ -207,13 +221,13 @@ export async function POST(request: Request) {
         return new Response("Invalid JSON", { status: 400 });
     }
 
-    const messages = parseMessages(body);
-    if (!messages) {
+    const parsedMessages = parseMessages(body);
+    if (!parsedMessages) {
         return Response.json({ error: "Invalid chat request. Please shorten your message and try again." }, { status: 400 });
     }
 
     // Extract the latest user message for audit logging
-    const lastUserMsg = [...messages]
+    const lastUserMsg = [...parsedMessages.textMessages]
         .reverse()
         .find((m) => m.role === "user");
     const questionText = lastUserMsg?.content ?? "";
@@ -230,7 +244,7 @@ export async function POST(request: Request) {
         /repeat.{0,30}everything.{0,30}said/i,
     ];
 
-    for (const message of messages) {
+    for (const message of parsedMessages.textMessages) {
         if (message.role === "user" && INJECTION_PATTERNS.some((pattern) => pattern.test(message.content))) {
             return new Response(
                 JSON.stringify({
@@ -263,8 +277,9 @@ export async function POST(request: Request) {
     }
 
     // ── 6. Build tools for this role ──────────────────────────────────────────
-    const rraTools = {
+    const rraReadTools = {
             lookupTrader,
+            searchTraders,
             getTransactions,
             getStockLevels,
             getTaxStatus,
@@ -276,20 +291,19 @@ export async function POST(request: Request) {
         };
     const tools: ToolSet = isTrader
         ? createTraderTools(userId)
-        : staffClearance === "super_admin" || staffClearance === "compliance_officer" || staffClearance === "audit_officer"
-            ? rraTools
-            : staffClearance === "stock_officer" || staffClearance === "correction_officer"
-                ? { lookupTrader, getTransactions, getStockLevels, traceSupplyChain }
-                : staffClearance === "reporting_officer"
-                    ? { getSystemStats, getRevenueForecastTool }
-                    : {};
+        : { ...rraReadTools, ...createRraActionTools(staffClearance) };
 
     // ── 7. Stream the response ───────────────────────────────────────────────
     try {
+        const validatedMessages = await validateUIMessages({
+            messages: parsedMessages.rawMessages,
+            tools,
+        });
+        const modelMessages = await convertToModelMessages(validatedMessages, { tools });
         const result = streamText({
             model: MODEL,
             system: isTrader ? TRADER_SYSTEM_PROMPT : RRA_SYSTEM_PROMPT,
-            messages,
+            messages: modelMessages,
             tools,
             stopWhen: stepCountIs(5),
             temperature: 0.1,      // low temperature for factual accuracy
@@ -316,3 +330,4 @@ export async function POST(request: Request) {
         );
     }
 }
+

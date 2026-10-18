@@ -21,7 +21,9 @@ interface InventoryItem {
 }
 
 interface SellFormProps {
-  inventory: InventoryItem[];
+  inventory?: InventoryItem[];
+  /** Backward-compatible prop name used by older sell pages. */
+  products?: InventoryItem[];
   vatRate: number;
 }
 
@@ -115,11 +117,18 @@ function SaleItemRow({
   );
 }
 
-export function SellForm({ inventory, vatRate }: SellFormProps) {
+export function SellForm({ inventory, products, vatRate }: SellFormProps) {
+  // Older page versions passed the same stock list as `products`. Treat an
+  // absent or malformed prop as an empty list so rendering never crashes.
+  const sellableInventory = Array.isArray(inventory)
+    ? inventory
+    : Array.isArray(products)
+      ? products
+      : [];
   const [isPending, startTransition] = useTransition();
   const [buyer, setBuyer] = useState<BuyerInfo | null>(null);
   const [saleItems, setSaleItems] = useState<SaleItem[]>(
-    inventory.map((inv) => ({
+    () => sellableInventory.map((inv) => ({
       productId: inv.productId,
       productName: inv.productName,
       available: inv.quantity,
@@ -258,3 +267,4 @@ export function SellForm({ inventory, vatRate }: SellFormProps) {
     </Card>
   );
 }
+
