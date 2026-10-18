@@ -29,6 +29,7 @@ import {
 import { Menu, Bell, LogOut, Brain } from "lucide-react";
 import { useSocketContext } from "@/components/providers/socket-provider";
 import { useSocket } from "@/lib/socket-client";
+import { translate, translateWithContext } from '@/lib/language';
 import {
     useDashboardLayoutCtx,
     LangSelector,
@@ -78,8 +79,8 @@ function NotificationBell({ userId }: { userId: string }) {
             </TooltipTrigger>
             <TooltipContent side="bottom">
                 {count > 0
-                    ? `${count} unread notification${count !== 1 ? "s" : ""}`
-                    : "Notifications"}
+                    ? translateWithContext(`${count} unread notification${count !== 1 ? "s" : ""}`, lang)
+                    : translate("Notifications", lang)}
             </TooltipContent>
         </Tooltip>
     );
@@ -167,7 +168,7 @@ export function DashboardTopbar({
                                     ROLE_COLORS[role],
                                 )}
                             >
-                                {ROLE_LABELS[role]}
+                                {translate(ROLE_LABELS[role], lang)}
                             </Badge>
                         </div>
 
@@ -180,7 +181,7 @@ export function DashboardTopbar({
                                     {group.label && (
                                         <div className="px-5 pt-4 pb-1.5">
                                             <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60">
-                                                {group.label}
+                                                {translate(group.label, lang)}
                                             </span>
                                         </div>
                                     )}
@@ -202,7 +203,7 @@ export function DashboardTopbar({
                                                         <span className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-full bg-foreground" />
                                                     )}
                                                     <item.icon className="h-4 w-4 shrink-0" />
-                                                    {item.label}
+                                                    {translate(item.label, lang)}
                                                 </Link>
                                             );
                                         })}

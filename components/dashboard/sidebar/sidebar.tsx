@@ -21,6 +21,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Search, LogOut, ChevronDown, ChevronRight, User, HelpCircle } from 'lucide-react';
 import { CommandPalette, type CommandItem } from '@/components/ui/command-palette';
 import { useDashboardLayoutCtx } from '@/components/dashboard/dashboard-layout-client';
+import { translate } from '@/lib/language';
 
 interface DashboardSidebarProps {
   role: TraderRole;
@@ -34,7 +35,7 @@ export function DashboardSidebar({ role, businessName, userName = 'User' }: Dash
   const groups = getSidebarGroups(role);
   const [isSigningOut, setIsSigningOut] = useState(false);
 
-  const { isSidebarCollapsed, sidebarW, expandSidebar } = useDashboardLayoutCtx();
+  const { isSidebarCollapsed, sidebarW, expandSidebar, lang } = useDashboardLayoutCtx();
 
   const handleSignOut = useCallback(async () => {
     if (isSigningOut) return;
@@ -58,13 +59,13 @@ export function DashboardSidebar({ role, businessName, userName = 'User' }: Dash
     () =>
       groups.flatMap((group) =>
         group.items.map((item) => ({
-          label: item.label,
+          label: translate(item.label, lang),
           href: item.href,
           icon: item.icon,
-          group: group.label || 'Navigation',
+          group: translate(group.label || 'Navigation', lang),
         })),
       ),
-    [groups],
+    [groups, lang],
   );
 
   const initials = userName
@@ -118,7 +119,7 @@ export function DashboardSidebar({ role, businessName, userName = 'User' }: Dash
                       </Link>
                     </TooltipTrigger>
                     <TooltipContent side="right" className="text-xs">
-                      {item.label}
+                      {translate(item.label, lang)}
                     </TooltipContent>
                   </Tooltip>
                 );
@@ -216,7 +217,7 @@ export function DashboardSidebar({ role, businessName, userName = 'User' }: Dash
             {group.label && (
               <div className="px-5 pt-4 pb-1.5">
                 <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60">
-                  {group.label}
+                  {translate(group.label, lang)}
                 </span>
               </div>
             )}
@@ -244,11 +245,11 @@ export function DashboardSidebar({ role, businessName, userName = 'User' }: Dash
                             active ? 'text-foreground' : 'text-muted-foreground/70 group-hover:text-foreground',
                           )}
                         />
-                        {item.label}
+                          {translate(item.label, lang)}
                       </Link>
                     </TooltipTrigger>
                     <TooltipContent side="right" className="text-xs">
-                      {item.label}
+                      {translate(item.label, lang)}
                     </TooltipContent>
                   </Tooltip>
                 );
@@ -283,7 +284,7 @@ export function DashboardSidebar({ role, businessName, userName = 'User' }: Dash
               <p className="text-sm font-medium truncate">{businessName}</p>
               <div className="flex items-center gap-2 mt-1">
                 <Badge variant="outline" className={cn('text-[10px] px-1.5 py-0', ROLE_COLORS[role])}>
-                  {ROLE_LABELS[role]}
+                  {translate(ROLE_LABELS[role], lang)}
                 </Badge>
               </div>
             </div>

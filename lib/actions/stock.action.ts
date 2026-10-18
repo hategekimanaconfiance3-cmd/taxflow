@@ -3,7 +3,7 @@
 import { eq, and, sql } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import db from '@/db/drizzle';
-import { auditLog, product, stock, transaction } from '@/db/schema';
+import { auditLog, product, stock, stockMovement, transaction } from '@/db/schema';
 import { requireTraderSession } from '@/lib/auth-guard';
 import { logAudit } from '@/lib/audit';
 
@@ -99,6 +99,18 @@ export async function recordProduction(data: { productId: string; quantity: numb
 
     const beforeQuantity = updatedStock.quantity - data.quantity;
     const afterQuantity = updatedStock.quantity;
+
+    await tx.insert(stockMovement).values({
+      businessId: session.user.id,
+      productId: data.productId,
+      quantityDelta: data.quantity,
+      quantityBefore: beforeQuantity,
+      quantityAfter: afterQuantity,
+      movementType: 'production',
+      sourceType: 'production',
+      sourceId: movementId,
+      actorUserId: session.user.id,
+    });
 
     await tx.insert(auditLog).values({
       userId: session.user.id,

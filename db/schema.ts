@@ -188,6 +188,30 @@ export const stock = pgTable(
   ],
 );
 
+// Append-only inventory evidence. Legacy stock quantities are opening balances;
+// only movements recorded after this table is introduced have verified provenance.
+export const stockMovement = pgTable(
+  'stock_movement',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    businessId: text('business_id').notNull().references(() => user.id),
+    productId: text('product_id').notNull().references(() => product.id),
+    quantityDelta: real('quantity_delta').notNull(),
+    quantityBefore: real('quantity_before').notNull(),
+    quantityAfter: real('quantity_after').notNull(),
+    movementType: text('movement_type').notNull(),
+    sourceType: text('source_type'),
+    sourceId: text('source_id'),
+    actorUserId: text('actor_user_id').references(() => user.id),
+    reason: text('reason'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('stock_movement_business_product_created_idx').on(table.businessId, table.productId, table.createdAt),
+    index('stock_movement_source_idx').on(table.sourceType, table.sourceId),
+  ],
+);
+
 // ---------------------------------------------------------------------------
 // Transactions
 // ---------------------------------------------------------------------------
@@ -210,6 +234,8 @@ export const transaction = pgTable(
     unitPrice: integer('unit_price').notNull(), // RWF
     totalAmount: integer('total_amount').notNull(), // quantity × unitPrice
     vatAmount: integer('vat_amount').notNull(), // totalAmount × 0.18
+    vatRateBasisPoints: integer('vat_rate_basis_points'), // null for legacy rows; snapshot at sale time
+    pricingMode: text('pricing_mode'), // 'exclusive' | 'inclusive'; null for legacy rows
     status: text('status').notNull().default('pending'),
     // "pending" | "confirmed" | "rejected" | "completed"
     createdAt: timestamp('created_at').defaultNow().notNull(),

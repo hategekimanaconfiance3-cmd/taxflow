@@ -12,6 +12,8 @@ import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport } from 'ai';
 import { cn } from '@/lib/utils';
 import type { TraderRole } from '@/lib/sidebar-config';
+import { LANGS, translate, type LangCode } from '@/lib/language';
+import { useLanguagePreference } from '@/lib/use-language';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -20,12 +22,6 @@ const SIDEBAR_FULL_W = 260;
 const SIDEBAR_ICON_W = 64;
 const AI_PANEL_W = 420;
 
-export const LANGS = [
-  { code: 'en', label: 'EN', full: 'English' },
-  { code: 'kiny', label: 'KINY', full: 'Kinyarwanda' },
-  { code: 'fr', label: 'FR', full: 'Français' },
-] as const;
-export type LangCode = 'en' | 'kiny' | 'fr';
 
 const SUGGESTIONS: Record<string, string[]> = {
   manufacturer: [
@@ -89,7 +85,7 @@ export function LangSelector({ value, onChange }: { value: LangCode; onChange: (
       </PopoverTrigger>
       <PopoverContent align="end" className="w-44 p-1">
         <p className="px-2 pt-1 pb-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">
-          Language
+          {translate('Language', value)}
         </p>
         {LANGS.map((lang) => (
           <button
@@ -271,7 +267,7 @@ export function DashboardLayoutClient({
 }: DashboardLayoutClientProps) {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isAiOpen, setIsAiOpen] = useState(false);
-  const [lang, setLang] = useState<LangCode>('en');
+  const [lang, setLang] = useLanguagePreference();
 
   const openAI = useCallback(() => {
     setIsAiOpen(true);

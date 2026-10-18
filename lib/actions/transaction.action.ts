@@ -2,7 +2,7 @@
 
 import { eq, and, or, asc, desc, lt, sql } from 'drizzle-orm';
 import db from '@/db/drizzle';
-import { transaction, stock, vatRecord, product, user, auditLog } from '@/db/schema';
+import { transaction, stock, stockMovement, vatRecord, product, user, auditLog } from '@/db/schema';
 import {
   requireTraderSession,
   requireApprovedClearance,
@@ -187,6 +187,8 @@ export async function createTransaction(data: {
         unitPrice: data.unitPrice,
         totalAmount,
         vatAmount,
+        vatRateBasisPoints: Math.round(config.vatRate * 10_000),
+        pricingMode: 'exclusive',
         status: 'pending',
       })
       .returning();
@@ -308,6 +310,11 @@ export async function confirmTransaction(transactionId: string) {
       buyerQuantityAfter = upsertedBuyerStock.quantity;
     }
     const buyerQuantityBefore = buyerQuantityAfter - lockedTxn.quantity;
+
+    await tx.insert(stockMovement).values([
+      { businessId: lockedTxn.sellerId, productId: lockedTxn.productId, quantityDelta: -lockedTxn.quantity, quantityBefore: sellerStock.quantity, quantityAfter: sellerStock.quantity - lockedTxn.quantity, movementType: 'sale', sourceType: 'transaction', sourceId: lockedTxn.id, actorUserId: session.user.id },
+      { businessId: session.user.id, productId: lockedTxn.productId, quantityDelta: lockedTxn.quantity, quantityBefore: buyerQuantityBefore, quantityAfter: buyerQuantityAfter, movementType: 'purchase', sourceType: 'transaction', sourceId: lockedTxn.id, actorUserId: session.user.id },
+    ]);
 
     // 3. Create VAT output record (seller)
     await tx.insert(vatRecord).values({
@@ -560,10 +567,24 @@ export async function createRetailSale(data: {
         unitPrice: data.unitPrice,
         totalAmount,
         vatAmount,
+        vatRateBasisPoints: Math.round(config.vatRate * 10_000),
+        pricingMode: 'exclusive',
         status: 'completed',
         confirmedAt: new Date(),
       })
       .returning();
+
+    await tx.insert(stockMovement).values({
+      businessId: session.user.id,
+      productId: data.productId,
+      quantityDelta: -data.quantity,
+      quantityBefore: retailerStock.quantity,
+      quantityAfter: retailerStock.quantity - data.quantity,
+      movementType: 'retail_sale',
+      sourceType: 'transaction',
+      sourceId: txn.id,
+      actorUserId: session.user.id,
+    });
 
     // Create VAT output record (retailer only — no buyer VAT for consumers)
     await tx.insert(vatRecord).values({

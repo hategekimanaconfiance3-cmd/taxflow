@@ -2,7 +2,7 @@
 
 import { eq, sql, desc, and, or, gte, lte, ilike } from "drizzle-orm";
 import db from "@/db/drizzle";
-import { dispute, user, transaction, vatRecord, auditLog, stock, product, taxPayment } from "@/db/schema";
+import { dispute, user, transaction, vatRecord, auditLog, stock, stockMovement, product, taxPayment } from "@/db/schema";
 import {
     requireRRASession,
     type RRARole,
@@ -408,10 +408,12 @@ export async function modifyTransaction(
                 .limit(1);
 
             if (sellerStock) {
+                const after = sellerStock.quantity - qtyDiff;
                 await tx
                     .update(stock)
-                    .set({ quantity: sellerStock.quantity - qtyDiff })
+                    .set({ quantity: after })
                     .where(eq(stock.id, sellerStock.id));
+                await tx.insert(stockMovement).values({ businessId: txn.sellerId, productId: txn.productId, quantityDelta: -qtyDiff, quantityBefore: sellerStock.quantity, quantityAfter: after, movementType: "transaction_correction", sourceType: "transaction", sourceId: txn.id, actorUserId: session.user.id });
             }
 
             // Adjust buyer stock (same direction)
@@ -428,10 +430,12 @@ export async function modifyTransaction(
                     .limit(1);
 
                 if (buyerStock) {
+                    const after = buyerStock.quantity + qtyDiff;
                     await tx
                         .update(stock)
-                        .set({ quantity: buyerStock.quantity + qtyDiff })
+                        .set({ quantity: after })
                         .where(eq(stock.id, buyerStock.id));
+                    await tx.insert(stockMovement).values({ businessId: txn.buyerId, productId: txn.productId, quantityDelta: qtyDiff, quantityBefore: buyerStock.quantity, quantityAfter: after, movementType: "transaction_correction", sourceType: "transaction", sourceId: txn.id, actorUserId: session.user.id });
                 }
             }
         }
@@ -577,15 +581,18 @@ export async function cancelTransaction(
                 .limit(1);
 
             if (sellerStock) {
+                const after = sellerStock.quantity + txn.quantity;
                 await tx.update(stock)
-                    .set({ quantity: sellerStock.quantity + txn.quantity })
+                    .set({ quantity: after })
                     .where(eq(stock.id, sellerStock.id));
+                await tx.insert(stockMovement).values({ businessId: txn.sellerId, productId: txn.productId, quantityDelta: txn.quantity, quantityBefore: sellerStock.quantity, quantityAfter: after, movementType: "transaction_reversal", sourceType: "transaction", sourceId: txn.id, actorUserId: session.user.id });
             } else {
                 await tx.insert(stock).values({
                     businessId: txn.sellerId,
                     productId: txn.productId,
                     quantity: txn.quantity,
                 });
+                await tx.insert(stockMovement).values({ businessId: txn.sellerId, productId: txn.productId, quantityDelta: txn.quantity, quantityBefore: 0, quantityAfter: txn.quantity, movementType: "transaction_reversal", sourceType: "transaction", sourceId: txn.id, actorUserId: session.user.id });
             }
 
             if (txn.buyerId) {
@@ -600,9 +607,11 @@ export async function cancelTransaction(
                     throw new Error("Transaction cannot be reversed because the buyer no longer has the purchased stock.");
                 }
 
+                const after = buyerStock.quantity - txn.quantity;
                 await tx.update(stock)
-                    .set({ quantity: buyerStock.quantity - txn.quantity })
+                    .set({ quantity: after })
                     .where(eq(stock.id, buyerStock.id));
+                await tx.insert(stockMovement).values({ businessId: txn.buyerId!, productId: txn.productId, quantityDelta: -txn.quantity, quantityBefore: buyerStock.quantity, quantityAfter: after, movementType: "transaction_reversal", sourceType: "transaction", sourceId: txn.id, actorUserId: session.user.id });
             }
 
             const originalVatRecords = await tx

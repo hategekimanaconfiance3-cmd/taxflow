@@ -3,6 +3,7 @@ import { GeistSans } from "geist/font/sans";
 import { GeistMono } from "geist/font/mono";
 
 import "./globals.css";
+import { LanguageRuntime } from '@/components/providers/language-runtime';
 
 export const metadata: Metadata = {
   title: "TaxFlow",
@@ -20,7 +21,7 @@ export default function RootLayout({
       <body
         className={`${GeistSans.variable} ${GeistMono.variable} antialiased`}
       >
-        {children}
+        <LanguageRuntime>{children}</LanguageRuntime>
       </body>
     </html>
   );

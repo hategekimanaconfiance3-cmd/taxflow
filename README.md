@@ -81,6 +81,7 @@ The GitHub Actions quality workflow is intended to run the same checks for pull 
 - Current-rate VAT checks may flag older transactions because applicable tax-rule versions are not yet persisted on each transaction.
 - The payment review screen is a manual authorized workflow, not a payment gateway or bank integration. An officer must independently verify settlement evidence before confirming a submission.
 - Stock movement evidence is written to the append-only audit log; this is not yet a separate normalized stock-ledger table, and historical events may not contain the newer movement details.
+- Import invoice PDFs are stored outside `public/` and served only to the owning trader and active RRA reviewers. Configure `TAXFLOW_PRIVATE_UPLOAD_DIR` to a persistent private volume when deploying; local filesystem storage must be shared by app instances that serve uploads.
 - VAT rounding, exemptions, refunds, credit notes, mixed-rate invoices, and official filing treatment require review by qualified tax/accounting specialists before production use.
 - Do not use seeded demo data for real tax decisions. Do not expose production taxpayer data to AI providers without an approved legal basis, privacy review, and retention policy.
 

@@ -2,7 +2,7 @@
 
 import { eq } from "drizzle-orm";
 import db from "@/db/drizzle";
-import { stock, product, user, auditLog } from "@/db/schema";
+import { stock, stockMovement, product, user, auditLog } from "@/db/schema";
 import { requireRRASession } from "@/lib/auth-guard";
 import { logAudit } from "@/lib/audit";
 import { desc } from "drizzle-orm";
@@ -63,11 +63,19 @@ export async function editStockRecord(
         throw new Error("No changes detected.");
     }
 
-    // 3. Apply update
-    await db.update(stock).set(updates).where(eq(stock.id, stockId));
-
-    // 4. Audit log with before/after values
-    await logAudit({
+    // Quantity corrections, their ledger event, and their audit record commit together.
+    await db.transaction(async (tx) => {
+      const [locked] = await tx.select({ quantity: stock.quantity }).from(stock).where(eq(stock.id, stockId)).for("update").limit(1);
+      if (!locked) throw new Error("Stock record not found.");
+      const nextQuantity = typeof updates.quantity === "number" ? updates.quantity : locked.quantity;
+      if (nextQuantity !== locked.quantity) {
+        await tx.insert(stockMovement).values({ businessId: current.businessId, productId: current.productId,
+          quantityDelta: nextQuantity - locked.quantity, quantityBefore: locked.quantity, quantityAfter: nextQuantity,
+          movementType: "correction", sourceType: "stock_correction", sourceId: stockId,
+          actorUserId: session.user.id, reason: reason.trim() });
+      }
+      await tx.update(stock).set(updates).where(eq(stock.id, stockId));
+      await logAudit({
         userId: session.user.id,
         action: "STOCK_EDITED",
         targetType: "stock",
@@ -88,6 +96,7 @@ export async function editStockRecord(
                 ...updates,
             },
         },
+      }, async (entry) => { await tx.insert(auditLog).values(entry); });
     });
 
     return { success: true };
@@ -128,11 +137,18 @@ export async function deleteStockRecord(stockId: string, reason: string) {
 
     if (!current) throw new Error("Stock record not found.");
 
-    // 2. Delete the record
-    await db.delete(stock).where(eq(stock.id, stockId));
-
-    // 3. Audit log with full snapshot of deleted record
-    await logAudit({
+    // Preserve a zero-balance stock row so historical references remain valid.
+    await db.transaction(async (tx) => {
+      const [locked] = await tx.select({ quantity: stock.quantity }).from(stock).where(eq(stock.id, stockId)).for("update").limit(1);
+      if (!locked) throw new Error("Stock record not found.");
+      if (locked.quantity !== 0) {
+        await tx.insert(stockMovement).values({ businessId: current.businessId, productId: current.productId,
+          quantityDelta: -locked.quantity, quantityBefore: locked.quantity, quantityAfter: 0,
+          movementType: "correction_void", sourceType: "stock_correction", sourceId: stockId,
+          actorUserId: session.user.id, reason: reason.trim() });
+      }
+      await tx.update(stock).set({ quantity: 0 }).where(eq(stock.id, stockId));
+      await logAudit({
         userId: session.user.id,
         action: "STOCK_DELETED",
         targetType: "stock",
@@ -151,6 +167,7 @@ export async function deleteStockRecord(stockId: string, reason: string) {
                 businessId: current.businessId,
             },
         },
+      }, async (entry) => { await tx.insert(auditLog).values(entry); });
     });
 
     return { success: true };
