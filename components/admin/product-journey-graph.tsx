@@ -68,7 +68,6 @@ export function ProductJourneyGraph({ edges, unit }: Props) {
     return { nodes: allNodes, positions, width: maxX, height: maxY };
   }, [filtered]);
 
-  const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
   const edgesWithConsumer = filtered.map((edge) => ({
     ...edge,
     targetId: edge.buyerId ?? "consumer:" + edge.id,
