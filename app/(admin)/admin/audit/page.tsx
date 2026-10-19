@@ -13,7 +13,7 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollText } from 'lucide-react';
 
 export default async function AdminAuditPage() {
-  await requireRRASession();
+  await requireRRASession("audit_officer", "audit_investigation_officer", "super_admin");
 
   let logs: Awaited<ReturnType<typeof getAuditLogs>> = [];
   try {

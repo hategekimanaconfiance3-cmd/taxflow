@@ -10,7 +10,7 @@ import { requireRRASession } from "@/lib/auth-guard";
 // ---------------------------------------------------------------------------
 
 export async function getAllPayments(filter?: "all" | "pending" | "confirmed" | "rejected") {
-    await requireRRASession("compliance_officer", "reporting_officer");
+    await requireRRASession("compliance_officer", "reporting_officer", "payments_reconciliation_officer");
 
     const conditions = [
         sql`${user.role} IN ('manufacturer', 'wholesaler', 'retailer')`,
@@ -45,7 +45,7 @@ export async function getAllPayments(filter?: "all" | "pending" | "confirmed" | 
 // ---------------------------------------------------------------------------
 
 export async function getPaymentSummary() {
-    await requireRRASession("compliance_officer", "reporting_officer");
+    await requireRRASession("compliance_officer", "reporting_officer", "payments_reconciliation_officer");
 
     const [totals] = await db
         .select({
@@ -76,7 +76,7 @@ export async function updatePaymentStatus(
     paymentId: string,
     status: "confirmed" | "rejected",
 ) {
-    const session = await requireRRASession("compliance_officer", "audit_officer");
+    const session = await requireRRASession("compliance_officer", "audit_officer", "payments_reconciliation_officer");
 
     await db.transaction(async (tx) => {
         const [payment] = await tx

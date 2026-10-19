@@ -84,7 +84,7 @@ const updateFindingSchema = z.object({
 });
 
 export async function getFindingStats(): Promise<FindingStats> {
-  await requireRRASession();
+  await requireRRASession("compliance_officer", "audit_officer", "audit_investigation_officer", "data_ai_analyst");
 
   const [row] = await db
     .select({
@@ -115,7 +115,7 @@ export async function getFindingStats(): Promise<FindingStats> {
 }
 
 export async function getFindings(filters: FindingFilters = {}): Promise<AiFinding[]> {
-  await requireRRASession();
+  await requireRRASession("compliance_officer", "audit_officer", "audit_investigation_officer", "data_ai_analyst");
   const parsed = findingFiltersSchema.safeParse(filters);
   if (!parsed.success) throw new Error("Invalid finding filters.");
   const values = parsed.data;

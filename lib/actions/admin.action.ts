@@ -18,7 +18,7 @@ import { getSystemConfig } from "@/lib/actions/system-config.action";
  * Get all traders in the system (paginated).
  */
 export async function getAllTraders() {
-    await requireRRASession();
+    await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
 
     return db
         .select({
@@ -42,7 +42,7 @@ export async function getAllTraders() {
  * Get a single trader's profile.
  */
 export async function getTrader(traderId: string) {
-    await requireRRASession();
+    await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
 
     const [trader] = await db
         .select()
@@ -128,7 +128,7 @@ export async function getAllTransactions(filters?: {
     dateTo?: string;
     search?: string;
 }) {
-    await requireRRASession();
+    await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
 
     const seller = db
         .select({ id: user.id, businessName: user.businessName })
@@ -458,7 +458,7 @@ export async function modifyTransaction(
 // ---------------------------------------------------------------------------
 
 export async function getTraderTransactions(traderId: string) {
-    await requireRRASession();
+    await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
 
     return db
         .select({

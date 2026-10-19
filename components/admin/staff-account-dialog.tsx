@@ -7,10 +7,10 @@ import { Eye, EyeOff, Loader2, UserPlus, WandSparkles } from "lucide-react";
 import { createStaffAccount } from "@/lib/actions/admin-staff.action";
 import {
     staffAccountSchema,
-    STAFF_ROLE_OPTIONS,
     type StaffAccountFields,
     type StaffAccountInput,
 } from "@/lib/validation/staff.schema";
+import { RRA_ROLE_OPTIONS } from "@/lib/rra-rbac";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -76,7 +76,7 @@ export function StaffAccountDialog({ onNotice, onCreated }: Props) {
             email: "",
             staffId: "",
             department: "",
-            clearanceLevel: "compliance_officer",
+            clearanceLevel: "tax_compliance_officer",
             password: "",
             confirmPassword: "",
         },
@@ -169,7 +169,7 @@ export function StaffAccountDialog({ onNotice, onCreated }: Props) {
                                         </FormControl>
                                         <SelectContent>
                                             <SelectGroup>
-                                                {STAFF_ROLE_OPTIONS.map((role) => (
+                                                {RRA_ROLE_OPTIONS.map((role) => (
                                                     <SelectItem key={role.value} value={role.value}>{role.label}</SelectItem>
                                                 ))}
                                             </SelectGroup>

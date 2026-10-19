@@ -10,7 +10,7 @@ import { requireRRASession } from "@/lib/auth-guard";
 // ---------------------------------------------------------------------------
 
 export async function getVATSummaryByMonth() {
-    await requireRRASession("reporting_officer");
+    await requireRRASession("reporting_officer", "director_executive", "data_ai_analyst");
 
     const monthlyVat = await db
         .select({
@@ -44,7 +44,7 @@ export async function getVATSummaryByMonth() {
 // ---------------------------------------------------------------------------
 
 export async function getTraderTaxReport(traderId: string) {
-    await requireRRASession("reporting_officer");
+    await requireRRASession("reporting_officer", "director_executive", "data_ai_analyst");
 
     const [traderInfo] = await db
         .select({

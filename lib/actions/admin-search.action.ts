@@ -9,7 +9,7 @@ import { requireRRASession } from "@/lib/auth-guard";
  * Search traders by TIN or business name. Returns up to 8 results.
  */
 export async function searchTraders(query: string) {
-    await requireRRASession();
+    await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
 
     if (!query || query.trim().length < 2) return [];
 

@@ -10,7 +10,7 @@ import { TrendingUp, Users, DollarSign } from 'lucide-react';
 import type { PriorityAlert } from '@/components/admin/overview/priority-alerts';
 
 export default async function AdminOverviewPage() {
-  const { user, staff } = await requireRRASession();
+  const { user, staff } = await requireRRASession("compliance_officer", "audit_officer", "reporting_officer", "director_executive", "tax_compliance_officer", "audit_investigation_officer", "data_ai_analyst");
   const stats = await getDashboardOverview();
 
   // Build priority alerts from live stats

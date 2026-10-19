@@ -21,7 +21,7 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 export default async function AdminVatVerificationPage() {
-  await requireRRASession();
+  await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
 
   let discrepancies: Awaited<ReturnType<typeof getVatVerification>> = [];
   try {

@@ -41,7 +41,7 @@ export interface TraderGap {
  * Compute national tax gap broken down by sector (role) and per-trader.
  */
 export async function getTaxGapData(): Promise<TaxGapData> {
-  await requireRRASession();
+  await requireRRASession("compliance_officer", "reporting_officer", "tax_compliance_officer", "payments_reconciliation_officer", "data_ai_analyst");
 
   try {
     // VAT output per trader (what they owe)

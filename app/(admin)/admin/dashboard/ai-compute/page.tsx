@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Bot, Cpu, Sparkles } from 'lucide-react';
 
 export default async function AiComputePage() {
-  await requireRRASession();
+  await requireRRASession("data_ai_analyst");
 
   return (
     <div className="space-y-6">

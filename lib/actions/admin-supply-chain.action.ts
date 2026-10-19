@@ -42,7 +42,7 @@ export type ProductFlow = {
 // ---------------------------------------------------------------------------
 
 export async function getProductList() {
-    await requireRRASession("audit_officer", "stock_officer");
+    await requireRRASession("audit_officer", "stock_officer", "audit_investigation_officer", "product_traceability_officer");
 
     return db
         .select({
@@ -61,7 +61,7 @@ export async function getProductList() {
 export async function getProductFlow(
     productId: string,
 ): Promise<ProductFlow | null> {
-    await requireRRASession("audit_officer", "stock_officer");
+    await requireRRASession("audit_officer", "stock_officer", "audit_investigation_officer", "product_traceability_officer");
 
     // Get product info
     const [prod] = await db

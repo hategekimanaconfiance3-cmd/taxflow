@@ -2,7 +2,7 @@ import { requireRRASession } from '@/lib/auth-guard';
 import { TaxGapDashboard } from '@/components/admin/tax-gap-dashboard';
 
 export default async function AdminTaxPage() {
-  await requireRRASession();
+  await requireRRASession("compliance_officer", "reporting_officer", "tax_compliance_officer", "payments_reconciliation_officer");
 
   return (
     <div className="space-y-6">

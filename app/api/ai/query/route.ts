@@ -32,7 +32,10 @@ import {
     getSystemStats,
     getBehavioralAnalysis,
     traceSupplyChain,
+    traceProductJourney,
+    getImportDeclarations,
 } from "@/lib/ai/tools/rra-tools";
+import { hasRRAPermission, isRRARole, type RRARole } from "@/lib/rra-rbac";
 
 // ---------------------------------------------------------------------------
 // Model setup — Google Gemini Flash (fast, cost-effective, 1M context)
@@ -116,6 +119,7 @@ CRITICAL RULES:
 7. If asked to take an action (send notice, impose penalty), explain you are read-only and direct the officer to the appropriate module.
 8. All amounts are in Rwandan Francs (RWF).
 9. Be precise, professional, and concise. Use tables for comparative data.
+10. For product traceability questions, use traceProductJourney when available. Report only its transaction records and clearly separate origin declarations that have no recorded batch link. Never infer quantity discrepancies or fraud from missing links.
 
 Format numbers with commas (e.g. 1,234,567 RWF).
 Today's date: ${new Date().toLocaleDateString("en-RW", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}.`;
@@ -188,6 +192,12 @@ export async function POST(request: Request) {
     if (!isTrader && !isRRAStaff) {
         return new Response("Forbidden", { status: 403 });
     }
+    if (session.user.isActive === false) {
+        return new Response("Forbidden", { status: 403 });
+    }
+    if (!isTrader && (!isRRARole(staffClearance) || !hasRRAPermission(staffClearance, "ai.assistant.use"))) {
+        return new Response("Forbidden", { status: 403 });
+    }
 
     // ── 3. Parse request body ────────────────────────────────────────────────
     let body: unknown;
@@ -253,26 +263,34 @@ export async function POST(request: Request) {
     }
 
     // ── 6. Build tools for this role ──────────────────────────────────────────
-    const rraTools = {
-            lookupTrader,
-            getTransactions,
-            getStockLevels,
-            getTaxStatus,
-            getRiskAssessment,
-            getRevenueForecastTool,
-            getSystemStats,
-            getBehavioralAnalysis,
-            traceSupplyChain,
-        };
+    const rraToolSets: Partial<Record<RRARole, ToolSet>> = {
+        super_admin: {},
+        director_executive: { getSystemStats, getRevenueForecastTool },
+        tax_compliance_officer: { lookupTrader, getTransactions, getTaxStatus },
+        audit_investigation_officer: {
+            lookupTrader, getTransactions, getStockLevels, getTaxStatus, getRiskAssessment,
+            getRevenueForecastTool, getSystemStats, getBehavioralAnalysis, traceProductJourney,
+            getImportDeclarations,
+        },
+        product_traceability_officer: { getTransactions, getStockLevels, traceProductJourney },
+        customs_import_officer: { getImportDeclarations },
+        payments_reconciliation_officer: { getTransactions, getTaxStatus },
+        data_ai_analyst: { getSystemStats, getRevenueForecastTool, getBehavioralAnalysis, getRiskAssessment },
+        compliance_officer: { lookupTrader, getTransactions, getTaxStatus, getRiskAssessment, traceSupplyChain },
+        audit_officer: {
+            lookupTrader, getTransactions, getStockLevels, getTaxStatus, getRiskAssessment,
+            getRevenueForecastTool, getSystemStats, getBehavioralAnalysis, traceSupplyChain,
+            traceProductJourney, getImportDeclarations,
+        },
+        stock_officer: { lookupTrader, getTransactions, getStockLevels, traceProductJourney },
+        correction_officer: { lookupTrader, getTransactions, getStockLevels },
+        reporting_officer: { getSystemStats, getRevenueForecastTool },
+    };
     const tools: ToolSet = isTrader
         ? createTraderTools(userId)
-        : staffClearance === "super_admin" || staffClearance === "compliance_officer" || staffClearance === "audit_officer"
-            ? rraTools
-            : staffClearance === "stock_officer" || staffClearance === "correction_officer"
-                ? { lookupTrader, getTransactions, getStockLevels, traceSupplyChain }
-                : staffClearance === "reporting_officer"
-                    ? { getSystemStats, getRevenueForecastTool }
-                    : {};
+        : isRRARole(staffClearance)
+            ? rraToolSets[staffClearance] ?? {}
+            : {};
 
     // ── 7. Stream the response ───────────────────────────────────────────────
     try {

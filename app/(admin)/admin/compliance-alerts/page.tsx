@@ -2,7 +2,7 @@ import { requireRRASession } from '@/lib/auth-guard';
 import { SmartAlertsPanel } from '@/components/admin/smart-alerts-panel';
 
 export default async function AdminComplianceAlertsPage() {
-  await requireRRASession();
+  await requireRRASession("compliance_officer", "tax_compliance_officer");
 
   return (
     <div className="space-y-6">

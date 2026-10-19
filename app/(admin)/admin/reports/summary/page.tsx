@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/table';
 
 export default async function AdminReportsSummaryPage() {
-  await requireRRASession();
+  await requireRRASession("reporting_officer", "director_executive", "data_ai_analyst");
 
   let monthlyData: Awaited<ReturnType<typeof getVATSummaryByMonth>> = [];
   try {

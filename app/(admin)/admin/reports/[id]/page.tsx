@@ -10,7 +10,7 @@ export default async function AdminScheduledReportDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  await requireRRASession();
+  await requireRRASession("reporting_officer", "director_executive", "data_ai_analyst");
   const { id } = await params;
 
   let report: Awaited<ReturnType<typeof generateComplianceSummary>> | null = null;

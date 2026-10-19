@@ -11,7 +11,7 @@ export default async function AdminTraderDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  await requireRRASession();
+  await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
   const { id } = await params;
 
   let trader;

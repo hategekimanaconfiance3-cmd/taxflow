@@ -72,7 +72,7 @@ export default async function FindingsPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  await requireRRASession();
+  await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer", "data_ai_analyst");
   const params = await searchParams;
 
   let findings: Awaited<ReturnType<typeof getFindings>> = [];

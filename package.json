@@ -7,7 +7,7 @@
     "dev:next": "next dev",
     "build": "next build",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/payment-idempotency.test.ts",
+    "test": "tsx --test tests/payment-idempotency.test.ts tests/product-journey.test.ts tests/rra-rbac.test.ts",
     "start": "NODE_ENV=production tsx server.ts",
     "lint": "eslint",
     "db:push": "drizzle-kit push --config drizzle.taxflow.config.ts",

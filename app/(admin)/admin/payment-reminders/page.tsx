@@ -14,7 +14,7 @@ import { Bell } from 'lucide-react';
 import { formatRWF } from '@/components/dashboard/stat-card/stat-card';
 
 export default async function AdminPaymentRemindersPage() {
-  await requireRRASession();
+  await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "payments_reconciliation_officer");
 
   let traders: Awaited<ReturnType<typeof getTradersWithUnpaidVat>> = [];
   try {

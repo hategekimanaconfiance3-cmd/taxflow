@@ -18,7 +18,7 @@ import { UserSearch, AlertTriangle, Clock, Database } from 'lucide-react';
 import { formatRWF } from '@/components/dashboard/stat-card/stat-card';
 
 export default async function AdminUnregisteredPage() {
-  await requireRRASession();
+  await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
 
   let buyers: Awaited<ReturnType<typeof getUnregisteredBuyers>> = [];
   let ghosts: Awaited<ReturnType<typeof getGhostTaxpayers>> = [];

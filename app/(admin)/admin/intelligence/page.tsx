@@ -88,7 +88,7 @@ export default async function IntelligenceHubPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  const { staff } = await requireRRASession();
+  const { staff } = await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer", "data_ai_analyst");
   const params = await searchParams;
   const activeTab = params.tab ?? 'all';
 
@@ -314,8 +314,8 @@ export default async function IntelligenceHubPage({
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {/* Server action buttons live in a client component */}
           <IntelligenceActionButtons
-            canRunReconciliation={['super_admin', 'stock_officer', 'compliance_officer', 'audit_officer'].includes(staff.clearanceLevel)}
-            canRunDataQuality={['super_admin', 'compliance_officer', 'audit_officer'].includes(staff.clearanceLevel)}
+            canRunReconciliation={['stock_officer', 'compliance_officer', 'audit_officer', 'product_traceability_officer', 'tax_compliance_officer', 'audit_investigation_officer'].includes(staff.clearanceLevel)}
+            canRunDataQuality={['compliance_officer', 'audit_officer', 'tax_compliance_officer', 'audit_investigation_officer', 'data_ai_analyst'].includes(staff.clearanceLevel)}
           />
 
           {/* Pure link cards */}

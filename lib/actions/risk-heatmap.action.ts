@@ -30,7 +30,7 @@ export interface RiskHeatmapData {
  * for speed, rather than the full 5-signal engine.
  */
 export async function getRiskHeatmap(): Promise<RiskHeatmapData> {
-    await requireRRASession();
+    await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer", "data_ai_analyst");
 
     try {
         // Get all traders

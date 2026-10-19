@@ -10,7 +10,7 @@ import { requireRRASession } from "@/lib/auth-guard";
 // ---------------------------------------------------------------------------
 
 export async function getTraderStock(traderId: string) {
-    await requireRRASession("stock_officer", "audit_officer", "correction_officer");
+    await requireRRASession("stock_officer", "audit_officer", "correction_officer", "product_traceability_officer", "audit_investigation_officer");
 
     const inventory = await db
         .select({
@@ -36,7 +36,7 @@ export async function getTraderStock(traderId: string) {
 // ---------------------------------------------------------------------------
 
 export async function getSystemStockOverview() {
-    await requireRRASession("stock_officer", "audit_officer", "correction_officer");
+    await requireRRASession("stock_officer", "audit_officer", "correction_officer", "product_traceability_officer", "audit_investigation_officer");
 
     return db
         .select({

@@ -4,21 +4,14 @@ import db from '@/db/drizzle';
 import { rraStaff } from '@/db/schema';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
+import { hasRRAPermission, isRRARole, isRRARoleAllowed, RRA_ROLE_VALUES, type RRAPermission, type RRARole } from '@/lib/rra-rbac';
 
 // ---------------------------------------------------------------------------
 // RRA Roles (specialized, not hierarchical)
 // ---------------------------------------------------------------------------
 
-export const RRA_ROLES = [
-  'super_admin',
-  'compliance_officer',
-  'audit_officer',
-  'stock_officer',
-  'correction_officer',
-  'reporting_officer',
-] as const;
-
-export type RRARole = (typeof RRA_ROLES)[number];
+export const RRA_ROLES = RRA_ROLE_VALUES;
+export type { RRARole };
 
 // ---------------------------------------------------------------------------
 // Trader roles
@@ -57,13 +50,17 @@ export async function requireSession() {
     redirect('/sign-in');
   }
 
+  if (session.user.isActive === false) {
+    redirect('/sign-in');
+  }
+
   return session;
 }
 
 /**
  * Validate the session AND confirm the user is active RRA staff.
  * Optionally restrict to specific RRA roles.
- * `super_admin` always has access regardless of the allowed roles list.
+ * Roles must match the explicit allowlist (with narrowly defined legacy aliases).
  *
  * @param allowedRoles - Roles that can access this resource. If empty, any active staff can access.
  * @returns The session plus the staff record
@@ -78,11 +75,14 @@ export async function requireRRASession(...allowedRoles: RRARole[]) {
   }
 
   const staff = staffRecords[0];
-  const userRole = staff.clearanceLevel as RRARole;
+  if (!isRRARole(staff.clearanceLevel)) {
+    redirect('/admin/dashboard');
+  }
+  const userRole = staff.clearanceLevel;
 
   // If specific roles are required, check access
   if (allowedRoles.length > 0) {
-    const hasAccess = userRole === 'super_admin' || allowedRoles.includes(userRole);
+    const hasAccess = isRRARoleAllowed(userRole, allowedRoles);
 
     if (!hasAccess) {
       redirect('/admin/dashboard');
@@ -90,6 +90,14 @@ export async function requireRRASession(...allowedRoles: RRARole[]) {
   }
 
   return { ...session, staff };
+}
+
+export async function requireRRAPermission(permission: RRAPermission) {
+  const rraSession = await requireRRASession();
+  if (!isRRARole(rraSession.staff.clearanceLevel) || !hasRRAPermission(rraSession.staff.clearanceLevel, permission)) {
+    redirect('/admin/dashboard');
+  }
+  return rraSession;
 }
 
 /**

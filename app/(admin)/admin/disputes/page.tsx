@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Scale } from 'lucide-react';
 
 export default async function AdminDisputesPage() {
-  await requireRRASession();
+  await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
   const disputes = await getAllDisputes();
 
   return (

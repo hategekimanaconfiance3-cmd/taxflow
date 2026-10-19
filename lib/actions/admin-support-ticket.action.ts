@@ -12,7 +12,7 @@ import { createNotification } from "@/lib/notifications";
 // ---------------------------------------------------------------------------
 
 export async function getAllTickets(status?: string) {
-    await requireRRASession();
+    await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
 
     const whereClause = status
         ? eq(supportTicket.status, status)
@@ -45,7 +45,7 @@ export async function assignTicket(
     ticketId: string,
     staffUserId: string,
 ): Promise<{ success: true }> {
-    const { staff, ...session } = await requireRRASession("super_admin", "compliance_officer");
+    const { staff, ...session } = await requireRRASession("compliance_officer", "tax_compliance_officer");
 
     const [ticket] = await db
         .select()
@@ -95,7 +95,7 @@ export async function resolveTicket(
     ticketId: string,
     resolution: string,
 ): Promise<{ success: true }> {
-    const { staff, ...session } = await requireRRASession("super_admin", "compliance_officer");
+    const { staff, ...session } = await requireRRASession("compliance_officer", "tax_compliance_officer");
 
     if (!resolution?.trim()) throw new Error("Resolution is required.");
 
@@ -145,7 +145,7 @@ export async function resolveTicket(
 // ---------------------------------------------------------------------------
 
 export async function getTicketStats() {
-    await requireRRASession();
+    await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
 
     const [stats] = await db
         .select({

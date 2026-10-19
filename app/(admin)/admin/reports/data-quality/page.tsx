@@ -6,7 +6,7 @@ import { DatabaseZap } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export default async function AdminDataQualityPage() {
-  await requireRRASession();
+  await requireRRASession("compliance_officer", "audit_officer", "audit_investigation_officer", "data_ai_analyst");
 
   let metrics: Awaited<ReturnType<typeof getDataQualityMetrics>> | null = null;
   try {

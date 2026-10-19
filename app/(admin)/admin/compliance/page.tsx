@@ -2,7 +2,7 @@ import { requireRRASession } from '@/lib/auth-guard';
 import { ComplianceOverview } from '@/components/admin/analytics/compliance-overview';
 
 export default async function AdminCompliancePage() {
-  await requireRRASession();
+  await requireRRASession("compliance_officer", "tax_compliance_officer");
 
   return (
     <div className="space-y-6">

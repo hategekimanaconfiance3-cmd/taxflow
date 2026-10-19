@@ -10,7 +10,7 @@ export const metadata = {
 };
 
 export default async function AdminAssistantPage() {
-  const { staff } = await requireRRASession();
+  const { staff } = await requireRRASession("compliance_officer", "audit_officer", "stock_officer", "reporting_officer", "tax_compliance_officer", "audit_investigation_officer", "product_traceability_officer", "customs_import_officer", "payments_reconciliation_officer", "data_ai_analyst", "director_executive");
 
   return (
     <div className="space-y-6">

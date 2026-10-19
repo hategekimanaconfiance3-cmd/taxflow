@@ -21,7 +21,7 @@ const BUCKET_COLORS: Record<string, string> = {
 };
 
 export default async function AdminArrearsAgingPage() {
-  await requireRRASession();
+  await requireRRASession("compliance_officer", "reporting_officer", "tax_compliance_officer", "payments_reconciliation_officer", "data_ai_analyst");
 
   let data: Awaited<ReturnType<typeof getArrearsAging>> | null = null;
   try {

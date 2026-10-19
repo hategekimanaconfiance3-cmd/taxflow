@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useTransition } from "react";
 import { Button } from "@/components/ui/button";
-import { Download, Loader2, FileSpreadsheet, Shield, Users } from "lucide-react";
+import { Loader2, FileSpreadsheet, Shield } from "lucide-react";
 import {
     getNationalTaxData,
     getComplianceDataset,
@@ -42,13 +42,8 @@ export function ExportNationalData() {
         startTransition(async () => {
             const data = await getNationalTaxData();
             const headers = [
-                "TIN",
-                "Business Name",
-                "Owner",
-                "Category",
-                "Phone",
-                "Status",
-                "Registered",
+                "Scope",
+                "Registered Taxpayers",
                 "VAT Output (RWF)",
                 "VAT Input (RWF)",
                 "Net VAT Due (RWF)",
@@ -60,13 +55,8 @@ export function ExportNationalData() {
                 "Payments",
             ];
             const rows = data.map((t) => [
-                t.tin,
                 t.businessName,
-                t.ownerName,
-                t.role,
-                t.phone,
-                t.status,
-                t.registeredAt,
+                t.status.replace(" registered taxpayers", ""),
                 String(t.vatOutput),
                 String(t.vatInput),
                 String(t.netVatDue),
@@ -103,64 +93,6 @@ export function ExportNationalData() {
 }
 
 // ---------------------------------------------------------------------------
-// Taxpayer Directory Export
-// ---------------------------------------------------------------------------
-
-export function ExportTaxpayerDirectory() {
-    const [isPending, startTransition] = useTransition();
-
-    function handleExport() {
-        startTransition(async () => {
-            const data = await getNationalTaxData();
-            const headers = [
-                "TIN",
-                "Business Name",
-                "Owner",
-                "Category",
-                "Phone",
-                "Status",
-                "Registered",
-            ];
-            const rows = data.map((t) => [
-                t.tin,
-                t.businessName,
-                t.ownerName,
-                t.role,
-                t.phone,
-                t.status,
-                t.registeredAt,
-            ]);
-            downloadCSV(
-                `taxpayer-directory-${new Date().toISOString().split("T")[0]}.csv`,
-                headers,
-                rows,
-            );
-        });
-    }
-
-    return (
-        <Button
-            variant="outline"
-            onClick={handleExport}
-            disabled={isPending}
-            className="gap-2 w-full justify-start h-auto py-4 px-5"
-        >
-            {isPending ? (
-                <Loader2 className="h-5 w-5 animate-spin" />
-            ) : (
-                <Users className="h-5 w-5" />
-            )}
-            <div className="text-left">
-                <p className="font-semibold">Taxpayer Directory</p>
-                <p className="text-xs font-normal text-muted-foreground">
-                    All registered traders with contact details
-                </p>
-            </div>
-        </Button>
-    );
-}
-
-// ---------------------------------------------------------------------------
 // Compliance Dataset Export
 // ---------------------------------------------------------------------------
 
@@ -171,10 +103,8 @@ export function ExportComplianceDataset() {
         startTransition(async () => {
             const data = await getComplianceDataset();
             const headers = [
-                "TIN",
-                "Business Name",
-                "Category",
-                "Status",
+                "Scope",
+                "Registered Taxpayers",
                 "Net VAT Due (RWF)",
                 "Total Paid (RWF)",
                 "Outstanding (RWF)",
@@ -185,9 +115,7 @@ export function ExportComplianceDataset() {
                 "Risk Level",
             ];
             const rows = data.map((t) => [
-                t.tin,
                 t.businessName,
-                t.role,
                 t.status,
                 String(t.netVatDue),
                 String(t.totalPaid),

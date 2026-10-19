@@ -1,6 +1,6 @@
 "use server";
 
-import { eq, sql, and } from "drizzle-orm";
+import { eq, sql, and, inArray } from "drizzle-orm";
 import db from "@/db/drizzle";
 import { account, auditLog, rraStaff, session as authSession, user } from "@/db/schema";
 import { requireRRASession } from "@/lib/auth-guard";
@@ -9,8 +9,8 @@ import { hashPassword } from "better-auth/crypto";
 import { randomUUID } from "node:crypto";
 import {
     resetStaffPasswordSchema,
+    staffAssignmentRoleSchema,
     staffAccountSchema,
-    staffRoleSchema,
 } from "@/lib/validation/staff.schema";
 
 type StaffMutationResult =
@@ -43,7 +43,7 @@ export async function updateStaffClearance(
     newClearance: string,
 ): Promise<StaffMutationResult> {
     const { staff, ...session } = await requireRRASession("super_admin");
-    const parsedRole = staffRoleSchema.safeParse(newClearance);
+    const parsedRole = staffAssignmentRoleSchema.safeParse(newClearance);
     if (!parsedRole.success) return { success: false, error: "Choose a valid staff role." };
 
     try {
@@ -201,7 +201,7 @@ export async function createStaffAccount(data: unknown): Promise<
                 userId,
                 staffId,
                 department: parsed.data.department,
-                clearanceLevel: parsed.data.clearanceLevel,
+                clearanceLevel: staffAssignmentRoleSchema.parse(parsed.data.clearanceLevel),
                 assignedBy: session.user.id,
                 isActive: true,
             });
@@ -310,7 +310,7 @@ export async function createStaffMember(data: {
     clearanceLevel: string;
 }): Promise<{ success: true; id: string }> {
     const { staff, ...session } = await requireRRASession("super_admin");
-    const parsedRole = staffRoleSchema.safeParse(data.clearanceLevel);
+    const parsedRole = staffAssignmentRoleSchema.safeParse(data.clearanceLevel);
     const staffId = data.staffId.trim().toUpperCase();
     const department = data.department.trim();
     if (!parsedRole.success || !/^[A-Z0-9]+(?:-[A-Z0-9]+)*$/.test(staffId) || !department) {
@@ -361,33 +361,25 @@ export async function createStaffMember(data: {
 // ---------------------------------------------------------------------------
 
 export async function deactivateTaxpayer(traderId: string) {
-    const { staff, ...session } = await requireRRASession("super_admin");
+    const session = await requireRRASession("compliance_officer");
+    await db.transaction(async (tx) => {
+        const [trader] = await tx
+            .select({ id: user.id, clearanceStatus: user.clearanceStatus })
+            .from(user)
+            .where(and(eq(user.id, traderId), inArray(user.role, ["manufacturer", "wholesaler", "retailer"])))
+            .for("update")
+            .limit(1);
+        if (!trader) throw new Error("Trader not found");
 
-    const [trader] = await db
-        .select({ id: user.id, clearanceStatus: user.clearanceStatus })
-        .from(user)
-        .where(eq(user.id, traderId))
-        .limit(1);
-
-    if (!trader) throw new Error("Trader not found");
-
-    await db
-        .update(user)
-        .set({
-            clearanceStatus: "suspended",
-            updatedAt: new Date(),
-        })
-        .where(eq(user.id, traderId));
-
-    await logAudit({
-        userId: session.user.id,
-        action: "TAXPAYER_DEACTIVATED",
-        targetType: "user",
-        targetId: traderId,
-        metadata: {
-            previousStatus: trader.clearanceStatus,
-            deactivatedBy: staff.staffId,
-        },
+        await tx.update(user).set({ clearanceStatus: "suspended", updatedAt: new Date() }).where(eq(user.id, traderId));
+        await logAudit({
+            userId: session.user.id,
+            action: "TAXPAYER_DEACTIVATED",
+            targetType: "user",
+            targetId: traderId,
+            beforeState: { clearanceStatus: trader.clearanceStatus },
+            afterState: { clearanceStatus: "suspended" },
+        }, async (entry) => { await tx.insert(auditLog).values(entry); });
     });
 
     return { success: true };
@@ -398,22 +390,25 @@ export async function deactivateTaxpayer(traderId: string) {
 // ---------------------------------------------------------------------------
 
 export async function reactivateTaxpayer(traderId: string) {
-    const { staff, ...session } = await requireRRASession("super_admin");
+    const session = await requireRRASession("compliance_officer");
+    await db.transaction(async (tx) => {
+        const [trader] = await tx
+            .select({ id: user.id, clearanceStatus: user.clearanceStatus })
+            .from(user)
+            .where(and(eq(user.id, traderId), inArray(user.role, ["manufacturer", "wholesaler", "retailer"])))
+            .for("update")
+            .limit(1);
+        if (!trader) throw new Error("Trader not found");
 
-    await db
-        .update(user)
-        .set({
-            clearanceStatus: "approved",
-            updatedAt: new Date(),
-        })
-        .where(eq(user.id, traderId));
-
-    await logAudit({
-        userId: session.user.id,
-        action: "TAXPAYER_REACTIVATED",
-        targetType: "user",
-        targetId: traderId,
-        metadata: { reactivatedBy: staff.staffId },
+        await tx.update(user).set({ clearanceStatus: "approved", updatedAt: new Date() }).where(eq(user.id, traderId));
+        await logAudit({
+            userId: session.user.id,
+            action: "TAXPAYER_REACTIVATED",
+            targetType: "user",
+            targetId: traderId,
+            beforeState: { clearanceStatus: trader.clearanceStatus },
+            afterState: { clearanceStatus: "approved" },
+        }, async (entry) => { await tx.insert(auditLog).values(entry); });
     });
 
     return { success: true };

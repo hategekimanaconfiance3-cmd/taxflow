@@ -3,7 +3,7 @@ import { getTaxpayerOverview } from '@/lib/actions/admin-taxpayer-overview.actio
 import { AdminTaxpayerTable } from '@/components/admin/admin-taxpayer-table';
 
 export default async function AdminTradersPage() {
-  await requireRRASession();
+  await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
 
   const { rows, pagination, summary } = await getTaxpayerOverview(1, 'name', 'asc');
 

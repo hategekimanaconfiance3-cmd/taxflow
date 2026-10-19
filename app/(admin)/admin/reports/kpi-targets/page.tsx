@@ -14,7 +14,7 @@ const STATUS_CONFIG: Record<string, { label: string; cls: string }> = {
 };
 
 export default async function AdminKpiTargetsPage() {
-  await requireRRASession();
+  await requireRRASession("compliance_officer", "reporting_officer", "tax_compliance_officer", "director_executive");
 
   let report: Awaited<ReturnType<typeof getKPIProgress>> | null = null;
   try {

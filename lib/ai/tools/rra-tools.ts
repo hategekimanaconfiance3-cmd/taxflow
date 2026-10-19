@@ -2,17 +2,18 @@
 
 import { tool } from "ai";
 import { z } from "zod";
-import { eq, sql, desc, and, gte, ilike, inArray } from "drizzle-orm";
+import { eq, sql, desc, and, ilike, inArray, or } from "drizzle-orm";
 import db from "@/db/drizzle";
 import {
     user, transaction, stock, product, vatRecord,
-    taxPayment, auditLog, importDeclaration, dispute,
+    taxPayment, importDeclaration, dispute,
 } from "@/db/schema";
 import tinDb from "@/db/tin-drizzle";
 import { tinRecord } from "@/db/tin-schema";
 import { computeRiskScore } from "@/lib/ai/risk-scoring";
 import { getRevenueForecast } from "@/lib/ai/revenue-forecast";
 import { analyzeMerchantBehavior } from "@/lib/ai/behavioral-analysis";
+import { searchProductJourney } from "@/lib/actions/product-journey.action";
 
 // ---------------------------------------------------------------------------
 // AI Tools — Database query tools for the RRA Intelligence Agent.
@@ -90,7 +91,7 @@ export const getTransactions = tool({
 
         if (status) conditions.push(eq(transaction.status, status));
 
-        let query = db
+        const query = db
             .select({
                 id: transaction.id,
                 productName: product.name,
@@ -531,5 +532,79 @@ export const traceSupplyChain = tool({
             chainsTraced: chains.length,
             chains,
         };
+    },
+});
+
+/** Return only persisted transaction edges and separately identified source records. */
+export const traceProductJourney = tool({
+    description: "Trace a recorded product journey for an RRA audit or stock officer. Returns persisted transaction records and origin declarations separately. Batch declarations are not linked to transactions unless the database contains that relationship; do not infer allocations, missing quantities, or fraud.",
+    inputSchema: z.object({
+        query: z.string().trim().min(2).max(120).describe("Product name or ID, batch reference, business name/TIN, transaction, or import reference"),
+        status: z.enum(["all", "pending", "confirmed", "completed", "rejected", "expired", "disputed"]).default("all"),
+    }),
+    execute: async ({ query, status }) => {
+        const result = await searchProductJourney({ query, status, offset: 0 });
+        return {
+            found: result.records.length > 0 || result.sourceRecords.length > 0,
+            transactionRecords: result.records.map(({ id, sellerName, sellerTin, sellerRole, buyerName, buyerTin, buyerRole, productName, quantity, unit, status: recordStatus, createdAt, confirmedAt, disputed }) => ({
+                reference: id,
+                seller: { name: sellerName, tin: sellerTin, role: sellerRole },
+                buyer: { name: buyerName, tin: buyerTin, role: buyerRole },
+                product: productName,
+                quantity,
+                unit,
+                status: recordStatus,
+                dispatchedAt: createdAt,
+                receiptConfirmedAt: confirmedAt,
+                disputed,
+            })),
+            originRecords: result.sourceRecords.map(({ kind, reference, businessName, businessTin, productName, quantity, status: sourceStatus, createdAt }) => ({
+                kind,
+                reference,
+                businessName,
+                businessTin,
+                productName,
+                declaredQuantity: quantity,
+                status: sourceStatus,
+                createdAt,
+                downstreamBatchLink: "not recorded",
+            })),
+            totalTransactions: result.total,
+            hasMore: result.hasMore,
+            limitation: "Only recorded links are returned. A missing transaction or batch allocation is unknown, not a zero quantity or proof of misconduct.",
+        };
+    },
+});
+
+export const getImportDeclarations = tool({
+    description: "Search existing import declarations for an authorized customs review. Returns only declaration records and recorded quantities; it does not confirm or alter declarations.",
+    inputSchema: z.object({ query: z.string().trim().min(2).max(120) }),
+    execute: async ({ query }) => {
+        const match = `%${query.replace(/[\\%_]/g, "\\$&")}%`;
+        const rows = await db.select({
+            id: importDeclaration.id,
+            businessName: sql<string>`COALESCE(${user.businessName}, ${user.name})`,
+            tin: user.tinNumber,
+            productName: product.name,
+            unit: product.unit,
+            expectedQuantity: importDeclaration.expectedQuantity,
+            actualQuantity: importDeclaration.actualQuantity,
+            status: importDeclaration.status,
+            customsReference: importDeclaration.customsRef,
+            invoiceReference: importDeclaration.invoiceRef,
+            createdAt: importDeclaration.createdAt,
+        }).from(importDeclaration)
+            .innerJoin(user, eq(importDeclaration.businessId, user.id))
+            .innerJoin(product, eq(importDeclaration.productId, product.id))
+            .where(or(
+                ilike(importDeclaration.customsRef, match),
+                ilike(importDeclaration.invoiceRef, match),
+                ilike(product.name, match),
+                ilike(user.tinNumber, match),
+                ilike(user.businessName, match),
+            ))
+            .orderBy(desc(importDeclaration.createdAt))
+            .limit(20);
+        return { count: rows.length, declarations: rows, readOnly: true };
     },
 });

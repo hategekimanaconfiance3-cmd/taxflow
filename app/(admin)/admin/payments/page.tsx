@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Banknote } from 'lucide-react';
 
 export default async function AdminPaymentsPage() {
-  await requireRRASession();
+  await requireRRASession("compliance_officer", "reporting_officer", "payments_reconciliation_officer");
 
   return (
     <div className="space-y-6">

@@ -23,7 +23,7 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 export default async function AdminTransactionsPage() {
-  await requireRRASession();
+  await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
 
   const transactions = await getAllTransactions();
 

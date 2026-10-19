@@ -14,7 +14,7 @@ import { Badge } from '@/components/ui/badge';
 import { Package } from 'lucide-react';
 
 export default async function AdminStockPage() {
-  await requireRRASession();
+    await requireRRASession("stock_officer", "audit_officer", "correction_officer", "product_traceability_officer", "audit_investigation_officer");
 
   let inventory: Awaited<ReturnType<typeof getSystemStockOverview>> = [];
   try {

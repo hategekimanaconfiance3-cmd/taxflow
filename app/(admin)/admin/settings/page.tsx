@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Settings, Users } from 'lucide-react';
 
 export default async function AdminSettingsPage() {
-  const { staff } = await requireRRASession();
+  const { staff } = await requireRRASession("super_admin");
 
   const config = await getSystemConfig();
   let staffMembers: StaffManagementMember[] = [];

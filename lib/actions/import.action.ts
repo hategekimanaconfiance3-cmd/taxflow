@@ -142,7 +142,7 @@ export async function submitImportArrival(
 // ---------------------------------------------------------------------------
 
 export async function confirmImportArrival(declarationId: string) {
-    const { staff, ...session } = await requireRRASession("compliance_officer", "audit_officer");
+    const { staff, ...session } = await requireRRASession("compliance_officer", "audit_officer", "customs_import_officer");
 
     const { declaration, actualQuantity, discrepancy } = await db.transaction(async (tx) => {
         const [declaration] = await tx
@@ -232,7 +232,7 @@ export async function rejectImportArrival(
     declarationId: string,
     reason: string,
 ) {
-    const { staff, ...session } = await requireRRASession("compliance_officer", "audit_officer");
+    const { staff, ...session } = await requireRRASession("compliance_officer", "audit_officer", "customs_import_officer");
 
     if (!reason?.trim()) {
         throw new Error("A reason is required for rejection");
@@ -360,7 +360,7 @@ export async function getImportDeclaration(declarationId: string) {
 // ---------------------------------------------------------------------------
 
 export async function getAllImportDeclarations(statusFilter?: string) {
-    await requireRRASession("compliance_officer", "audit_officer");
+    await requireRRASession("compliance_officer", "audit_officer", "customs_import_officer");
 
     const result = await db
         .select({
