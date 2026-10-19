@@ -15,6 +15,7 @@ import {
 } from "@/db/schema";
 import { buildRiskAlerts } from "@/lib/intelligence/risk-rules";
 import { getSystemConfig } from "@/lib/actions/system-config.action";
+import { buildVatGuidance } from "@/lib/ai/vat-guidance";
 
 // ---------------------------------------------------------------------------
 // Factory: creates trader tools scoped to a specific userId.
@@ -261,19 +262,13 @@ export function createTraderTools(userId: string) {
 
     /** Explain VAT calculation and answer tax questions. */
     const explainVat = tool({
-        description: "Explain how VAT is calculated in Rwanda. Use when the trader asks about VAT, tax rates, or why their tax changed. Also provides the trader's current VAT breakdown.",
+        description: "Explain TaxFlow's configured VAT arithmetic and, optionally, the logged-in trader's unfrozen VAT records. This tool does not provide official RRA tax law, exemptions, or filing deadlines.",
         inputSchema: z.object({
             includeBreakdown: z.boolean().default(false).describe("Include the trader's current VAT breakdown"),
         }),
         execute: async ({ includeBreakdown }) => {
-            const explanation = {
-                vatRate: "18% (Rwanda standard rate)",
-                howItWorks: "VAT is charged on each transaction. Output VAT (on sales) minus Input VAT (on purchases) = Net VAT owed to RRA.",
-                outputVat: "Tax Generated — charged when you sell goods. Calculated as: sale amount × 18%",
-                inputVat: "Tax Paid/Credited — credited when you purchase goods from a VAT-registered supplier. This reduces your total VAT owed.",
-                netOwed: "Tax Balance = Tax Generated - Tax Paid. If positive, you owe RRA. If negative, you have credit.",
-                filingPeriod: "VAT returns are typically filed monthly by the 15th of the following month.",
-            };
+            const config = await getSystemConfig();
+            const explanation = buildVatGuidance(config.vatRate);
 
             if (!includeBreakdown) return explanation;
 
@@ -284,7 +279,7 @@ export function createTraderTools(userId: string) {
                     total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`,
                 })
                 .from(vatRecord)
-                .where(eq(vatRecord.businessId, userId))
+                .where(and(eq(vatRecord.businessId, userId), eq(vatRecord.isFrozen, false)))
                 .groupBy(vatRecord.vatType);
 
             const taxGenerated = Number(vatResult.find((r) => r.vatType === "output")?.total) || 0;
@@ -295,7 +290,8 @@ export function createTraderTools(userId: string) {
                 yourBreakdown: {
                     taxGenerated_vatOutput: taxGenerated,
                     taxPaid_vatInput: taxPaidVat,
-                    netTaxDue: taxGenerated - taxPaidVat,
+                    recordedNetVatPosition: taxGenerated - taxPaidVat,
+                    note: "Calculated from this trader's unfrozen TaxFlow VAT records; not an official RRA balance.",
                 },
             };
         },

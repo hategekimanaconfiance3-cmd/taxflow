@@ -8,6 +8,7 @@
     "build": "next build",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts",
+    "ai:eval": "tsx scripts/evaluate-ai.ts",
     "start": "NODE_ENV=production tsx server.ts",
     "lint": "eslint",
     "db:push": "drizzle-kit push --config drizzle.taxflow.config.ts",

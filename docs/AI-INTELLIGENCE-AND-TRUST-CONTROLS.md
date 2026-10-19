@@ -82,8 +82,12 @@ Track transaction match rate, stock-count variance, payment reconciliation rate,
 
 The assistant's first repeatable evaluation gate is role-tool access: synthetic cases assert that each staff role receives only its configured read tools. Keep those cases in `tests/fixtures/ai-evaluation-cases.json` and run them with the test suite after changing the role matrix or AI route.
 
+Run `pnpm ai:eval` to send the separate synthetic answer-quality cases to the configured model. This requires `GOOGLE_GENERATIVE_AI_API_KEY`, makes billable provider requests, and reports tool selection and simple answer-policy checks without printing answers. Do not run it against production taxpayer data.
+
 Staff can submit a rating and a fixed issue category. The feedback table deliberately excludes prompt text, response text, TINs, and free-text notes. Reviewers with the `ai.feedback.review` permission classify each item as added to the evaluation set, follow-up, duplicate, or no action. Review submissions and decisions are written to the audit log in the same database transaction as the feedback mutation.
 
 An “added to evaluation set” decision is a curation marker, not automatic model training. Add a case to a model-quality evaluation set only after a qualified reviewer writes a synthetic or properly de-identified input, independently verified expected answer, allowed evidence/tools, and scoring rubric. Keep answer quality, factuality, privacy, refusal behavior, and role leakage as separate metrics. Never use model output as the source of truth for tax calculations, payments, or filing decisions.
 
 Do not fine-tune on staff feedback alone. Collect and review a representative labeled dataset, define acceptance thresholds, measure false answers and role leakage, and evaluate model and prompt changes before deployment. Preserve a versioned holdout set so the evaluation can detect regressions.
+
+The application currently calls the Gemini Developer API through `@ai-sdk/google`; that API currently has no fine-tuning model available. Actual Gemini supervised fine-tuning requires a Vertex AI / Gemini Enterprise Agent Platform workflow and a supported base model. Build and approve a training dataset first, keep a separate holdout set, and deploy a tuned model only after it passes the same evaluations. See [Gemini API fine-tuning status](https://ai.google.dev/gemini-api/docs/model-tuning.md) and [Vertex AI model tuning](https://cloud.google.com/vertex-ai/generative-ai/docs/models/tune-models).

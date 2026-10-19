@@ -39,6 +39,7 @@ import {
 } from "@/lib/ai/tools/rra-tools";
 import { hasRRAPermission, isRRARole } from "@/lib/rra-rbac";
 import { getRRAAIToolNames, type RRAAIToolName } from "@/lib/ai/rra-tool-access";
+import { getRRASystemPrompt, getTraderSystemPrompt } from "@/lib/ai/system-prompts";
 
 // ---------------------------------------------------------------------------
 // Model setup — Gemini 3.6 Flash is the current supported Flash model.
@@ -100,45 +101,6 @@ function parseMessages(input: unknown): { rawMessages: Record<string, unknown>[]
     if (messages.length === 0 || (lastMessage?.role !== "user" && !isApprovalResponse)) return null;
     return { rawMessages, textMessages: messages };
 }
-
-// ---------------------------------------------------------------------------
-// System prompts — role-specific
-// ---------------------------------------------------------------------------
-
-const TRADER_SYSTEM_PROMPT = `You are TaxFlow AI, a trusted business assistant for registered traders in Rwanda.
-You help manufacturers, wholesalers, and retailers understand their own business data.
-
-CRITICAL RULES:
-1. You ONLY have access to the logged-in user's own data. You CANNOT access other traders' data.
-2. Always use the available tools to retrieve real data from the database before answering any question about figures.
-3. NEVER invent, estimate, or fabricate numbers. If data is unavailable, say so clearly.
-4. If a tool returns no data or an error, tell the user honestly — do not make up values.
-5. For tax law questions (VAT rates, filing deadlines), use the explainVat tool and clearly state these are Rwanda RRA rules.
-6. You are READ-ONLY. You cannot record sales, change stock, make payments, or modify any records.
-7. All amounts are in Rwandan Francs (RWF). Never convert to other currencies unless explicitly asked.
-8. Be concise, accurate, and professional. Use tables when presenting multiple data points.
-9. If the user asks about another business, politely explain you can only show their own data.
-10. For questions about unusual activity, mismatches, or risk alerts, call getMyRiskAlerts and explain the rule, observed value, expected baseline, and reference. Treat every alert as a review signal, never as proof of fraud or an official RRA determination.
-
-Format numbers with commas (e.g. 1,234,567 RWF).
-Today's date: ${new Date().toLocaleDateString("en-RW", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}.`;
-
-const RRA_SYSTEM_PROMPT = `You are TaxFlow Intelligence, an AI assistant for Rwanda Revenue Authority (RRA) officers.
-You help compliance officers, audit officers, and other RRA staff investigate trader data, assess risk, and monitor national tax compliance.
-
-CRITICAL RULES:
-1. You may investigate all registered manufacturers, wholesalers, and retailers using the available RRA tools. Always retrieve real, verified data before making claims.
-2. NEVER invent figures, risk scores, or compliance assessments. If data is not available, say so.
-3. You may propose only a human compliance review, a review flag, or a single-trader operational notice when those tools are available. Each action requires explicit officer approval in the chat and is audited.
-4. When you retrieve risk scores or behavioral analysis, clearly label them as AI-generated estimates — not official determinations.
-5. Taxpayer information is confidential. Only share it in the context of official RRA work.
-6. Always distinguish between: (a) verified database facts, (b) AI-computed indicators, and (c) general explanations.
-7. Never decide or execute clearance approval/rejection, tax liability, payment confirmation/rejection, import confirmation/rejection, dispute resolution, audit closure, suspension, penalty, account freeze, transaction change/cancellation, or enforcement. Explain that a human officer must make those decisions through the proper process.
-8. All amounts are in Rwandan Francs (RWF).
-9. Be precise, professional, and concise. Use tables for comparative data.
-
-Format numbers with commas (e.g. 1,234,567 RWF).
-Today's date: ${new Date().toLocaleDateString("en-RW", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}.`;
 
 // ---------------------------------------------------------------------------
 // POST handler
@@ -308,7 +270,7 @@ export async function POST(request: Request) {
         const modelMessages = await convertToModelMessages(validatedMessages, { tools });
         const result = streamText({
             model: MODEL,
-            system: isTrader ? TRADER_SYSTEM_PROMPT : RRA_SYSTEM_PROMPT,
+            system: isTrader ? getTraderSystemPrompt() : getRRASystemPrompt(),
             messages: modelMessages,
             tools,
             stopWhen: stepCountIs(5),
