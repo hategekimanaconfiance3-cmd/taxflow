@@ -1,4 +1,4 @@
-import { and, desc, eq } from 'drizzle-orm';
+import { desc, eq } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import db from '@/db/drizzle';
 import { product, productionBatch, transaction, user, stockMovement, importDeclaration } from '@/db/schema';
