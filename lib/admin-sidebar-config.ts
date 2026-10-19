@@ -167,6 +167,16 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 ],
             },
             {
+                label: "Product Journey Tree",
+                href: "/admin/product-journey",
+                icon: GitBranch,
+                allowedRoles: [
+                    "compliance_officer",
+                    "audit_officer",
+                    "stock_officer",
+                ],
+            },
+            {
                 label: "Stock Overview",
                 href: "/admin/stock",
                 icon: Package,
