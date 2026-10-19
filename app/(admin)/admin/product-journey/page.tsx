@@ -4,6 +4,7 @@ import db from '@/db/drizzle';
 import { product, productionBatch, transaction, user, stockMovement, importDeclaration } from '@/db/schema';
 import { requireRRASession } from '@/lib/auth-guard';
 import { ProductJourneyExplorer } from '@/components/admin/product-journey-explorer';
+import { reconcileStockMovements } from '@/lib/product-journey/reconciliation';
 
 export const dynamic = 'force-dynamic';
 
@@ -114,6 +115,13 @@ export default async function ProductJourneyPage({ searchParams }: PageProps) {
   const completedSales = transactions.filter((item) => ['completed', 'confirmed'].includes(item.status));
   const totalRecordedSales = completedSales.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
   const unmatchedCount = transactions.filter((item) => !item.buyerId && !item.finalBuyerName).length;
+  const movementChecks = reconcileStockMovements(movements.map((item) => ({
+    id: item.id,
+    quantityBefore: Number(item.quantityBefore),
+    quantityDelta: Number(item.quantityDelta),
+    quantityAfter: Number(item.quantityAfter),
+  })));
+  const inconsistentMovementCount = movementChecks.filter((item) => !item.consistent).length;
 
   return (
     <div className="space-y-6">
@@ -234,6 +242,7 @@ export default async function ProductJourneyPage({ searchParams }: PageProps) {
               <li>{unmatchedCount} transaction(s) have neither a linked business buyer nor a recorded final-customer name.</li>
               <li>Only confirmed/completed transactions are included in the recorded-sales summary; this is not a physical stock count.</li>
               <li>Legacy stock balances without movement history cannot be reliably attributed to a source batch.</li>
+              <li>{inconsistentMovementCount} stock movement(s) have an arithmetic mismatch between before + delta and after. This is a data-quality flag, not a fraud finding.</li>
               <li>Displayed quantities are recorded evidence, not an automatic finding of fraud or a physical-location claim.</li>
             </ul>
           </div>
