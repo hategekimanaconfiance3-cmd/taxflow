@@ -65,7 +65,7 @@ export function AIChatWidget({ role }: AIChatWidgetProps) {
     const [input, setInput] = useState("");
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
-    const { messages, sendMessage, status, setMessages } = useChat({
+    const { messages, sendMessage, status, error, setMessages } = useChat({
         transport: new DefaultChatTransport({ api: "/api/ai/query" }),
     });
 
@@ -341,6 +341,12 @@ export function AIChatWidget({ role }: AIChatWidgetProps) {
                                 </div>
                             );
                         })}
+
+                        {status === "error" && (
+                            <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                                {error?.message || "The AI assistant could not respond. Please try again in a moment."}
+                            </div>
+                        )}
 
                         {/* Loading indicator — only when NO assistant message exists yet */}
                         {isLoading && (messages.length === 0 || messages[messages.length - 1]?.role === "user") && (

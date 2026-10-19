@@ -2,7 +2,7 @@
 
 import { eq, and, or, asc, desc, lt, sql } from 'drizzle-orm';
 import db from '@/db/drizzle';
-import { transaction, stock, vatRecord, product, user, auditLog } from '@/db/schema';
+import { transaction, stock, stockMovement, vatRecord, product, user, auditLog } from '@/db/schema';
 import {
   requireTraderSession,
   requireApprovedClearance,
@@ -16,6 +16,7 @@ import { checkAndAlertCompliance } from '@/lib/actions/compliance.action';
 import { getBusinessComplianceStatus } from '@/lib/compliance-status';
 import { getSystemConfig } from '@/lib/actions/system-config.action';
 import { validatePriceFloor } from '@/lib/ai/price-suggestion';
+import { calculateVat } from '@/lib/intelligence/tax-engine';
 
 /** Pending transactions expire after 10 minutes (ms). */
 const PENDING_EXPIRY_MS = 10 * 60 * 1000;
@@ -86,8 +87,8 @@ export async function createTransaction(data: {
     throw new Error('Retailers must use createRetailSale() for consumer sales.');
   }
 
-  if (data.quantity <= 0 || data.unitPrice <= 0) {
-    throw new Error('Quantity and unit price must be positive');
+  if (!Number.isFinite(data.quantity) || data.quantity <= 0 || !Number.isSafeInteger(data.unitPrice) || data.unitPrice <= 0) {
+    throw new Error('Quantity must be positive and finite, and unit price must be a positive whole-RWF amount');
   }
 
   // Look up the buyer by TIN
@@ -139,8 +140,15 @@ export async function createTransaction(data: {
   }
 
   const config = await getSystemConfig();
-  const totalAmount = data.quantity * data.unitPrice;
-  const vatAmount = Math.round(totalAmount * config.vatRate);
+  // Persist whole-RWF amounts consistently with the integer database columns.
+  const totalAmount = Math.round(data.quantity * data.unitPrice);
+  if (totalAmount <= 0) throw new Error("Sale total must be at least 1 RWF after rounding");
+  const vatCalculation = calculateVat({
+    amountRwf: totalAmount,
+    rateBasisPoints: Math.round(config.vatRate * 10_000),
+    pricingMode: 'exclusive',
+  });
+  const vatAmount = vatCalculation.vatAmountRwf;
 
   // AI Price Floor enforcement — blocks underreporting
   const priceCheck = await validatePriceFloor(data.productId, session.user.id, data.unitPrice);
@@ -179,6 +187,8 @@ export async function createTransaction(data: {
         unitPrice: data.unitPrice,
         totalAmount,
         vatAmount,
+        vatRateBasisPoints: Math.round(config.vatRate * 10_000),
+        pricingMode: 'exclusive',
         status: 'pending',
       })
       .returning();
@@ -271,14 +281,20 @@ export async function confirmTransaction(transactionId: string) {
       .set({ quantity: sellerStock.quantity - lockedTxn.quantity })
       .where(eq(stock.id, sellerStock.id));
 
-    // 2. Add/upsert buyer stock
+    // 2. Add/upsert buyer stock and use the database-returned quantity.
+    // The ON CONFLICT path can run when another confirmation creates this row
+    // concurrently, so the initially selected buyerStock may be absent/stale.
+    let buyerQuantityAfter: number;
     if (buyerStock) {
-      await tx
+      const [updatedBuyerStock] = await tx
         .update(stock)
         .set({ quantity: buyerStock.quantity + lockedTxn.quantity })
-        .where(eq(stock.id, buyerStock.id));
+        .where(eq(stock.id, buyerStock.id))
+        .returning({ quantity: stock.quantity });
+      if (!updatedBuyerStock) throw new Error('Unable to update buyer stock');
+      buyerQuantityAfter = updatedBuyerStock.quantity;
     } else {
-      await tx
+      const [upsertedBuyerStock] = await tx
         .insert(stock)
         .values({
           businessId: session.user.id,
@@ -288,8 +304,17 @@ export async function confirmTransaction(transactionId: string) {
         .onConflictDoUpdate({
           target: [stock.businessId, stock.productId],
           set: { quantity: sql`${stock.quantity} + ${lockedTxn.quantity}` },
-        });
+        })
+        .returning({ quantity: stock.quantity });
+      if (!upsertedBuyerStock) throw new Error('Unable to create or update buyer stock');
+      buyerQuantityAfter = upsertedBuyerStock.quantity;
     }
+    const buyerQuantityBefore = buyerQuantityAfter - lockedTxn.quantity;
+
+    await tx.insert(stockMovement).values([
+      { businessId: lockedTxn.sellerId, productId: lockedTxn.productId, quantityDelta: -lockedTxn.quantity, quantityBefore: sellerStock.quantity, quantityAfter: sellerStock.quantity - lockedTxn.quantity, movementType: 'sale', sourceType: 'transaction', sourceId: lockedTxn.id, actorUserId: session.user.id },
+      { businessId: session.user.id, productId: lockedTxn.productId, quantityDelta: lockedTxn.quantity, quantityBefore: buyerQuantityBefore, quantityAfter: buyerQuantityAfter, movementType: 'purchase', sourceType: 'transaction', sourceId: lockedTxn.id, actorUserId: session.user.id },
+    ]);
 
     // 3. Create VAT output record (seller)
     await tx.insert(vatRecord).values({
@@ -329,18 +354,38 @@ export async function confirmTransaction(transactionId: string) {
       beforeState: {
         status: 'pending',
         sellerStockQuantity: sellerStock.quantity,
-        buyerStockQuantity: buyerStock?.quantity ?? 0,
+        buyerStockQuantity: buyerQuantityBefore,
       },
       afterState: {
         status: 'confirmed',
         sellerStockQuantity: sellerStock.quantity - lockedTxn.quantity,
-        buyerStockQuantity: (buyerStock?.quantity ?? 0) + lockedTxn.quantity,
+        buyerStockQuantity: buyerQuantityAfter,
         vatAmount: lockedTxn.vatAmount,
       },
       metadata: JSON.stringify({
         sellerId: lockedTxn.sellerId,
         quantity: lockedTxn.quantity,
         vatAmount: lockedTxn.vatAmount,
+        stockMovements: [
+          {
+            movementId: `${lockedTxn.id}:seller`,
+            movementType: 'sale',
+            businessId: lockedTxn.sellerId,
+            productId: lockedTxn.productId,
+            quantityDelta: -lockedTxn.quantity,
+            quantityBefore: sellerStock.quantity,
+            quantityAfter: sellerStock.quantity - lockedTxn.quantity,
+          },
+          {
+            movementId: `${lockedTxn.id}:buyer`,
+            movementType: 'purchase',
+            businessId: session.user.id,
+            productId: lockedTxn.productId,
+            quantityDelta: lockedTxn.quantity,
+            quantityBefore: buyerQuantityBefore,
+            quantityAfter: buyerQuantityAfter,
+          },
+        ],
       }),
     });
 
@@ -446,8 +491,8 @@ export async function createRetailSale(data: {
   // Only retailers can sell to consumers
   await requireTraderSession(['retailer']);
 
-  if (data.quantity <= 0 || data.unitPrice <= 0) {
-    throw new Error('Quantity and unit price must be positive');
+  if (!Number.isFinite(data.quantity) || data.quantity <= 0 || !Number.isSafeInteger(data.unitPrice) || data.unitPrice <= 0) {
+    throw new Error('Quantity must be positive and finite, and unit price must be a positive whole-RWF amount');
   }
 
   if (!data.customerName.trim()) {
@@ -455,8 +500,15 @@ export async function createRetailSale(data: {
   }
 
   const config = await getSystemConfig();
-  const totalAmount = data.quantity * data.unitPrice;
-  const vatAmount = Math.round(totalAmount * config.vatRate);
+  // Persist whole-RWF amounts consistently with the integer database columns.
+  const totalAmount = Math.round(data.quantity * data.unitPrice);
+  if (totalAmount <= 0) throw new Error("Sale total must be at least 1 RWF after rounding");
+  const vatCalculation = calculateVat({
+    amountRwf: totalAmount,
+    rateBasisPoints: Math.round(config.vatRate * 10_000),
+    pricingMode: 'exclusive',
+  });
+  const vatAmount = vatCalculation.vatAmountRwf;
 
   // AI Price Floor enforcement — blocks underreporting
   const priceCheck = await validatePriceFloor(data.productId, session.user.id, data.unitPrice);
@@ -515,10 +567,24 @@ export async function createRetailSale(data: {
         unitPrice: data.unitPrice,
         totalAmount,
         vatAmount,
+        vatRateBasisPoints: Math.round(config.vatRate * 10_000),
+        pricingMode: 'exclusive',
         status: 'completed',
         confirmedAt: new Date(),
       })
       .returning();
+
+    await tx.insert(stockMovement).values({
+      businessId: session.user.id,
+      productId: data.productId,
+      quantityDelta: -data.quantity,
+      quantityBefore: retailerStock.quantity,
+      quantityAfter: retailerStock.quantity - data.quantity,
+      movementType: 'retail_sale',
+      sourceType: 'transaction',
+      sourceId: txn.id,
+      actorUserId: session.user.id,
+    });
 
     // Create VAT output record (retailer only — no buyer VAT for consumers)
     await tx.insert(vatRecord).values({
@@ -533,8 +599,16 @@ export async function createRetailSale(data: {
       action: 'RETAIL_SALE_COMPLETED',
       targetType: 'transaction',
       targetId: txn.id,
+      beforeState: { stockQuantity: retailerStock.quantity },
+      afterState: { stockQuantity: retailerStock.quantity - data.quantity },
       metadata: JSON.stringify({
+        movementId: `${txn.id}:retail-sale`,
+        movementType: 'sale',
+        businessId: session.user.id,
         productId: data.productId,
+        quantityDelta: -data.quantity,
+        quantityBefore: retailerStock.quantity,
+        quantityAfter: retailerStock.quantity - data.quantity,
         quantity: data.quantity,
         totalAmount,
         vatAmount,

@@ -3,7 +3,7 @@ import { getNotifications } from '@/lib/actions/notification.action';
 import { NotificationsClient } from '@/components/dashboard/notifications/notifications-client';
 
 export default async function NotificationsPage() {
-  const session = await requireTraderSession();
+  await requireTraderSession();
 
   const notifications = await getNotifications();
 
@@ -17,8 +17,8 @@ export default async function NotificationsPage() {
       </div>
 
       <NotificationsClient
-        userId={session.user.id}
-        initialNotifications={notifications}
+        notifications={notifications}
+        unreadCount={notifications.filter((notification) => !notification.read).length}
       />
     </div>
   );

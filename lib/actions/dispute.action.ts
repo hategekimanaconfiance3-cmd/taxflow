@@ -2,7 +2,7 @@
 
 import { eq, desc, and, or, sql } from "drizzle-orm";
 import db from "@/db/drizzle";
-import { auditLog, dispute, notification, stock, transaction, user, vatRecord } from "@/db/schema";
+import { auditLog, dispute, notification, stock, stockMovement, transaction, user, vatRecord } from "@/db/schema";
 import { requireTraderSession, requireRRASession } from "@/lib/auth-guard";
 import { emitToUser } from "@/lib/realtime";
 import { getSystemConfig } from "@/lib/actions/system-config.action";
@@ -407,9 +407,11 @@ export async function resolveDispute(
                 if (!buyerStock || buyerStock.quantity < txn.quantity) {
                     throw new Error("Transaction cannot be undone because the buyer no longer has the purchased stock.");
                 }
+                const buyerAfter = buyerStock.quantity - txn.quantity;
                 await tx.update(stock)
-                    .set({ quantity: buyerStock.quantity - txn.quantity })
+                    .set({ quantity: buyerAfter })
                     .where(eq(stock.id, buyerStock.id));
+                await tx.insert(stockMovement).values({ businessId: txn.buyerId!, productId: txn.productId, quantityDelta: -txn.quantity, quantityBefore: buyerStock.quantity, quantityAfter: buyerAfter, movementType: "dispute_reversal", sourceType: "transaction", sourceId: txn.id, actorUserId: session.user.id });
             }
 
             const [sellerStock] = await tx
@@ -419,11 +421,14 @@ export async function resolveDispute(
                 .for("update")
                 .limit(1);
             if (sellerStock) {
+                const sellerAfter = sellerStock.quantity + txn.quantity;
                 await tx.update(stock)
-                    .set({ quantity: sellerStock.quantity + txn.quantity })
+                    .set({ quantity: sellerAfter })
                     .where(eq(stock.id, sellerStock.id));
+                await tx.insert(stockMovement).values({ businessId: txn.sellerId, productId: txn.productId, quantityDelta: txn.quantity, quantityBefore: sellerStock.quantity, quantityAfter: sellerAfter, movementType: "dispute_reversal", sourceType: "transaction", sourceId: txn.id, actorUserId: session.user.id });
             } else {
                 await tx.insert(stock).values({ businessId: txn.sellerId, productId: txn.productId, quantity: txn.quantity });
+                await tx.insert(stockMovement).values({ businessId: txn.sellerId, productId: txn.productId, quantityDelta: txn.quantity, quantityBefore: 0, quantityAfter: txn.quantity, movementType: "dispute_reversal", sourceType: "transaction", sourceId: txn.id, actorUserId: session.user.id });
             }
 
             await tx.update(transaction)

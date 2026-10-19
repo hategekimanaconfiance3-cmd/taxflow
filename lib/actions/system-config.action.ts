@@ -2,7 +2,7 @@
 
 import { eq } from "drizzle-orm";
 import db from "@/db/drizzle";
-import { systemConfig } from "@/db/schema";
+import { systemConfig, auditLog } from "@/db/schema";
 import { requireRRASession } from "@/lib/auth-guard";
 import { logAudit } from "@/lib/audit";
 import { z } from "zod";
@@ -56,22 +56,22 @@ const updateSchema = z.object({
 
 const VALUE_VALIDATORS: Record<string, (v: string) => string | null> = {
     compliance_threshold: (v) => {
-        const n = parseFloat(v);
+        const n = Number(v);
         if (isNaN(n) || n < 0.01 || n > 1) return "Must be between 0.01 and 1 (e.g. 0.95 for 95%)";
         return null;
     },
     vat_rate: (v) => {
-        const n = parseFloat(v);
+        const n = Number(v);
         if (isNaN(n) || n < 0 || n > 1) return "Must be between 0 and 1 (e.g. 0.18 for 18%)";
         return null;
     },
     dispute_window_hours: (v) => {
-        const n = parseInt(v, 10);
+        const n = Number(v);
         if (isNaN(n) || n < 1 || n > 720) return "Must be between 1 and 720 hours";
         return null;
     },
     auto_suspension_threshold: (v) => {
-        const n = parseFloat(v);
+        const n = Number(v);
         if (isNaN(n) || n < 0.01 || n > 1) return "Must be between 0.01 and 1 (e.g. 0.50 for 50%)";
         return null;
     },
@@ -96,42 +96,19 @@ export async function updateSystemConfig(data: { key: string; value: string }): 
         }
     }
 
-    // Get old value for audit log
-    const [existing] = await db
-        .select()
-        .from(systemConfig)
-        .where(eq(systemConfig.key, key))
-        .limit(1);
-
-    const oldValue = existing?.value ?? DEFAULTS[key] ?? "unknown";
-
-    // Upsert the config value
-    await db
-        .insert(systemConfig)
-        .values({
-            key,
-            value,
-            updatedBy: session.user.id,
-        })
-        .onConflictDoUpdate({
-            target: systemConfig.key,
-            set: {
-                value,
-                updatedBy: session.user.id,
-                updatedAt: new Date(),
-            },
-        });
-
-    await logAudit({
-        userId: session.user.id,
-        action: "SYSTEM_CONFIG_UPDATED",
-        targetType: "system_config",
-        targetId: key,
-        metadata: {
-            key,
-            oldValue,
-            newValue: value,
-        },
+    await db.transaction(async (tx) => {
+        const [existing] = await tx.select().from(systemConfig)
+            .where(eq(systemConfig.key, key)).for("update").limit(1);
+        const oldValue = existing?.value ?? DEFAULTS[key] ?? "unknown";
+        await tx.insert(systemConfig).values({ key, value, updatedBy: session.user.id })
+            .onConflictDoUpdate({ target: systemConfig.key, set: { value, updatedBy: session.user.id, updatedAt: new Date() } });
+        await logAudit({
+            userId: session.user.id,
+            action: "SYSTEM_CONFIG_UPDATED",
+            targetType: "system_config",
+            targetId: key,
+            metadata: { key, oldValue, newValue: value },
+        }, async (entry) => { await tx.insert(auditLog).values(entry); });
     });
 
     return { success: true };

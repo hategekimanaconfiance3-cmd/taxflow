@@ -1,4 +1,4 @@
-import { requireRRASession } from '@/lib/auth-guard';
+﻿import { requireRRASession } from '@/lib/auth-guard';
 import { IntelligenceChat } from '@/components/admin/intelligence-chat';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -28,7 +28,7 @@ export default async function AdminAssistantPage() {
         <div className="flex items-center gap-2">
           <Badge variant="outline" className="text-emerald-600 border-emerald-200 bg-emerald-50 text-xs">
             <Shield className="h-3 w-3 mr-1" />
-            Read-Only · Audited
+            Officer-approved actions · No decisions
           </Badge>
           <Badge variant="outline" className="text-xs capitalize">
             {staff.clearanceLevel.replace('_', ' ')}
@@ -42,8 +42,7 @@ export default async function AdminAssistantPage() {
         <p>
           This assistant retrieves <strong>verified data</strong> from the TaxFlow database.
           AI-generated risk scores and behavioral analysis are <strong>indicators only</strong> —
-          not official determinations. All queries are audit-logged. The assistant cannot
-          impose penalties, modify records, or take enforcement actions.
+          not official determinations. All queries are audit-logged. The assistant may propose an audited review or a single-trader notice for officer approval. Each action is shown here before it runs. The assistant cannot decide clearance, tax liability, payments, disputes, penalties, or enforcement, or modify official records.
         </p>
       </div>
 
@@ -62,3 +61,4 @@ export default async function AdminAssistantPage() {
     </div>
   );
 }
+

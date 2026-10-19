@@ -1,8 +1,9 @@
 'use server';
 
 import { eq, and, sql } from 'drizzle-orm';
+import { randomUUID } from 'node:crypto';
 import db from '@/db/drizzle';
-import { product, stock, transaction } from '@/db/schema';
+import { auditLog, product, stock, stockMovement, transaction } from '@/db/schema';
 import { requireTraderSession } from '@/lib/auth-guard';
 import { logAudit } from '@/lib/audit';
 
@@ -56,13 +57,13 @@ export async function getProducts(userId?: string) {
 export async function recordProduction(data: { productId: string; quantity: number }) {
   const session = await requireTraderSession(['manufacturer']);
 
-  if (data.quantity <= 0) {
-    throw new Error('Quantity must be positive');
+  if (!Number.isFinite(data.quantity) || data.quantity <= 0) {
+    throw new Error('Quantity must be a positive finite number');
   }
 
-  // Verify the product belongs to this manufacturer
+  // Verify the product belongs to this manufacturer.
   const [existingProduct] = await db
-    .select()
+    .select({ id: product.id })
     .from(product)
     .where(and(eq(product.id, data.productId), eq(product.createdByUserId, session.user.id)))
     .limit(1);
@@ -71,35 +72,67 @@ export async function recordProduction(data: { productId: string; quantity: numb
     throw new Error('Product not found or not owned by you');
   }
 
-  // Upsert stock: insert or increment
-  const [existingStock] = await db
-    .select()
-    .from(stock)
-    .where(and(eq(stock.businessId, session.user.id), eq(stock.productId, data.productId)))
-    .limit(1);
+  const movementId = randomUUID();
 
-  if (existingStock) {
-    await db
-      .update(stock)
-      .set({ quantity: existingStock.quantity + data.quantity })
-      .where(eq(stock.id, existingStock.id));
-  } else {
-    await db.insert(stock).values({
+  // Stock increment and its append-only evidence are committed atomically.
+  const result = await db.transaction(async (tx) => {
+    const [updatedStock] = await tx
+      .insert(stock)
+      .values({
+        businessId: session.user.id,
+        productId: data.productId,
+        quantity: data.quantity,
+        source: 'manufactured',
+      })
+      .onConflictDoUpdate({
+        target: [stock.businessId, stock.productId],
+        set: {
+          quantity: sql`${stock.quantity} + ${data.quantity}`,
+          updatedAt: new Date(),
+        },
+      })
+      .returning({ id: stock.id, quantity: stock.quantity });
+
+    if (!updatedStock) {
+      throw new Error('Production stock update could not be confirmed');
+    }
+
+    const beforeQuantity = updatedStock.quantity - data.quantity;
+    const afterQuantity = updatedStock.quantity;
+
+    await tx.insert(stockMovement).values({
       businessId: session.user.id,
       productId: data.productId,
-      quantity: data.quantity,
+      quantityDelta: data.quantity,
+      quantityBefore: beforeQuantity,
+      quantityAfter: afterQuantity,
+      movementType: 'production',
+      sourceType: 'production',
+      sourceId: movementId,
+      actorUserId: session.user.id,
     });
-  }
 
-  await logAudit({
-    userId: session.user.id,
-    action: 'PRODUCTION_RECORDED',
-    targetType: 'product',
-    targetId: data.productId,
-    metadata: { quantity: data.quantity },
+    await tx.insert(auditLog).values({
+      userId: session.user.id,
+      action: 'PRODUCTION_RECORDED',
+      targetType: 'product',
+      targetId: data.productId,
+      beforeState: { stockQuantity: beforeQuantity },
+      afterState: { stockQuantity: afterQuantity },
+      metadata: JSON.stringify({
+        movementId,
+        movementType: 'production',
+        quantity: data.quantity,
+        beforeQuantity,
+        afterQuantity,
+        productId: data.productId,
+      }),
+    });
+
+    return { stockId: updatedStock.id, beforeQuantity, afterQuantity };
   });
 
-  return { success: true };
+  return { success: true, movementId, ...result };
 }
 
 /**

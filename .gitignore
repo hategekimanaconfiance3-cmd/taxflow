@@ -19,6 +19,9 @@
 
 # production
 /build
+/private-uploads/
+/public/uploads/imports/
+/.corepack-cache/
 
 # misc
 .DS_Store

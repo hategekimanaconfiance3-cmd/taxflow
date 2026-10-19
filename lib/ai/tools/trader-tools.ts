@@ -7,12 +7,14 @@
 
 import { tool } from "ai";
 import { z } from "zod";
-import { eq, sql, desc, and, inArray } from "drizzle-orm";
+import { eq, sql, desc, and, inArray, or } from "drizzle-orm";
 import db from "@/db/drizzle";
 import {
     user, transaction, stock, product, vatRecord,
     taxPayment, auditLog,
 } from "@/db/schema";
+import { buildRiskAlerts } from "@/lib/intelligence/risk-rules";
+import { getSystemConfig } from "@/lib/actions/system-config.action";
 
 // ---------------------------------------------------------------------------
 // Factory: creates trader tools scoped to a specific userId.
@@ -389,8 +391,74 @@ export function createTraderTools(userId: string) {
         },
     });
 
+    /** Explainable review alerts scoped to the signed-in trader. */
+    const getMyRiskAlerts = tool({
+        description: "Get explainable TaxFlow review alerts for the logged-in trader's own recent transactions, inventory, and payment records. Alerts are indicators for human review, not fraud findings or official RRA assessments. Use when asked about unusual activity, mismatches, pending confirmations, payment status, or risk alerts.",
+        inputSchema: z.object({
+            limit: z.number().int().min(1).max(20).default(10),
+        }),
+        execute: async ({ limit }) => {
+            const [config, transactions, inventory, payments] = await Promise.all([
+                getSystemConfig(),
+                db
+                    .select({
+                        id: transaction.id,
+                        productId: transaction.productId,
+                        productName: product.name,
+                        direction: sql<"sale" | "purchase">`CASE WHEN ${transaction.sellerId} = ${userId} THEN 'sale' ELSE 'purchase' END`,
+                        quantity: transaction.quantity,
+                        unitPrice: transaction.unitPrice,
+                        totalAmount: transaction.totalAmount,
+                        vatAmount: transaction.vatAmount,
+                        status: transaction.status,
+                        createdAt: transaction.createdAt,
+                    })
+                    .from(transaction)
+                    .innerJoin(product, eq(transaction.productId, product.id))
+                    .where(or(eq(transaction.sellerId, userId), eq(transaction.buyerId, userId)))
+                    .orderBy(desc(transaction.createdAt))
+                    .limit(250),
+                db
+                    .select({
+                        id: stock.id,
+                        productName: product.name,
+                        quantity: stock.quantity,
+                    })
+                    .from(stock)
+                    .innerJoin(product, eq(stock.productId, product.id))
+                    .where(eq(stock.businessId, userId))
+                    .limit(250),
+                db
+                    .select({
+                        id: taxPayment.id,
+                        amount: taxPayment.amount,
+                        status: taxPayment.status,
+                        createdAt: taxPayment.createdAt,
+                    })
+                    .from(taxPayment)
+                    .where(eq(taxPayment.businessId, userId))
+                    .orderBy(desc(taxPayment.createdAt))
+                    .limit(100),
+            ]);
+
+            const alerts = buildRiskAlerts({
+                transactions,
+                stock: inventory,
+                payments,
+                vatRate: config.vatRate,
+            });
+
+            return {
+                count: alerts.length,
+                alerts: alerts.slice(0, limit),
+                note: "Rule-based alerts are explainable review signals, not proof of fraud. Historical tax-rule versions may differ from the current configured VAT rate.",
+            };
+        },
+    });
+
     return {
         getDashboardOverview,
+        getMyRiskAlerts,
         getMyTransactions,
         getMyStock,
         getMyTaxStatus,

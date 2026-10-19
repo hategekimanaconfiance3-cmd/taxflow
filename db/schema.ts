@@ -188,6 +188,30 @@ export const stock = pgTable(
   ],
 );
 
+// Append-only inventory evidence. Legacy stock quantities are opening balances;
+// only movements recorded after this table is introduced have verified provenance.
+export const stockMovement = pgTable(
+  'stock_movement',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    businessId: text('business_id').notNull().references(() => user.id),
+    productId: text('product_id').notNull().references(() => product.id),
+    quantityDelta: real('quantity_delta').notNull(),
+    quantityBefore: real('quantity_before').notNull(),
+    quantityAfter: real('quantity_after').notNull(),
+    movementType: text('movement_type').notNull(),
+    sourceType: text('source_type'),
+    sourceId: text('source_id'),
+    actorUserId: text('actor_user_id').references(() => user.id),
+    reason: text('reason'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('stock_movement_business_product_created_idx').on(table.businessId, table.productId, table.createdAt),
+    index('stock_movement_source_idx').on(table.sourceType, table.sourceId),
+  ],
+);
+
 // ---------------------------------------------------------------------------
 // Transactions
 // ---------------------------------------------------------------------------
@@ -210,6 +234,8 @@ export const transaction = pgTable(
     unitPrice: integer('unit_price').notNull(), // RWF
     totalAmount: integer('total_amount').notNull(), // quantity × unitPrice
     vatAmount: integer('vat_amount').notNull(), // totalAmount × 0.18
+    vatRateBasisPoints: integer('vat_rate_basis_points'), // null for legacy rows; snapshot at sale time
+    pricingMode: text('pricing_mode'), // 'exclusive' | 'inclusive'; null for legacy rows
     status: text('status').notNull().default('pending'),
     // "pending" | "confirmed" | "rejected" | "completed"
     createdAt: timestamp('created_at').defaultNow().notNull(),
@@ -406,13 +432,30 @@ export const importDeclaration = pgTable(
     invoiceRef: text('invoice_ref'), // invoice or import document reference
     supportingDoc: text('supporting_doc'), // description of supporting documents
     reviewedById: text('reviewed_by_id').references(() => user.id), // RRA officer who confirmed/rejected
+
+    // ── Smart Customs enhancement fields ─────────────────────────────────────
+    declarationRef: text('declaration_ref').unique(), // unique pre-travel reference, e.g. DECL-XXXXXXXX
+    supplier: text('supplier'),                        // exporter / supplier name
+    estimatedValue: real('estimated_value'),            // declared value in chosen currency
+    currency: text('currency').default('USD'),          // ISO-4217 currency code
+    expectedReturnDate: timestamp('expected_return_date'), // expected arrival date
+    reviewerNote: text('reviewer_note'),                // RRA officer inspection note
+    inspectedQuantity: real('inspected_quantity'),      // physically verified quantity (set by RRA)
+    discrepancyFlag: boolean('discrepancy_flag').notNull().default(false), // >10% variance detected
+    discrepancyPct: real('discrepancy_pct'),            // |expected - inspected| / expected * 100
+
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at')
       .defaultNow()
       .$onUpdate(() => /* @__PURE__ */ new Date())
       .notNull(),
   },
-  (table) => [index('import_business_idx').on(table.businessId), index('import_status_idx').on(table.status)],
+  (table) => [
+    index('import_business_idx').on(table.businessId),
+    index('import_status_idx').on(table.status),
+    index('import_declaration_ref_idx').on(table.declarationRef),
+    index('import_discrepancy_flag_idx').on(table.discrepancyFlag),
+  ],
 );
 
 // ---------------------------------------------------------------------------
@@ -940,3 +983,4 @@ export const aiAuditLogRelations = relations(aiAuditLog, ({ one }) => ({
 }));
 
 // ---------------------------------------------------------------------------
+

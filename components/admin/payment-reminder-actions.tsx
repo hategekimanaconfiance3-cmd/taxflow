@@ -111,3 +111,9 @@ export function BulkReminderDialog({ count }: { count: number }) {
         </Dialog>
     );
 }
+
+
+/** Backwards-compatible name used by the admin payment reminders page. */
+export function SendBulkRemindersButton({ count }: { count: number }) {
+    return <BulkReminderDialog count={count} />;
+}

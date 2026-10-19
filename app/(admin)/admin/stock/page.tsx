@@ -1,6 +1,6 @@
 import { requireRRASession } from '@/lib/auth-guard';
 import { getSystemStockOverview } from '@/lib/actions/admin-stock.action';
-import { StockCorrectionDialogs } from '@/components/admin/stock-correction-dialogs';
+import { EditStockDialog, DeleteStockDialog } from '@/components/admin/stock-correction-dialogs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Table,
@@ -79,7 +79,7 @@ export default async function AdminStockPage() {
                     {row.updatedAt ? new Date(row.updatedAt).toLocaleDateString() : '—'}
                   </TableCell>
                   <TableCell className="text-right">
-                    <StockCorrectionDialogs stockId={row.id} currentQuantity={row.quantity} />
+                    <div className="inline-flex items-center gap-1"><EditStockDialog row={{ id: row.id, quantity: row.quantity, price: row.price, source: row.source, productName: row.productName, productUnit: row.productUnit }} /><DeleteStockDialog row={{ id: row.id, quantity: row.quantity, price: row.price, source: row.source, productName: row.productName, productUnit: row.productUnit }} /></div>
                   </TableCell>
                 </TableRow>
               ))}

@@ -110,7 +110,7 @@ export function AdminImportActions({
                         </div>
                     )}
                     {supportingDoc && (
-                        supportingDoc.startsWith("/uploads") ? (
+                        supportingDoc.startsWith("/api/import-invoice/") || supportingDoc.startsWith("/uploads") ? (
                             <a
                                 href={supportingDoc}
                                 target="_blank"

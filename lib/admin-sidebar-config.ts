@@ -242,6 +242,7 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 icon: CreditCard,
                 allowedRoles: [
                     "compliance_officer",
+                    "audit_officer",
                     "reporting_officer",
                     "payments_reconciliation_officer",
                 ],

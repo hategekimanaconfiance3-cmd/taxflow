@@ -21,6 +21,8 @@ import { CommandPalette, type CommandItem } from '@/components/ui/command-palett
 import { authClient } from '@/lib/auth-client';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport } from 'ai';
+import { LANGS, translate, type LangCode } from '@/lib/language';
+import { useLanguagePreference } from '@/lib/use-language';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -28,13 +30,6 @@ import { DefaultChatTransport } from 'ai';
 const SIDEBAR_FULL_W = 260;
 const SIDEBAR_ICON_W = 64;
 const AI_PANEL_W = 420;
-
-const LANGS = [
-  { code: 'en', label: 'EN', full: 'English' },
-  { code: 'kiny', label: 'KINY', full: 'Kinyarwanda' },
-  { code: 'fr', label: 'FR', full: 'Français' },
-] as const;
-type LangCode = 'en' | 'kiny' | 'fr';
 
 const AI_SUGGESTIONS = [
   'Show system-wide statistics',
@@ -62,7 +57,7 @@ function LangSelector({ value, onChange }: { value: LangCode; onChange: (l: Lang
       </PopoverTrigger>
       <PopoverContent align="end" className="w-44 p-1">
         <p className="px-2 pt-1 pb-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">
-          Language
+          {translate('Language', value)}
         </p>
         {LANGS.map((lang) => (
           <button
@@ -275,7 +270,7 @@ export function AdminShell({ userName, staffId, clearanceLevel, children }: Admi
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isAiOpen, setIsAiOpen] = useState(false);
-  const [lang, setLang] = useState<LangCode>('en');
+  const [lang, setLang] = useLanguagePreference();
 
   // Ctrl+I toggles AI panel
   useEffect(() => {
@@ -322,16 +317,16 @@ export function AdminShell({ userName, staffId, clearanceLevel, children }: Admi
     () =>
       groups.flatMap((group) =>
         group.items.flatMap((item) => [
-          { label: item.label, href: item.href, icon: item.icon, group: group.label || 'Overview' },
+          { label: translate(item.label, lang), href: item.href, icon: item.icon, group: translate(group.label || 'Overview', lang) },
           ...(item.children?.map((child) => ({
-            label: child.label,
+            label: translate(child.label, lang),
             href: child.href,
             icon: child.icon,
-            group: item.label,
+            group: translate(item.label, lang),
           })) ?? []),
         ]),
       ),
-    [groups],
+    [groups, lang],
   );
 
   const initials = userName
@@ -407,7 +402,7 @@ export function AdminShell({ userName, staffId, clearanceLevel, children }: Admi
                           </Link>
                         </TooltipTrigger>
                         <TooltipContent side="right" className="text-xs">
-                          {child.label}
+                          {translate(child.label, lang)}
                         </TooltipContent>
                       </Tooltip>
                     );
@@ -434,7 +429,7 @@ export function AdminShell({ userName, staffId, clearanceLevel, children }: Admi
                       </Link>
                     </TooltipTrigger>
                     <TooltipContent side="right" className="text-xs">
-                      {item.label}
+                      {translate(item.label, lang)}
                     </TooltipContent>
                   </Tooltip>,
                 ];
@@ -486,7 +481,7 @@ export function AdminShell({ userName, staffId, clearanceLevel, children }: Admi
                 className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
               >
                 <LogOut className="h-3.5 w-3.5" />
-                {isSigningOut ? 'Signing out…' : 'Log Out'}
+                {translate(isSigningOut ? 'Signing out…' : 'Log Out', lang)}
               </button>
             </div>
           </PopoverContent>
@@ -536,7 +531,7 @@ export function AdminShell({ userName, staffId, clearanceLevel, children }: Admi
             {group.label && (
               <div className="px-5 pt-4 pb-1.5">
                 <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60">
-                  {group.label}
+                  {translate(group.label, lang)}
                 </span>
               </div>
             )}
@@ -568,10 +563,10 @@ export function AdminShell({ userName, staffId, clearanceLevel, children }: Admi
                               parentActive ? 'text-foreground' : 'text-muted-foreground/70 group-hover:text-foreground',
                             )}
                           />
-                          {item.label}
+                          {translate(item.label, lang)}
                         </Link>
                       </TooltipTrigger>
-                      <TooltipContent side="right" className="text-xs">{item.label}</TooltipContent>
+                      <TooltipContent side="right" className="text-xs">{translate(item.label, lang)}</TooltipContent>
                     </Tooltip>
                     {hasChildren && (
                       <div className="ml-3 pl-3 border-l border-border/40 mt-[2px] space-y-[2px]">
@@ -597,7 +592,7 @@ export function AdminShell({ userName, staffId, clearanceLevel, children }: Admi
                                   childActive ? 'text-foreground' : 'text-muted-foreground/70 group-hover:text-foreground',
                                 )}
                               />
-                              {child.label}
+                              {translate(child.label, lang)}
                             </Link>
                           );
                         })}
@@ -643,7 +638,7 @@ export function AdminShell({ userName, staffId, clearanceLevel, children }: Admi
                     className={cn('text-[9px] px-1 py-0 font-semibold', ROLE_COLORS[clearanceLevel as RRARole] || '')}
                   >
                     <Shield className="h-2.5 w-2.5 mr-0.5" />
-                    {ROLE_LABELS[clearanceLevel as RRARole] ?? clearanceLevel}
+                    {translate(ROLE_LABELS[clearanceLevel as RRARole] ?? clearanceLevel, lang)}
                   </Badge>
                 </div>
               </div>
@@ -656,7 +651,7 @@ export function AdminShell({ userName, staffId, clearanceLevel, children }: Admi
               <p className="text-[11px] text-muted-foreground font-mono mt-0.5">{staffId}</p>
               <div className="flex items-center gap-2 mt-1.5">
                 <Badge variant="outline" className={cn('text-[10px] px-1.5 py-0', ROLE_COLORS[clearanceLevel as RRARole] || '')}>
-                  {ROLE_LABELS[clearanceLevel as RRARole] ?? clearanceLevel}
+                    {translate(ROLE_LABELS[clearanceLevel as RRARole] ?? clearanceLevel, lang)}
                 </Badge>
               </div>
             </div>
@@ -678,7 +673,7 @@ export function AdminShell({ userName, staffId, clearanceLevel, children }: Admi
                 className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-50"
               >
                 <LogOut className="h-3.5 w-3.5" />
-                {isSigningOut ? 'Signing out…' : 'Log Out'}
+                {translate(isSigningOut ? 'Signing out…' : 'Log Out', lang)}
               </button>
             </div>
           </PopoverContent>
