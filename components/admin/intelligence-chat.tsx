@@ -6,6 +6,7 @@ import { DefaultChatTransport, lastAssistantMessageIsCompleteWithApprovalRespons
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { AIFeedbackControl } from "@/components/admin/ai-feedback-control";
 import {
     Brain,
     Send,
@@ -160,6 +161,9 @@ export function IntelligenceChat() {
                                 }
                                 return null;
                             })}
+                            {msg.role === "assistant" && status === "ready" && msg.parts.some((part) => part.type === "text") && (
+                                <AIFeedbackControl messageId={msg.id} />
+                            )}
                         </div>
                         {msg.role === "user" && (
                             <div className="shrink-0 w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center">

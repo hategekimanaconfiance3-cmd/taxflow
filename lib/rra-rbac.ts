@@ -28,7 +28,7 @@ export const RRA_PERMISSIONS = [
     "tax.records.read", "compliance.followup.manage", "investigation.case.manage",
     "transaction.read", "audit.trail.read", "traceability.read", "stock.read",
     "imports.read", "imports.review", "payments.read", "payments.reconcile",
-    "analytics.read", "ai.findings.read", "data_quality.read", "ai.assistant.use",
+    "analytics.read", "ai.findings.read", "data_quality.read", "ai.assistant.use", "ai.feedback.review",
     "stock.correction.review", "support.manage",
 ] as const;
 export type RRAPermission = (typeof RRA_PERMISSIONS)[number];
@@ -41,7 +41,7 @@ const PROPOSED_ROLE_PERMISSIONS: Record<RRAProposedRole, readonly RRAPermission[
     product_traceability_officer: ["traceability.read", "stock.read", "ai.assistant.use"],
     customs_import_officer: ["imports.read", "imports.review", "ai.assistant.use"],
     payments_reconciliation_officer: ["tax.records.read", "payments.read", "payments.reconcile", "ai.assistant.use"],
-    data_ai_analyst: ["analytics.read", "ai.findings.read", "data_quality.read", "reports.aggregate.read", "ai.assistant.use"],
+    data_ai_analyst: ["analytics.read", "ai.findings.read", "data_quality.read", "reports.aggregate.read", "ai.assistant.use", "ai.feedback.review"],
 };
 
 const LEGACY_ROLE_PERMISSIONS: Record<(typeof LEGACY_RRA_ROLES)[number], readonly RRAPermission[]> = {

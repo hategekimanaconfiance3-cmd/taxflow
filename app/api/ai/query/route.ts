@@ -37,7 +37,8 @@ import {
     traceProductJourney,
     getImportDeclarations,
 } from "@/lib/ai/tools/rra-tools";
-import { hasRRAPermission, isRRARole, type RRARole } from "@/lib/rra-rbac";
+import { hasRRAPermission, isRRARole } from "@/lib/rra-rbac";
+import { getRRAAIToolNames, type RRAAIToolName } from "@/lib/ai/rra-tool-access";
 
 // ---------------------------------------------------------------------------
 // Model setup — Gemini 3.6 Flash is the current supported Flash model.
@@ -286,22 +287,14 @@ export async function POST(request: Request) {
     }
 
     // ── 6. Build tools for this role ──────────────────────────────────────────
-    const rraToolSets: Partial<Record<RRARole, ToolSet>> = {
-        super_admin: {},
-        director_executive: { getSystemStats, getRevenueForecastTool },
-        tax_compliance_officer: { lookupTrader, searchTraders, getTransactions, getTaxStatus },
-        audit_investigation_officer: { lookupTrader, searchTraders, getTransactions, getStockLevels, getTaxStatus, getRiskAssessment, getRevenueForecastTool, getSystemStats, getBehavioralAnalysis, traceSupplyChain, traceProductJourney, getImportDeclarations },
-        product_traceability_officer: { getTransactions, getStockLevels, traceSupplyChain, traceProductJourney },
-        customs_import_officer: { getImportDeclarations },
-        payments_reconciliation_officer: { getTaxStatus },
-        data_ai_analyst: { getSystemStats, getRevenueForecastTool, getBehavioralAnalysis, getRiskAssessment },
-        compliance_officer: { lookupTrader, searchTraders, getTransactions, getTaxStatus, getRiskAssessment, traceSupplyChain },
-        audit_officer: { lookupTrader, searchTraders, getTransactions, getStockLevels, getTaxStatus, getRiskAssessment, getRevenueForecastTool, getSystemStats, getBehavioralAnalysis, traceSupplyChain, traceProductJourney, getImportDeclarations },
-        stock_officer: { lookupTrader, getTransactions, getStockLevels, traceProductJourney },
-        correction_officer: { lookupTrader, getTransactions, getStockLevels },
-        reporting_officer: { getSystemStats, getRevenueForecastTool },
-    };
-    const rraReadTools = isRRARole(staffClearance) ? rraToolSets[staffClearance] ?? {} : {};
+    const rraToolRegistry = {
+        lookupTrader, searchTraders, getTransactions, getStockLevels, getTaxStatus,
+        getRiskAssessment, getRevenueForecastTool, getSystemStats, getBehavioralAnalysis,
+        traceSupplyChain, traceProductJourney, getImportDeclarations,
+    } satisfies Record<RRAAIToolName, ToolSet[RRAAIToolName]>;
+    const rraReadTools: ToolSet = isRRARole(staffClearance)
+        ? Object.fromEntries(getRRAAIToolNames(staffClearance).map((name) => [name, rraToolRegistry[name]])) as ToolSet
+        : {};
     const tools: ToolSet = isTrader
         ? createTraderTools(userId)
         : { ...rraReadTools, ...createRraActionTools(staffClearance) };

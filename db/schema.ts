@@ -918,6 +918,29 @@ export const aiAuditLog = pgTable(
   ],
 );
 
+// Feedback stores review metadata only; chat prompts and responses are never persisted here.
+export const aiFeedback = pgTable(
+  'ai_feedback',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    submittedById: text('submitted_by_id').notNull().references(() => user.id),
+    staffRole: text('staff_role').notNull(),
+    messageHash: text('message_hash').notNull(),
+    rating: text('rating').notNull(),
+    issueCategory: text('issue_category'),
+    reviewStatus: text('review_status').notNull().default('pending'),
+    reviewOutcome: text('review_outcome'),
+    reviewedById: text('reviewed_by_id').references(() => user.id),
+    reviewedAt: timestamp('reviewed_at'),
+    modelVersion: text('model_version').notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('ai_feedback_submitter_message_unique').on(table.submittedById, table.messageHash),
+    index('ai_feedback_status_created_idx').on(table.reviewStatus, table.createdAt),
+  ],
+);
+
 // ---------------------------------------------------------------------------
 // Relations for new Phase 2 tables
 // ---------------------------------------------------------------------------

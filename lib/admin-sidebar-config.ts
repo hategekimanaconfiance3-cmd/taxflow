@@ -407,6 +407,12 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 allowedRoles: ["reporting_officer", "director_executive", "data_ai_analyst"],
             },
             {
+                label: "AI Feedback Review",
+                href: "/admin/intelligence/feedback",
+                icon: Brain,
+                allowedRoles: ["data_ai_analyst"],
+            },
+            {
                 label: "Notifications",
                 href: "/admin/notifications",
                 icon: Bell,
