@@ -4,6 +4,7 @@ import db from '@/db/drizzle';
 import { product, productionBatch, transaction, user, stockMovement, importDeclaration } from '@/db/schema';
 import { requireRRASession } from '@/lib/auth-guard';
 import { ProductJourneyExplorer } from '@/components/admin/product-journey-explorer';
+import { ProductJourneyGraph } from '@/components/admin/product-journey-graph';
 import { reconcileStockMovements } from '@/lib/product-journey/reconciliation';
 
 export const dynamic = 'force-dynamic';
@@ -152,6 +153,23 @@ export default async function ProductJourneyPage({ searchParams }: PageProps) {
             <Summary label="Confirmed/completed sales" value={totalRecordedSales} unit={selectedProduct.unit} />
             <Summary label="Inventory movement records" value={movements.length} unit="events" />
           </div>
+
+          <ProductJourneyGraph
+            unit={selectedProduct.unit}
+            edges={transactions.map((item) => ({
+              id: item.id,
+              sellerId: item.sellerId,
+              sellerName: item.sellerName ?? 'Unknown seller',
+              sellerTin: item.sellerTin,
+              buyerId: item.buyerId,
+              buyerName: item.buyerName,
+              buyerTin: item.buyerTin,
+              finalBuyerName: item.finalBuyerName,
+              quantity: Number(item.quantity),
+              status: item.status,
+              createdAt: new Date(item.createdAt).toISOString(),
+            }))}
+          />
 
           <div className="rounded-xl border bg-card p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
