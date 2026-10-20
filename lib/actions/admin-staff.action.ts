@@ -49,7 +49,7 @@ export async function updateStaffClearance(
     try {
         await db.transaction(async (tx) => {
             const [target] = await tx
-                .select({ clearanceLevel: rraStaff.clearanceLevel, isActive: rraStaff.isActive })
+                .select({ clearanceLevel: rraStaff.clearanceLevel, isActive: rraStaff.isActive, userId: rraStaff.userId })
                 .from(rraStaff)
                 .where(eq(rraStaff.id, targetStaffId))
                 .for("update")
@@ -65,6 +65,10 @@ export async function updateStaffClearance(
                 .update(rraStaff)
                 .set({ clearanceLevel: parsedRole.data, updatedAt: new Date() })
                 .where(eq(rraStaff.id, targetStaffId));
+
+            // Invalidate all active sessions so the new role takes effect immediately.
+            await tx.delete(authSession).where(eq(authSession.userId, target.userId));
+
             await logAudit(
                 {
                     userId: session.user.id,
@@ -96,7 +100,7 @@ export async function toggleStaffStatus(targetStaffId: string): Promise<StaffMut
     try {
         const isActive = await db.transaction(async (tx) => {
             const [target] = await tx
-                .select({ isActive: rraStaff.isActive, clearanceLevel: rraStaff.clearanceLevel })
+                .select({ isActive: rraStaff.isActive, clearanceLevel: rraStaff.clearanceLevel, userId: rraStaff.userId })
                 .from(rraStaff)
                 .where(eq(rraStaff.id, targetStaffId))
                 .for("update")
@@ -113,6 +117,12 @@ export async function toggleStaffStatus(targetStaffId: string): Promise<StaffMut
                 .update(rraStaff)
                 .set({ isActive: newStatus, updatedAt: new Date() })
                 .where(eq(rraStaff.id, targetStaffId));
+
+            // Revoke all sessions on deactivation or role-related status change.
+            if (!newStatus) {
+                await tx.delete(authSession).where(eq(authSession.userId, target.userId));
+            }
+
             await logAudit(
                 {
                     userId: session.user.id,
