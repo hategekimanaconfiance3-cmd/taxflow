@@ -31,7 +31,7 @@ export async function createBulletin(data: {
     priority: "info" | "important" | "urgent";
     department?: string;
 }): Promise<{ success: true; id: string }> {
-    const { staff, ...session } = await requireRRASession();
+    const { staff, ...session } = await requireRRASession("super_admin", "director_executive", "tax_compliance_officer", "audit_investigation_officer", "compliance_officer", "audit_officer");
 
     if (!data.title?.trim()) throw new Error("Title is required.");
     if (!data.content?.trim()) throw new Error("Content is required.");

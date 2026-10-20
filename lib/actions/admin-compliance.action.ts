@@ -36,7 +36,7 @@ export type AuditNote = {
 // ---------------------------------------------------------------------------
 
 export async function startComplianceAudit(traderId: string, reason: string) {
-    const { staff, ...session } = await requireRRASession("compliance_officer");
+    const { staff, ...session } = await requireRRASession("compliance_officer", "tax_compliance_officer");
 
     if (!reason?.trim()) throw new Error("A reason is required to start an audit.");
 
@@ -74,7 +74,7 @@ export async function addAuditNote(
     note: string,
     newStatus?: AuditStatus,
 ) {
-    const { staff, ...session } = await requireRRASession("compliance_officer");
+    const { staff, ...session } = await requireRRASession("compliance_officer", "tax_compliance_officer");
 
     if (!note?.trim()) throw new Error("Note cannot be empty.");
 
@@ -110,7 +110,7 @@ export async function flagSuspiciousActivity(
     reason: string,
     severity: "low" | "medium" | "high" | "critical",
 ) {
-    const { staff, ...session } = await requireRRASession("compliance_officer");
+    const { staff, ...session } = await requireRRASession("compliance_officer", "tax_compliance_officer");
 
     if (!reason?.trim()) throw new Error("A reason is required.");
 
@@ -134,7 +134,7 @@ export async function flagSuspiciousActivity(
 // ---------------------------------------------------------------------------
 
 export async function getTraderAuditHistory(traderId: string) {
-    await requireRRASession("compliance_officer");
+    await requireRRASession("compliance_officer", "tax_compliance_officer");
 
     return db
         .select({
@@ -156,7 +156,7 @@ export async function getTraderAuditHistory(traderId: string) {
 // ---------------------------------------------------------------------------
 
 export async function getActiveAudits() {
-    await requireRRASession("compliance_officer");
+    await requireRRASession("compliance_officer", "tax_compliance_officer");
 
     const auditEntries = await db
         .select({

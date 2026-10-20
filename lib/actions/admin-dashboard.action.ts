@@ -19,7 +19,7 @@ import { requireRRASession } from "@/lib/auth-guard";
 // ---------------------------------------------------------------------------
 
 export async function getDashboardOverview(from?: Date, to?: Date) {
-    await requireRRASession("compliance_officer", "audit_officer", "reporting_officer", "director_executive", "tax_compliance_officer", "audit_investigation_officer", "data_ai_analyst");
+    await requireRRASession("compliance_officer", "audit_officer", "reporting_officer", "director_executive", "tax_compliance_officer", "audit_investigation_officer", "data_ai_analyst", "payments_reconciliation_officer", "product_traceability_officer", "customs_import_officer");
 
     // Build date filter conditions for each table
     const txnDateFilter = from && to ? and(gte(transaction.createdAt, from), lte(transaction.createdAt, to)) : from ? gte(transaction.createdAt, from) : to ? lte(transaction.createdAt, to) : undefined;

@@ -361,7 +361,7 @@ export async function createStaffMember(data: {
 // ---------------------------------------------------------------------------
 
 export async function deactivateTaxpayer(traderId: string) {
-    const session = await requireRRASession("compliance_officer");
+    const session = await requireRRASession("compliance_officer", "tax_compliance_officer");
     await db.transaction(async (tx) => {
         const [trader] = await tx
             .select({ id: user.id, clearanceStatus: user.clearanceStatus })
@@ -390,7 +390,7 @@ export async function deactivateTaxpayer(traderId: string) {
 // ---------------------------------------------------------------------------
 
 export async function reactivateTaxpayer(traderId: string) {
-    const session = await requireRRASession("compliance_officer");
+    const session = await requireRRASession("compliance_officer", "tax_compliance_officer");
     await db.transaction(async (tx) => {
         const [trader] = await tx
             .select({ id: user.id, clearanceStatus: user.clearanceStatus })

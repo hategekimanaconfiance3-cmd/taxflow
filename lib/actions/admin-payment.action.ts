@@ -1,4 +1,4 @@
-﻿"use server";
+"use server";
 
 import { eq, desc, sql, and, ilike } from "drizzle-orm";
 import db from "@/db/drizzle";
@@ -77,7 +77,7 @@ export async function updatePaymentStatus(
     paymentId: string,
     status: "rejected",
 ) {
-    const session = await requireRRASession("compliance_officer", "audit_officer");
+    const session = await requireRRASession("compliance_officer", "audit_officer", "payments_reconciliation_officer");
     await db.transaction(async (tx) => {
         const [payment] = await tx
             .select()

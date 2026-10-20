@@ -34,7 +34,7 @@ export async function getTaxpayerOverview(
     sortBy: TaxpayerSort = "name",
     sortDir: "asc" | "desc" = "asc",
 ) {
-    await requireRRASession("compliance_officer", "reporting_officer");
+    await requireRRASession("compliance_officer", "reporting_officer", "tax_compliance_officer", "data_ai_analyst");
 
     // Get all traders with their VAT and payment aggregates in a single query
     const traders = await db
@@ -171,7 +171,7 @@ export async function getTaxpayerOverview(
 // ---------------------------------------------------------------------------
 
 export async function getComplianceAlerts() {
-    await requireRRASession("compliance_officer", "reporting_officer");
+    await requireRRASession("compliance_officer", "reporting_officer", "tax_compliance_officer", "data_ai_analyst");
 
     // Traders below compliance threshold
     // We'll re-use the taxpayer overview logic but just get non-compliant

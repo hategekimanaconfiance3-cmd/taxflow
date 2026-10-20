@@ -103,6 +103,7 @@ export const ROLE_COLORS: Record<RRARole, string> = {
 // ---------------------------------------------------------------------------
 
 const ALL: RRARole[] = [
+    "super_admin",
     "compliance_officer",
     "audit_officer",
     "stock_officer",
@@ -443,6 +444,16 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
  * Super Admin sees everything. Other roles see only their allowed items.
  */
 export function getAdminSidebarGroups(role: string): AdminSidebarGroup[] {
+    // Super admin sees all items
+    if (role === "super_admin") {
+        return ADMIN_SIDEBAR_GROUPS.map((group) => ({
+            ...group,
+            items: group.items.map((item) => ({
+                ...item,
+                children: item.children,
+            })),
+        })).filter((group) => group.items.length > 0);
+    }
     return ADMIN_SIDEBAR_GROUPS.map((group) => ({
         ...group,
         items: group.items.filter(

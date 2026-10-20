@@ -35,7 +35,7 @@ export type Anomaly = {
 // ---------------------------------------------------------------------------
 
 export async function detectAnomalies(): Promise<Anomaly[]> {
-    await requireRRASession("compliance_officer", "audit_officer");
+    await requireRRASession("compliance_officer", "audit_officer", "audit_investigation_officer", "data_ai_analyst");
 
     const anomalies: Anomaly[] = [];
     const thirtyDaysAgo = new Date();

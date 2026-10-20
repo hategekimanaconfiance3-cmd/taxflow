@@ -1,7 +1,9 @@
+import { requireRRASession } from '@/lib/auth-guard';
 import { getAIFeedbackForReview } from "@/lib/actions/ai-feedback.action";
 import { AIFeedbackReview } from "@/components/admin/ai-feedback-review";
 
 export default async function AIFeedbackPage() {
+  await requireRRASession("data_ai_analyst");
   const rows = await getAIFeedbackForReview();
   return (
     <div className="space-y-6 p-6">
