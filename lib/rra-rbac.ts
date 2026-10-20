@@ -34,7 +34,7 @@ export const RRA_PERMISSIONS = [
 export type RRAPermission = (typeof RRA_PERMISSIONS)[number];
 
 const PROPOSED_ROLE_PERMISSIONS: Record<RRAProposedRole, readonly RRAPermission[]> = {
-    super_admin: ["staff.manage", "system.configure", "security.audit.read", "reports.aggregate.read", "dashboard.executive.read", "taxpayer.compliance.read", "tax.records.read", "investigation.case.manage", "transaction.read", "audit.trail.read", "traceability.read", "stock.read", "imports.read", "imports.review", "payments.read", "payments.reconcile", "analytics.read", "ai.findings.read", "data_quality.read", "ai.assistant.use", "ai.feedback.review", "compliance.followup.manage", "support.manage", "supply_chain.summary.read"],
+    super_admin: ["staff.manage", "system.configure", "security.audit.read", "reports.aggregate.read", "dashboard.executive.read", "taxpayer.compliance.read", "tax.records.read", "investigation.case.manage", "transaction.read", "audit.trail.read", "traceability.read", "stock.read", "imports.read", "imports.review", "payments.read", "payments.reconcile", "analytics.read", "ai.findings.read", "data_quality.read", "ai.assistant.use", "ai.feedback.review", "stock.correction.review", "compliance.followup.manage", "support.manage", "supply_chain.summary.read"],
     director_executive: ["dashboard.executive.read", "reports.aggregate.read", "supply_chain.summary.read", "ai.assistant.use"],
     tax_compliance_officer: ["taxpayer.compliance.read", "tax.records.read", "payments.read", "compliance.followup.manage", "support.manage", "ai.assistant.use"],
     audit_investigation_officer: ["investigation.case.manage", "transaction.read", "audit.trail.read", "traceability.read", "ai.assistant.use"],

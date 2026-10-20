@@ -23,10 +23,28 @@ test("synthetic role evaluation cases match the assistant tool allowlist", () =>
   }
 });
 
-test("only the data and AI analyst can review feedback", () => {
+test("only data_ai_analyst and super_admin can review AI feedback; all others are denied", () => {
+  // Roles that should have ai.feedback.review
   assert.equal(hasRRAPermission("data_ai_analyst", "ai.feedback.review"), true);
-  assert.equal(hasRRAPermission("super_admin", "ai.feedback.review"), false);
-  assert.equal(hasRRAPermission("director_executive", "ai.feedback.review"), false);
+  assert.equal(hasRRAPermission("super_admin", "ai.feedback.review"), true);
+
+  // All other roles must not have feedback review access
+  const denied = [
+    "director_executive",
+    "tax_compliance_officer",
+    "audit_investigation_officer",
+    "product_traceability_officer",
+    "customs_import_officer",
+    "payments_reconciliation_officer",
+    "compliance_officer",
+    "audit_officer",
+    "stock_officer",
+    "correction_officer",
+    "reporting_officer",
+  ] as const;
+  for (const role of denied) {
+    assert.equal(hasRRAPermission(role, "ai.feedback.review"), false, `${role} must not have ai.feedback.review`);
+  }
 });
 
 test("unknown roles receive no assistant tools", () => {

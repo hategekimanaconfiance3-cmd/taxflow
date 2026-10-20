@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { auth } from '@/lib/auth';
 import db from '@/db/drizzle';
-import { rraStaff } from '@/db/schema';
+import { auditLog, rraStaff } from '@/db/schema';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { hasRRAPermission, isRRARole, isRRARoleAllowed, RRA_ROLE_VALUES, type RRAPermission, type RRARole } from '@/lib/rra-rbac';
@@ -30,6 +30,33 @@ export const ALLOWED_BUYERS: Record<string, string[]> = {
   wholesaler: ['wholesaler', 'retailer'],
   retailer: ['consumer'],
 };
+
+// ---------------------------------------------------------------------------
+// Audit helper — fire-and-forget, never throws
+// ---------------------------------------------------------------------------
+
+/**
+ * Log a permission denial to the audit_log table.
+ * Uses a fire-and-forget pattern so a logging failure never blocks the redirect.
+ */
+async function logAccessDenial(userId: string, detail: {
+  action: string;
+  targetType?: string;
+  metadata?: Record<string, unknown>;
+}): Promise<void> {
+  try {
+    await db.insert(auditLog).values({
+      userId,
+      action: detail.action,
+      targetType: detail.targetType ?? null,
+      targetId: null,
+      metadata: detail.metadata ? JSON.stringify(detail.metadata) : null,
+    });
+  } catch {
+    // Never surface logging errors — the guard redirect is more important.
+    // Errors here indicate a transient DB issue; the session check already ran.
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Guards
@@ -62,6 +89,9 @@ export async function requireSession() {
  * Optionally restrict to specific RRA roles.
  * Roles must match the explicit allowlist (with narrowly defined legacy aliases).
  *
+ * Permission denials are written to the audit_log before redirecting so that
+ * probing attempts leave a forensic trail.
+ *
  * @param allowedRoles - Roles that can access this resource. If empty, any active staff can access.
  * @returns The session plus the staff record
  */
@@ -71,11 +101,18 @@ export async function requireRRASession(...allowedRoles: RRARole[]) {
   const staffRecords = await db.select().from(rraStaff).where(eq(rraStaff.userId, session.user.id)).limit(1);
 
   if (staffRecords.length === 0 || !staffRecords[0].isActive) {
+    // Could be a trader hitting an admin route — not a security concern to log.
     redirect('/sign-in');
   }
 
   const staff = staffRecords[0];
   if (!isRRARole(staff.clearanceLevel)) {
+    // Unrecognized clearance level — log and redirect.
+    void logAccessDenial(session.user.id, {
+      action: 'ACCESS_DENIED_UNKNOWN_ROLE',
+      targetType: 'rra_staff',
+      metadata: { clearanceLevel: staff.clearanceLevel },
+    });
     redirect('/admin/dashboard');
   }
   const userRole = staff.clearanceLevel;
@@ -85,6 +122,15 @@ export async function requireRRASession(...allowedRoles: RRARole[]) {
     const hasAccess = isRRARoleAllowed(userRole, allowedRoles);
 
     if (!hasAccess) {
+      // Log the denial — role is valid but insufficient for this resource.
+      void logAccessDenial(session.user.id, {
+        action: 'ACCESS_DENIED_INSUFFICIENT_ROLE',
+        targetType: 'rra_guard',
+        metadata: {
+          userRole,
+          requiredRoles: allowedRoles,
+        },
+      });
       redirect('/admin/dashboard');
     }
   }
@@ -92,9 +138,23 @@ export async function requireRRASession(...allowedRoles: RRARole[]) {
   return { ...session, staff };
 }
 
+/**
+ * Validate that the current staff member has a specific fine-grained permission.
+ * Denials are logged to the audit trail.
+ *
+ * @param permission - The required permission key from RRA_PERMISSIONS
+ */
 export async function requireRRAPermission(permission: RRAPermission) {
   const rraSession = await requireRRASession();
   if (!isRRARole(rraSession.staff.clearanceLevel) || !hasRRAPermission(rraSession.staff.clearanceLevel, permission)) {
+    void logAccessDenial(rraSession.user.id, {
+      action: 'ACCESS_DENIED_MISSING_PERMISSION',
+      targetType: 'rra_permission',
+      metadata: {
+        userRole: rraSession.staff.clearanceLevel,
+        requiredPermission: permission,
+      },
+    });
     redirect('/admin/dashboard');
   }
   return rraSession;
