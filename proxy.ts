@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import { getSessionCookie } from 'better-auth/cookies';
 
 export default function proxy(request: NextRequest) {
@@ -26,11 +26,13 @@ export default function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL('/dashboard', request.url));
   }
 
-  // Redirect unauthenticated users
+  // Redirect unauthenticated users, preserving the original path as callbackUrl
   if (!isAuthenticated && !isAuthPage) {
     const redirectTo = pathname.startsWith('/admin') ? '/admin-login' : '/sign-in';
+    const redirectUrl = new URL(redirectTo, request.url);
+    redirectUrl.searchParams.set('callbackUrl', pathname);
 
-    return NextResponse.redirect(new URL(redirectTo, request.url));
+    return NextResponse.redirect(redirectUrl);
   }
 
   return NextResponse.next();
