@@ -5,7 +5,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   const { user, staff } = await requireRRASession();
 
   return (
-    <AdminShell userName={user.name} staffId={staff.staffId} clearanceLevel={staff.clearanceLevel}>
+    <AdminShell userName={user.name} staffId={staff.staffId} clearanceLevel={staff.clearanceLevel} clearanceRoles={staff.clearanceRoles}>
       {children}
     </AdminShell>
   );

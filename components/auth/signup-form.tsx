@@ -27,6 +27,12 @@ const ROLES = [
 
 type Role = (typeof ROLES)[number]['value'];
 type RoleOrNull = Role | null;
+const BUSINESS_TYPES = [
+  { value: 'registered_business', label: 'Registered business' },
+  { value: 'institution', label: 'Institution' },
+  { value: 'government', label: 'Government' },
+  { value: 'large_bulk_buyer', label: 'Large / bulk buyer' },
+] as const;
 
 function RoleSelector({
   value,
@@ -104,6 +110,7 @@ export function SignUpForm() {
   const router = useRouter();
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [role, setRole] = useState<RoleOrNull>(null);
+  const [businessType, setBusinessType] = useState<(typeof BUSINESS_TYPES)[number]['value']>('registered_business');
 
   // Role enforcement
   const [roleError, setRoleError] = useState('');
@@ -218,6 +225,7 @@ export function SignUpForm() {
         businessName: resolvedBusiness,
         phoneNumber: resolvedPhone,
         role,
+        businessType,
       },
       {
         onError: (ctx: { error: { message: string } }) => {
@@ -292,6 +300,18 @@ export function SignUpForm() {
             disabled={step > 1}
             hasError={!!roleError}
           />
+          {step === 1 && (
+            <label className="mx-auto flex max-w-xs flex-col gap-1 text-left text-xs text-gray-500">
+              Business / buyer type
+              <select
+                value={businessType}
+                onChange={(event) => setBusinessType(event.target.value as typeof businessType)}
+                className="h-9 rounded-md border border-gray-200 bg-white px-2 text-sm text-gray-800"
+              >
+                {BUSINESS_TYPES.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
+              </select>
+            </label>
+          )}
           {roleError && <p className="text-xs text-red-500 font-medium">{roleError}</p>}
         </div>
 

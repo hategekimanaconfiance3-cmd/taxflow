@@ -174,6 +174,28 @@ const translations: Record<Exclude<LangCode, 'en'>, Record<string, string>> = {
   },
 };
 
+Object.assign(translations.kiny, {
+  'Download PDF': 'Kuramo PDF', 'Generating…': 'Birimo gutegurwa…', 'Tax & VAT Overview': 'Incamake y’imisoro na TVA',
+  'My Import Declarations': 'Amatangazo yanjye y’ibitumizwa mu mahanga',
+  'Track arrival details, supporting invoices, and RRA review updates.': 'Kurikirana amakuru y’ibyageze, inyemezabuguzi n’ivugurura ry’isuzuma rya RRA.',
+  'No import declarations yet. New declarations will appear here so you can follow their progress.': 'Nta matangazo y’ibitumizwa arahari. Amatangazo mashya azagaragara hano kugira ngo ukurikire aho ageze.',
+  'Awaiting RRA review': 'Bitegereje isuzuma rya RRA', 'Approved and added to stock': 'Byemejwe kandi byongerewe mu bubiko',
+  'Action required': 'Harasabwa igikorwa', 'Arrival details needed': 'Hakenewe amakuru y’ibyageze', Expected: 'Byitezwe', Arrived: 'Byageze',
+  'Customs ref:': 'Nimero ya gasutamo:', 'Invoice:': 'Inyemezabuguzi:', 'RRA review note:': 'Icyitonderwa cy’isuzuma rya RRA:',
+  'Review the RRA note above, then contact RRA support if you need help updating this declaration.': 'Soma icyitonderwa cya RRA kiri hejuru, hanyuma ubaze ubufasha bwa RRA niba ukeneye kuvugurura iri tangazo.',
+});
+
+Object.assign(translations.fr, {
+  'Download PDF': 'Télécharger le PDF', 'Generating…': 'Génération…', 'Tax & VAT Overview': 'Aperçu des impôts et de la TVA',
+  'My Import Declarations': 'Mes déclarations d’importation',
+  'Track arrival details, supporting invoices, and RRA review updates.': 'Suivez les arrivées, les factures justificatives et les mises à jour de l’examen RRA.',
+  'No import declarations yet. New declarations will appear here so you can follow their progress.': 'Aucune déclaration d’importation. Les nouvelles déclarations apparaîtront ici avec leur progression.',
+  'Awaiting RRA review': 'En attente d’examen par la RRA', 'Approved and added to stock': 'Approuvée et ajoutée au stock',
+  'Action required': 'Action requise', 'Arrival details needed': 'Détails d’arrivée requis', Expected: 'Prévu', Arrived: 'Arrivé',
+  'Customs ref:': 'Référence douanière :', 'Invoice:': 'Facture :', 'RRA review note:': 'Note d’examen RRA :',
+  'Review the RRA note above, then contact RRA support if you need help updating this declaration.': 'Consultez la note RRA ci-dessus, puis contactez l’assistance RRA si vous avez besoin d’aide pour modifier cette déclaration.',
+});
+
 // Coverage for common page headings, form controls, validation states, and admin workflows.
 Object.assign(translations.kiny, {
   'New Ticket': 'Ubusabe bushya', 'All Transactions': 'Ihererekanya ryose', 'Direction': 'Icyerekezo',
@@ -1030,6 +1052,78 @@ Object.assign(translations.fr, {
   'The AI assistant could not respond. Please try again in a moment.': 'L’assistant IA n’a pas pu répondre. Veuillez réessayer dans un instant.',
   'The AI assistant could not complete this request. Please try again.': 'L’assistant IA n’a pas pu terminer cette demande. Veuillez réessayer.',
   'The AI assistant is not configured. Please contact your administrator.': 'L’assistant IA n’est pas configuré. Veuillez contacter votre administrateur.',
+});
+
+Object.assign(translations.kiny, {
+  'Trader Self-Service Lookup': 'Gushakisha amakuru y’umucuruzi',
+  'Find a caller by TIN and review the information assigned to your RRA role.': 'Shakisha umuhamagaye ukoresheje TIN urebe amakuru yemerewe inshingano yawe muri RRA.',
+  'Trader lookup by TIN': 'Gushakisha umucuruzi ukoresheje TIN',
+  'Enter the caller’s TIN to see trader information available to your RRA role.': 'Andika TIN y’umuhamagaye urebe amakuru yemerewe inshingano yawe muri RRA.',
+  'Enter trader TIN': 'Andika TIN y’umucuruzi', 'Search TIN': 'Shakisha TIN', 'Searching…': 'Birimo gushakisha…',
+  'No trader was found with that TIN.': 'Nta mucuruzi wabonetse kuri iyo TIN.',
+  'Enter a valid TIN using 5 to 32 letters, numbers, or hyphens.': 'Andika TIN yemewe irimo inyuguti, imibare cyangwa uturongo hagati kuva kuri 5 kugeza kuri 32.',
+  'TIN lookup failed. Please try again.': 'Gushakisha TIN ntibyagenze neza. Ongera ugerageze.',
+  'Trader information': 'Amakuru y’umucuruzi', 'Information shown is limited to your RRA role.': 'Amakuru yerekanwa agarukira ku nshingano yawe muri RRA.',
+  'Information available to your role:': 'Amakuru yemerewe inshingano yawe:',
+  'Tax and VAT summary': 'Incamake y’imisoro na TVA', 'Recent sales and transactions': 'Ibyagurishijwe n’ihererekanya biheruka',
+  'Import declarations': 'Amatangazo y’ibitumizwa mu mahanga', 'Current stock': 'Ibicuruzwa biri mu bubiko',
+  'Stock correction history': 'Amateka y’ivugururwa ry’ububiko', 'Recent tax payments': 'Ubwishyu bw’imisoro buheruka',
+  'Support requests': 'Ubusabe bw’ubufasha', Disputes: 'Impaka', Registered: 'Yanditswe',
+  'VAT output': 'TVA yavuye mu igurisha', 'VAT input': 'TVA yo ku byo yaguze', 'Net VAT due': 'TVA isigaye kwishyurwa',
+  'Confirmed payments': 'Ubwishyu bwemejwe', Outstanding: 'Amafaranga asigaye', 'Confirmed payment count': 'Umubare w’ubwishyu bwemejwe',
+  'No transactions found.': 'Nta hererekanya ryabonetse.', 'No import declarations found.': 'Nta matangazo y’ibitumizwa yabonetse.',
+  'No stock records found.': 'Nta nyandiko z’ububiko zabonetse.', 'No stock corrections recorded.': 'Nta vugururwa ry’ububiko ryanditswe.',
+  'No tax payments found.': 'Nta bwishyu bw’imisoro bwabonetse.', 'No support requests found.': 'Nta busabe bw’ubufasha bwabonetse.',
+  'No disputes filed by this trader.': 'Uyu mucuruzi nta mpaka yatanze.', 'Expected': 'Byitezwe', 'Arrived': 'Byageze',
+});
+
+Object.assign(translations.fr, {
+  'Trader Self-Service Lookup': 'Recherche autonome de commerçant',
+  'Find a caller by TIN and review the information assigned to your RRA role.': 'Recherchez un appelant par NIF et consultez les informations accessibles à votre rôle RRA.',
+  'Trader lookup by TIN': 'Recherche de commerçant par NIF',
+  'Enter the caller’s TIN to see trader information available to your RRA role.': 'Saisissez le NIF de l’appelant pour consulter les informations accessibles à votre rôle RRA.',
+  'Enter trader TIN': 'Saisir le NIF du commerçant', 'Search TIN': 'Rechercher le NIF', 'Searching…': 'Recherche…',
+  'No trader was found with that TIN.': 'Aucun commerçant trouvé pour ce NIF.',
+  'Enter a valid TIN using 5 to 32 letters, numbers, or hyphens.': 'Saisissez un NIF valide de 5 à 32 lettres, chiffres ou tirets.',
+  'TIN lookup failed. Please try again.': 'La recherche du NIF a échoué. Veuillez réessayer.',
+  'Trader information': 'Informations sur le commerçant', 'Information shown is limited to your RRA role.': 'Les informations affichées sont limitées à votre rôle RRA.',
+  'Information available to your role:': 'Informations accessibles à votre rôle :',
+  'Tax and VAT summary': 'Résumé des impôts et de la TVA', 'Recent sales and transactions': 'Ventes et transactions récentes',
+  'Import declarations': 'Déclarations d’importation', 'Current stock': 'Stock actuel',
+  'Stock correction history': 'Historique des corrections de stock', 'Recent tax payments': 'Paiements fiscaux récents',
+  'Support requests': 'Demandes d’assistance', Disputes: 'Litiges', Registered: 'Inscrit',
+  'VAT output': 'TVA collectée', 'VAT input': 'TVA déductible', 'Net VAT due': 'TVA nette due',
+  'Confirmed payments': 'Paiements confirmés', Outstanding: 'Solde restant', 'Confirmed payment count': 'Nombre de paiements confirmés',
+  'No transactions found.': 'Aucune transaction trouvée.', 'No import declarations found.': 'Aucune déclaration d’importation trouvée.',
+  'No stock records found.': 'Aucun enregistrement de stock trouvé.', 'No stock corrections recorded.': 'Aucune correction de stock enregistrée.',
+  'No tax payments found.': 'Aucun paiement fiscal trouvé.', 'No support requests found.': 'Aucune demande d’assistance trouvée.',
+  'No disputes filed by this trader.': 'Aucun litige déposé par ce commerçant.', 'Expected': 'Prévu', 'Arrived': 'Arrivé',
+});
+
+Object.assign(translations.kiny, {
+  'Staff role assignments': 'Inshingano z’umukozi', 'Manage roles': 'Gucunga inshingano',
+  'Role assignments': 'Inshingano zahawe umukozi',
+  'Select the predefined permission bundles this worker needs. Super Admin must be assigned alone.': 'Hitamo inshingano zisanzwe uyu mukozi akeneye. Super Admin agomba guhabwa inshingano imwe gusa.',
+  'Save role assignments': 'Bika inshingano zahawe umukozi', 'Roles updated for': 'Inshingano za',
+  'Full access to all dashboard areas, staff roles, system settings, and taxpayer records.': 'Uburenganzira bwose kuri paji, inshingano z’abakozi, igenamiterere n’inyandiko z’abasoreshwa.',
+  'Taxpayer lookup, VAT and tax compliance, payment review, support, and compliance cases.': 'Gushakisha abasoreshwa, kugenzura TVA n’imisoro, ubwishyu, ubufasha n’imanza z’iyubahiriza.',
+  'Transactions, imports, disputes, stock evidence, audits, and investigation records.': 'Ihererekanya, ibitumizwa, impaka, ibimenyetso by’ububiko, ubugenzuzi n’inyandiko z’iperereza.',
+  'Inventory, stock movements, imports, and supply-chain monitoring.': 'Ibarura ry’ibicuruzwa, ingendo z’ububiko, ibitumizwa no gukurikirana urunana rw’ibicuruzwa.',
+  'Inventory records, correction history, and authorized stock corrections.': 'Inyandiko z’ububiko, amateka y’ivugururwa n’ivugururwa ryemewe ry’ububiko.',
+  'Tax and VAT summaries, payment aggregates, reports, and approved data exports.': 'Incamake y’imisoro na TVA, ubwishyu, raporo no kohereza amakuru byemewe.',
+});
+
+Object.assign(translations.fr, {
+  'Staff role assignments': 'Attributions de rôles du personnel', 'Manage roles': 'Gérer les rôles',
+  'Role assignments': 'Attributions de rôles',
+  'Select the predefined permission bundles this worker needs. Super Admin must be assigned alone.': 'Sélectionnez les ensembles d’autorisations prédéfinis nécessaires. Le Super Admin doit être attribué seul.',
+  'Save role assignments': 'Enregistrer les attributions de rôles', 'Roles updated for': 'Rôles mis à jour pour',
+  'Full access to all dashboard areas, staff roles, system settings, and taxpayer records.': 'Accès complet au tableau de bord, aux rôles du personnel, aux paramètres et aux dossiers des contribuables.',
+  'Taxpayer lookup, VAT and tax compliance, payment review, support, and compliance cases.': 'Recherche de contribuables, conformité TVA et fiscale, paiements, assistance et dossiers de conformité.',
+  'Transactions, imports, disputes, stock evidence, audits, and investigation records.': 'Transactions, importations, litiges, preuves de stock, audits et dossiers d’enquête.',
+  'Inventory, stock movements, imports, and supply-chain monitoring.': 'Stocks, mouvements, importations et suivi de la chaîne d’approvisionnement.',
+  'Inventory records, correction history, and authorized stock corrections.': 'Dossiers de stock, historique des corrections et corrections autorisées.',
+  'Tax and VAT summaries, payment aggregates, reports, and approved data exports.': 'Résumés fiscaux et TVA, agrégats de paiements, rapports et exports autorisés.',
 });
 
 export function translate(text: string | undefined, language: LangCode): string {

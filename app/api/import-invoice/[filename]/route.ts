@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import db from "@/db/drizzle";
-import { importDeclaration, rraStaff } from "@/db/schema";
+import { importDeclaration, rraStaff, rraStaffRole } from "@/db/schema";
 import { getImportUploadDirectory, isImportFilenameForDeclaration } from "@/lib/import-files";
 
 export const runtime = "nodejs";
@@ -29,11 +29,12 @@ export async function GET(
   let hasAccess = declaration.businessId === session.user.id;
   if (!hasAccess) {
     const [staff] = await db
-      .select({ clearanceLevel: rraStaff.clearanceLevel, isActive: rraStaff.isActive })
-      .from(rraStaff)
-      .where(eq(rraStaff.userId, session.user.id))
+      .select({ id: rraStaff.id })
+      .from(rraStaffRole)
+      .innerJoin(rraStaff, eq(rraStaffRole.staffRecordId, rraStaff.id))
+      .where(and(eq(rraStaff.userId, session.user.id), eq(rraStaff.isActive, true), inArray(rraStaffRole.role, ["super_admin", "compliance_officer", "audit_officer", "stock_officer"])))
       .limit(1);
-    hasAccess = Boolean(staff?.isActive && ["super_admin", "compliance_officer", "audit_officer"].includes(staff.clearanceLevel));
+    hasAccess = Boolean(staff);
   }
   if (!hasAccess) return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
 

@@ -1,26 +1,18 @@
 import { requireRRASession } from '@/lib/auth-guard';
-import { getTaxpayerOverview } from '@/lib/actions/admin-taxpayer-overview.action';
-import { AdminTaxpayerTable } from '@/components/admin/admin-taxpayer-table';
+import { TinTaxpayerLookup } from '@/components/admin/tin-taxpayer-lookup';
 
 export default async function AdminTradersPage() {
   await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
 
-  const { rows, pagination, summary } = await getTaxpayerOverview(1, 'name', 'asc');
-
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Traders</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Trader Self-Service Lookup</h1>
         <p className="text-muted-foreground text-sm mt-1">
-          All registered manufacturers, wholesalers, and retailers with compliance metrics.
+          Find a caller by TIN and review the information assigned to your RRA role.
         </p>
       </div>
-
-      <AdminTaxpayerTable
-        initialRows={rows}
-        initialPagination={pagination}
-        initialSummary={summary}
-      />
+      <TinTaxpayerLookup />
     </div>
   );
 }

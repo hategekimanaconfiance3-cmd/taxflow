@@ -138,6 +138,11 @@ export const auth = betterAuth({
         type: 'string',
         required: false,
       },
+      businessType: {
+        type: 'string',
+        required: false,
+        defaultValue: 'registered_business',
+      },
       clearanceStatus: {
         type: 'string',
         required: false,

@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm';
 import { auth } from '@/lib/auth';
 import db from '@/db/drizzle';
-import { auditLog, rraStaff } from '@/db/schema';
+import { auditLog, rraStaff, rraStaffRole } from '@/db/schema';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { hasRRAPermission, isRRARole, isRRARoleAllowed, RRA_ROLE_VALUES, type RRAPermission, type RRARole } from '@/lib/rra-rbac';
@@ -93,7 +93,7 @@ export async function requireSession() {
  * probing attempts leave a forensic trail.
  *
  * @param allowedRoles - Roles that can access this resource. If empty, any active staff can access.
- * @returns The session plus the staff record
+ * @returns The session plus the staff record and all effective role assignments
  */
 export async function requireRRASession(...allowedRoles: RRARole[]) {
   const session = await requireSession();
@@ -106,20 +106,24 @@ export async function requireRRASession(...allowedRoles: RRARole[]) {
   }
 
   const staff = staffRecords[0];
-  if (!isRRARole(staff.clearanceLevel)) {
+  const assignedRows = await db.select({ role: rraStaffRole.role })
+    .from(rraStaffRole)
+    .where(eq(rraStaffRole.staffRecordId, staff.id));
+  const assignedRoles = assignedRows.length ? assignedRows.map((row) => row.role) : [staff.clearanceLevel];
+  const clearanceRoles = [...new Set(assignedRoles.filter(isRRARole))];
+  if (clearanceRoles.length === 0) {
     // Unrecognized clearance level — log and redirect.
     void logAccessDenial(session.user.id, {
       action: 'ACCESS_DENIED_UNKNOWN_ROLE',
       targetType: 'rra_staff',
-      metadata: { clearanceLevel: staff.clearanceLevel },
+      metadata: { clearanceLevel: staff.clearanceLevel, assignedRoles },
     });
     redirect('/admin/dashboard');
   }
-  const userRole = staff.clearanceLevel;
 
   // If specific roles are required, check access
   if (allowedRoles.length > 0) {
-    const hasAccess = isRRARoleAllowed(userRole, allowedRoles);
+    const hasAccess = clearanceRoles.some((role) => isRRARoleAllowed(role, allowedRoles));
 
     if (!hasAccess) {
       // Log the denial — role is valid but insufficient for this resource.
@@ -127,7 +131,7 @@ export async function requireRRASession(...allowedRoles: RRARole[]) {
         action: 'ACCESS_DENIED_INSUFFICIENT_ROLE',
         targetType: 'rra_guard',
         metadata: {
-          userRole,
+          clearanceRoles,
           requiredRoles: allowedRoles,
         },
       });
@@ -135,7 +139,7 @@ export async function requireRRASession(...allowedRoles: RRARole[]) {
     }
   }
 
-  return { ...session, staff };
+  return { ...session, staff: { ...staff, clearanceRoles } };
 }
 
 /**
@@ -146,18 +150,22 @@ export async function requireRRASession(...allowedRoles: RRARole[]) {
  */
 export async function requireRRAPermission(permission: RRAPermission) {
   const rraSession = await requireRRASession();
-  if (!isRRARole(rraSession.staff.clearanceLevel) || !hasRRAPermission(rraSession.staff.clearanceLevel, permission)) {
+  if (!rraSession.staff.clearanceRoles.some((role) => hasRRAPermission(role, permission))) {
     void logAccessDenial(rraSession.user.id, {
       action: 'ACCESS_DENIED_MISSING_PERMISSION',
       targetType: 'rra_permission',
       metadata: {
-        userRole: rraSession.staff.clearanceLevel,
+        userRoles: rraSession.staff.clearanceRoles,
         requiredPermission: permission,
       },
     });
     redirect('/admin/dashboard');
   }
   return rraSession;
+}
+
+export function hasRRARole(staff: { clearanceLevel: string; clearanceRoles?: RRARole[] }, role: RRARole): boolean {
+  return staff.clearanceRoles?.includes(role) ?? staff.clearanceLevel === role;
 }
 
 /**

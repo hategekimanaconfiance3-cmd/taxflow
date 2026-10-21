@@ -12,6 +12,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { ArrowLeftRight } from 'lucide-react';
 import { formatRWF } from '@/components/dashboard/stat-card/stat-card';
+import { PaymentStatusControl } from '@/components/dashboard/transactions/payment-status-control';
 
 const STATUS_COLORS: Record<string, string> = {
   confirmed: 'bg-emerald-100 text-emerald-700',
@@ -72,13 +73,14 @@ export default async function TransactionsPage() {
                 <TableHead className="text-right">Qty</TableHead>
                 <TableHead className="text-right">Amount</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead>Type / payment</TableHead>
                 <TableHead>Date</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {allTransactions.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center py-8 text-muted-foreground text-sm">
+                  <TableCell colSpan={8} className="text-center py-8 text-muted-foreground text-sm">
                     No transactions yet.
                   </TableCell>
                 </TableRow>
@@ -94,7 +96,12 @@ export default async function TransactionsPage() {
                     </Badge>
                   </TableCell>
                   <TableCell className="text-xs">{txn.counterparty ?? '—'}</TableCell>
-                  <TableCell className="text-xs font-medium">{txn.productName}</TableCell>
+                  <TableCell className="text-xs font-medium">
+                    {txn.productName}
+                    {txn.transactionType === 'DIRECT_BULK_SALE' && (
+                      <Badge variant="outline" className="ml-2 text-[9px]">Direct bulk</Badge>
+                    )}
+                  </TableCell>
                   <TableCell className="text-right text-xs">{txn.quantity?.toLocaleString()}</TableCell>
                   <TableCell className="text-right font-mono text-xs">
                     {formatRWF(Number(txn.totalAmount))}
@@ -106,6 +113,13 @@ export default async function TransactionsPage() {
                     >
                       {txn.status}
                     </Badge>
+                  </TableCell>
+                  <TableCell>
+                    {['confirmed', 'completed'].includes(txn.status) ? (
+                      <PaymentStatusControl transactionId={txn.id} status={txn.paymentStatus} />
+                    ) : (
+                      <span className="text-xs capitalize text-muted-foreground">{txn.paymentStatus}</span>
+                    )}
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">
                     {txn.createdAt ? new Date(txn.createdAt).toLocaleDateString() : '—'}

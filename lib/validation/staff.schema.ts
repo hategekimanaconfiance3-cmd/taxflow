@@ -1,18 +1,29 @@
 import { z } from 'zod';
-import { RRA_ROLE_OPTIONS, type RRAProposedRole, type RRARole } from '@/lib/rra-rbac';
+import { RRA_ROLE_OPTIONS, RRA_ROLE_PERMISSIONS, RRA_ROLE_VALUES, type RRARole } from '@/lib/rra-rbac';
 
-export const STAFF_ROLE_OPTIONS = [
-  ...RRA_ROLE_OPTIONS,
-  { value: 'compliance_officer', label: 'Legacy · Compliance Officer' },
-  { value: 'audit_officer', label: 'Legacy · Audit Officer' },
-  { value: 'stock_officer', label: 'Legacy · Stock Monitoring Officer' },
-  { value: 'correction_officer', label: 'Legacy · Correction Officer' },
-  { value: 'reporting_officer', label: 'Legacy · Reporting & Analytics' },
-] as const satisfies readonly { value: RRARole; label: string }[];
+const LEGACY_ROLE_LABELS: Partial<Record<RRARole, string>> = {
+  compliance_officer: 'Legacy · Compliance Officer',
+  audit_officer: 'Legacy · Audit Officer',
+  stock_officer: 'Legacy · Stock Monitoring Officer',
+  correction_officer: 'Legacy · Correction Officer',
+  reporting_officer: 'Legacy · Reporting & Analytics',
+};
+
+export const STAFF_ROLE_OPTIONS = RRA_ROLE_VALUES.map((value) => {
+  const proposed = RRA_ROLE_OPTIONS.find((role) => role.value === value);
+  return {
+    value,
+    label: proposed?.label ?? LEGACY_ROLE_LABELS[value] ?? value,
+    permissions: (RRA_ROLE_PERMISSIONS[value] ?? []).join(', '),
+  };
+}) as readonly { value: RRARole; label: string; permissions: string }[];
 
 const STAFF_ROLES = STAFF_ROLE_OPTIONS.map((option) => option.value) as [RRARole, ...RRARole[]];
 export const staffRoleSchema = z.enum(STAFF_ROLES);
-export const staffAssignmentRoleSchema = z.enum(RRA_ROLE_OPTIONS.map((option) => option.value) as [RRAProposedRole, ...RRAProposedRole[]]);
+export const staffAssignmentRoleSchema = staffRoleSchema;
+export const staffRolesSchema = z.array(staffRoleSchema).min(1, 'Choose at least one role.').max(STAFF_ROLE_OPTIONS.length)
+  .refine((roles) => new Set(roles).size === roles.length, 'Each role can only be assigned once.')
+  .refine((roles) => !roles.includes('super_admin') || roles.length === 1, 'Super Admin must be the only assigned role.');
 
 const passwordSchema = z
   .string()
@@ -34,7 +45,7 @@ export const staffAccountSchema = z
       .max(20, 'Staff ID must be at most 20 characters.')
       .regex(/^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/, 'Use letters, numbers, and single dashes only.'),
     department: z.string().trim().min(2, 'Enter a department.').max(100),
-    clearanceLevel: staffAssignmentRoleSchema,
+    roles: staffRolesSchema,
     password: passwordSchema,
     confirmPassword: z.string().min(1, 'Confirm the password.'),
   })

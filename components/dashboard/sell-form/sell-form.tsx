@@ -127,6 +127,11 @@ export function SellForm({ inventory, products, vatRate }: SellFormProps) {
       : [];
   const [isPending, startTransition] = useTransition();
   const [buyer, setBuyer] = useState<BuyerInfo | null>(null);
+  const [isDirectBulkSale, setIsDirectBulkSale] = useState(false);
+  const [invoiceReference, setInvoiceReference] = useState('');
+  const [deliveryAddress, setDeliveryAddress] = useState('');
+  const [deliverySchedule, setDeliverySchedule] = useState('');
+  const [deliveryNotes, setDeliveryNotes] = useState('');
   const [saleItems, setSaleItems] = useState<SaleItem[]>(
     () => sellableInventory.map((inv) => ({
       productId: inv.productId,
@@ -170,6 +175,11 @@ export function SellForm({ inventory, products, vatRate }: SellFormProps) {
             productId: item.productId,
             quantity: item.quantityToSell,
             unitPrice: item.unitPrice,
+            transactionType: isDirectBulkSale ? 'DIRECT_BULK_SALE' : 'STANDARD_B2B_SALE',
+            invoiceReference,
+            deliveryInformation: isDirectBulkSale
+              ? { address: deliveryAddress, schedule: deliverySchedule, notes: deliveryNotes }
+              : undefined,
           });
         }
 
@@ -220,6 +230,50 @@ export function SellForm({ inventory, products, vatRate }: SellFormProps) {
         {/* Buyer lookup */}
         <BuyerLookup onBuyerFound={handleBuyerFound} onBuyerCleared={handleBuyerCleared} />
 
+        {buyer?.isEligible && (
+          <div className="space-y-3 rounded-lg border p-3">
+            <label className="flex items-start gap-2 text-sm font-medium">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={isDirectBulkSale}
+                onChange={(event) => setIsDirectBulkSale(event.target.checked)}
+              />
+              <span>
+                Direct bulk sale <span className="block text-xs font-normal text-muted-foreground">For a large business or institution buying directly from you. It does not require a wholesaler in between.</span>
+              </span>
+            </label>
+            {isDirectBulkSale && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Input
+                  value={invoiceReference}
+                  onChange={(event) => setInvoiceReference(event.target.value)}
+                  placeholder="Invoice / reference number"
+                  maxLength={120}
+                />
+                <Input
+                  value={deliveryAddress}
+                  onChange={(event) => setDeliveryAddress(event.target.value)}
+                  placeholder="Delivery address"
+                  maxLength={500}
+                />
+                <Input
+                  value={deliverySchedule}
+                  onChange={(event) => setDeliverySchedule(event.target.value)}
+                  placeholder="Delivery schedule, e.g. 10,000 bags weekly"
+                  maxLength={500}
+                />
+                <Input
+                  value={deliveryNotes}
+                  onChange={(event) => setDeliveryNotes(event.target.value)}
+                  placeholder="Delivery notes (optional)"
+                  maxLength={500}
+                />
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Product selection table */}
         {buyer?.isEligible && (
           <>
@@ -267,4 +321,3 @@ export function SellForm({ inventory, products, vatRate }: SellFormProps) {
     </Card>
   );
 }
-

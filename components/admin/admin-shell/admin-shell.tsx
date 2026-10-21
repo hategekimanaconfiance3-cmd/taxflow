@@ -257,20 +257,23 @@ interface AdminShellProps {
   userName: string;
   staffId: string;
   clearanceLevel: string;
+  clearanceRoles: string[];
   children: React.ReactNode;
 }
 
 // ---------------------------------------------------------------------------
 // AdminShell
 // ---------------------------------------------------------------------------
-export function AdminShell({ userName, staffId, clearanceLevel, children }: AdminShellProps) {
+export function AdminShell({ userName, staffId, clearanceLevel, clearanceRoles, children }: AdminShellProps) {
   const pathname = usePathname();
-  const groups = getAdminSidebarGroups(clearanceLevel);
+  const groups = getAdminSidebarGroups(clearanceRoles.length ? clearanceRoles : [clearanceLevel]);
 
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isAiOpen, setIsAiOpen] = useState(false);
   const [lang, setLang] = useLanguagePreference();
+  const roleSummary = (clearanceRoles.length ? clearanceRoles : [clearanceLevel])
+    .map((role) => translate(ROLE_LABELS[role as RRARole] ?? role, lang)).join(", ");
 
   // Ctrl+I toggles AI panel
   useEffect(() => {
@@ -638,7 +641,7 @@ export function AdminShell({ userName, staffId, clearanceLevel, children }: Admi
                     className={cn('text-[9px] px-1 py-0 font-semibold', ROLE_COLORS[clearanceLevel as RRARole] || '')}
                   >
                     <Shield className="h-2.5 w-2.5 mr-0.5" />
-                    {translate(ROLE_LABELS[clearanceLevel as RRARole] ?? clearanceLevel, lang)}
+                    {roleSummary}
                   </Badge>
                 </div>
               </div>
@@ -651,7 +654,7 @@ export function AdminShell({ userName, staffId, clearanceLevel, children }: Admi
               <p className="text-[11px] text-muted-foreground font-mono mt-0.5">{staffId}</p>
               <div className="flex items-center gap-2 mt-1.5">
                 <Badge variant="outline" className={cn('text-[10px] px-1.5 py-0', ROLE_COLORS[clearanceLevel as RRARole] || '')}>
-                    {translate(ROLE_LABELS[clearanceLevel as RRARole] ?? clearanceLevel, lang)}
+                    {roleSummary}
                 </Badge>
               </div>
             </div>

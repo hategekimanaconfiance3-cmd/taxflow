@@ -74,6 +74,9 @@ export async function createTransaction(data: {
   productId: string;
   quantity: number;
   unitPrice: number; // RWF
+  transactionType?: 'STANDARD_B2B_SALE' | 'DIRECT_BULK_SALE';
+  invoiceReference?: string;
+  deliveryInformation?: { address?: string; schedule?: string; notes?: string };
 }) {
   const { suspended, clearanceStatus, ...session } = await requireApprovedClearance();
 
@@ -100,6 +103,14 @@ export async function createTransaction(data: {
 
   if (!buyer.role) {
     throw new Error('Buyer has no assigned role');
+  }
+
+  const transactionType = data.transactionType ?? 'STANDARD_B2B_SALE';
+  if (data.invoiceReference && data.invoiceReference.length > 120) {
+    throw new Error('Invoice/reference number must be 120 characters or fewer.');
+  }
+  if (data.deliveryInformation && Object.values(data.deliveryInformation).some((value) => typeof value !== 'string' || value.length > 500)) {
+    throw new Error('Delivery information fields must be text with at most 500 characters.');
   }
 
   // Validate seller → buyer role compatibility
@@ -183,6 +194,14 @@ export async function createTransaction(data: {
         sellerId: session.user.id,
         buyerId: buyer.id,
         productId: data.productId,
+        transactionType,
+        buyerType:
+          transactionType === 'DIRECT_BULK_SALE' && (!buyer.businessType || buyer.businessType === 'registered_business')
+            ? 'large_bulk_buyer'
+            : (buyer.businessType ?? 'registered_business'),
+        invoiceReference: data.invoiceReference?.trim() || null,
+        deliveryInformation: data.deliveryInformation ?? null,
+        paymentStatus: 'unpaid',
         quantity: data.quantity,
         unitPrice: data.unitPrice,
         totalAmount,
@@ -562,6 +581,8 @@ export async function createRetailSale(data: {
         sellerId: session.user.id,
         buyerId: null,
         buyerName: data.customerName.trim(),
+        transactionType: 'RETAIL_SALE',
+        buyerType: 'individual_consumer',
         productId: data.productId,
         quantity: data.quantity,
         unitPrice: data.unitPrice,
@@ -647,6 +668,8 @@ export async function getOutgoingTransactions() {
       totalAmount: transaction.totalAmount,
       vatAmount: transaction.vatAmount,
       status: transaction.status,
+      transactionType: transaction.transactionType,
+      paymentStatus: transaction.paymentStatus,
       createdAt: transaction.createdAt,
       confirmedAt: transaction.confirmedAt,
     })
@@ -676,6 +699,8 @@ export async function getIncomingTransactions() {
       totalAmount: transaction.totalAmount,
       vatAmount: transaction.vatAmount,
       status: transaction.status,
+      transactionType: transaction.transactionType,
+      paymentStatus: transaction.paymentStatus,
       createdAt: transaction.createdAt,
     })
     .from(transaction)
@@ -709,6 +734,37 @@ export async function getTransaction(transactionId: string) {
   return txn;
 }
 
+/** Record payment progress reported by either party after delivery is confirmed. */
+export async function updateTransactionPaymentStatus(
+  transactionId: string,
+  paymentStatus: 'unpaid' | 'partial' | 'paid',
+) {
+  const session = await requireTraderSession();
+  if (!['unpaid', 'partial', 'paid'].includes(paymentStatus)) throw new Error('Invalid payment status.');
+
+  await db.transaction(async (tx) => {
+    const [txn] = await tx.select().from(transaction).where(eq(transaction.id, transactionId)).for('update').limit(1);
+    if (!txn || (txn.sellerId !== session.user.id && txn.buyerId !== session.user.id)) {
+      throw new Error('Transaction not found.');
+    }
+    if (!['confirmed', 'completed'].includes(txn.status)) {
+      throw new Error('Payment can be updated after the buyer confirms receipt.');
+    }
+
+    await tx.update(transaction).set({ paymentStatus }).where(eq(transaction.id, transactionId));
+    await tx.insert(auditLog).values({
+      userId: session.user.id,
+      action: 'TRANSACTION_PAYMENT_STATUS_UPDATED',
+      targetType: 'transaction',
+      targetId: transactionId,
+      beforeState: { paymentStatus: txn.paymentStatus },
+      afterState: { paymentStatus },
+    });
+  });
+
+  return { success: true };
+}
+
 // ---------------------------------------------------------------------------
 // Lookup buyer by TIN (for sell-to-buyer form)
 // ---------------------------------------------------------------------------
@@ -729,6 +785,7 @@ export async function lookupBuyer(buyerTin: string) {
         businessName: user.businessName,
         tinNumber: user.tinNumber,
         role: user.role,
+        businessType: user.businessType,
         clearanceStatus: user.clearanceStatus,
       })
       .from(user)

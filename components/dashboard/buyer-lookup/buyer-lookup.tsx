@@ -17,6 +17,7 @@ export interface BuyerInfo {
   businessName: string | null;
   tinNumber: string | null;
   role: string;
+  businessType: string;
   clearanceStatus: string;
   compliancePct: number;
   isEligible: boolean;
@@ -136,7 +137,7 @@ export function BuyerLookup({ onBuyerFound, onBuyerCleared }: BuyerLookupProps) 
             <div>
               <p className="text-xs text-muted-foreground">Category</p>
               <Badge variant="outline" className="text-xs capitalize">
-                {buyer.role}
+                {buyer.businessType.replaceAll('_', ' ')}
               </Badge>
             </div>
             <div>

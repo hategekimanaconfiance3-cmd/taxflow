@@ -84,7 +84,7 @@ export async function validateId(nationalId: string): Promise<IdLookupResult> {
 // ---------------------------------------------------------------------------
 
 export type RRAVerifyResult =
-    | { success: true; staffId: string; clearanceLevel: string; department: string | null }
+    | { success: true; staffId: string; clearanceLevel: string; clearanceRoles: string[]; department: string | null }
     | { success: false; error: string };
 
 /**
@@ -96,7 +96,7 @@ export async function verifyRRAStaff(): Promise<RRAVerifyResult> {
     const { headers } = await import("next/headers");
     const { eq } = await import("drizzle-orm");
     const { default: db } = await import("@/db/drizzle");
-    const { rraStaff } = await import("@/db/schema");
+    const { rraStaff, rraStaffRole } = await import("@/db/schema");
 
     try {
         const session = await auth.api.getSession({
@@ -123,10 +123,15 @@ export async function verifyRRAStaff(): Promise<RRAVerifyResult> {
             return { success: false, error: "This staff account has been deactivated." };
         }
 
+        const roleAssignments = await db.select({ role: rraStaffRole.role }).from(rraStaffRole)
+            .where(eq(rraStaffRole.staffRecordId, staff.id));
+        const clearanceRoles = roleAssignments.length ? roleAssignments.map((assignment) => assignment.role) : [staff.clearanceLevel];
+
         return {
             success: true,
             staffId: staff.staffId,
             clearanceLevel: staff.clearanceLevel,
+            clearanceRoles,
             department: staff.department,
         };
     } catch (error) {

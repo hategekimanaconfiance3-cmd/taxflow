@@ -109,7 +109,7 @@ export async function deleteBulletin(bulletinId: string): Promise<{ success: tru
     if (!bulletin) throw new Error("Bulletin not found.");
 
     // Only author or super_admin can delete
-    if (bulletin.authorId !== session.user.id && staff.clearanceLevel !== "super_admin") {
+    if (bulletin.authorId !== session.user.id && !staff.clearanceRoles.includes("super_admin")) {
         throw new Error("You can only delete your own bulletins.");
     }
 

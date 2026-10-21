@@ -16,7 +16,7 @@ import { convertToModelMessages, stepCountIs, streamText, validateUIMessages, ty
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import db from "@/db/drizzle";
-import { rraStaff, auditLog } from "@/db/schema";
+import { rraStaff, rraStaffRole, auditLog } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { headers } from "next/headers";
 import { createHash } from "node:crypto";
@@ -163,10 +163,11 @@ export async function POST(request: Request) {
     // Check RRA staff status (verify against DB, not client-supplied data)
     let isRRAStaff = false;
     let staffClearance = "";
+    let staffRoles: string[] = [];
 
     if (!isTrader) {
         const staffRecords = await db
-            .select({ clearanceLevel: rraStaff.clearanceLevel, isActive: rraStaff.isActive })
+            .select({ id: rraStaff.id, clearanceLevel: rraStaff.clearanceLevel, isActive: rraStaff.isActive })
             .from(rraStaff)
             .where(eq(rraStaff.userId, userId))
             .limit(1);
@@ -174,6 +175,8 @@ export async function POST(request: Request) {
         if (staffRecords.length > 0 && staffRecords[0].isActive) {
             isRRAStaff = true;
             staffClearance = staffRecords[0].clearanceLevel;
+            const assignments = await db.select({ role: rraStaffRole.role }).from(rraStaffRole).where(eq(rraStaffRole.staffRecordId, staffRecords[0].id));
+            staffRoles = assignments.length ? assignments.map(({ role }) => role) : [staffClearance];
         }
     }
 
@@ -181,7 +184,7 @@ export async function POST(request: Request) {
     if (!isTrader && !isRRAStaff) {
         return new Response("Forbidden", { status: 403 });
     }
-    if (!isTrader && (!isRRARole(staffClearance) || !hasRRAPermission(staffClearance, "ai.assistant.use"))) {
+    if (!isTrader && !staffRoles.some((role) => isRRARole(role) && hasRRAPermission(role, "ai.assistant.use"))) {
         return new Response("Forbidden", { status: 403 });
     }
 
@@ -235,7 +238,7 @@ export async function POST(request: Request) {
             targetType: "ai_assistant",
             targetId: null,
             metadata: JSON.stringify({
-                role: isTrader ? userRole : `rra_staff:${staffClearance}`,
+                role: isTrader ? userRole : `rra_staff:${staffRoles.join(",")}`,
                 questionHash: createHash("sha256").update(questionText).digest("hex"),
                 questionLength: questionText.length,
             }),
@@ -254,8 +257,9 @@ export async function POST(request: Request) {
         getRiskAssessment, getRevenueForecastTool, getSystemStats, getBehavioralAnalysis,
         traceSupplyChain, traceProductJourney, getImportDeclarations,
     } satisfies Record<RRAAIToolName, ToolSet[RRAAIToolName]>;
-    const rraReadTools: ToolSet = isRRARole(staffClearance)
-        ? Object.fromEntries(getRRAAIToolNames(staffClearance).map((name) => [name, rraToolRegistry[name]])) as ToolSet
+    const allowedRraTools = [...new Set(staffRoles.filter(isRRARole).flatMap((role) => getRRAAIToolNames(role)))];
+    const rraReadTools: ToolSet = isRRAStaff
+        ? Object.fromEntries(allowedRraTools.map((name) => [name, rraToolRegistry[name]])) as ToolSet
         : {};
     const tools: ToolSet = isTrader
         ? createTraderTools(userId)

@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Shield, TrendingUp, DollarSign, CheckCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import Link from 'next/link';
+import { ExportPDFButton } from '@/components/dashboard/export-pdf-button/export-pdf-button';
 
 export default async function TaxPage() {
   await requireApprovedClearance();
@@ -24,10 +25,15 @@ export default async function TaxPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Tax & VAT Overview</h1>
-        <p className="text-muted-foreground text-sm mt-1">
-          Your current VAT position, compliance status, and payment history.
-        </p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Tax & VAT Overview</h1>
+            <p className="text-muted-foreground text-sm mt-1">
+              Your current VAT position, compliance status, and payment history.
+            </p>
+          </div>
+          <ExportPDFButton />
+        </div>
       </div>
 
       {/* Compliance status */}

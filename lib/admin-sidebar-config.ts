@@ -443,24 +443,15 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
  * Filter sidebar groups by role.
  * Super Admin sees everything. Other roles see only their allowed items.
  */
-export function getAdminSidebarGroups(role: string): AdminSidebarGroup[] {
-    // Super admin sees all items
-    if (role === "super_admin") {
-        return ADMIN_SIDEBAR_GROUPS.map((group) => ({
-            ...group,
-            items: group.items.map((item) => ({
-                ...item,
-                children: item.children,
-            })),
-        })).filter((group) => group.items.length > 0);
-    }
+export function getAdminSidebarGroups(roles: string | string[]): AdminSidebarGroup[] {
+    const assignedRoles = Array.isArray(roles) ? roles : [roles];
     return ADMIN_SIDEBAR_GROUPS.map((group) => ({
         ...group,
         items: group.items.filter(
-            (item) => item.allowedRoles.includes(role as RRARole),
+            (item) => assignedRoles.some((role) => item.allowedRoles.includes(role as RRARole)),
         ).map((item) => ({
             ...item,
-            children: item.children?.filter((child) => !child.allowedRoles || child.allowedRoles.includes(role as RRARole)),
+            children: item.children?.filter((child) => !child.allowedRoles || assignedRoles.some((role) => child.allowedRoles!.includes(role as RRARole))),
         })),
     })).filter((group) => group.items.length > 0);
 }
@@ -468,7 +459,7 @@ export function getAdminSidebarGroups(role: string): AdminSidebarGroup[] {
 /**
  * Flat list of all visible items for a role.
  */
-export function getAdminSidebarItems(role: string): AdminSidebarItem[] {
-    return getAdminSidebarGroups(role).flatMap((g) => g.items);
+export function getAdminSidebarItems(roles: string | string[]): AdminSidebarItem[] {
+    return getAdminSidebarGroups(roles).flatMap((g) => g.items);
 }
 

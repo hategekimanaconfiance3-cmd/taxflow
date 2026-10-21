@@ -31,7 +31,7 @@ export default async function AdminAssistantPage() {
             Officer-approved actions · No decisions
           </Badge>
           <Badge variant="outline" className="text-xs capitalize">
-            {staff.clearanceLevel.replace('_', ' ')}
+            {staff.clearanceRoles.map((role) => role.replaceAll('_', ' ')).join(', ')}
           </Badge>
         </div>
       </div>

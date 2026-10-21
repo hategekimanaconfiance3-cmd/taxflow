@@ -28,6 +28,7 @@ export const user = pgTable(
     phoneNumber: text('phone_number').unique(), // From phoneNumber plugin
     phoneNumberVerified: boolean('phone_number_verified').default(false),
     role: text('role').notNull().default('retailer'), // manufacturer, wholesaler, retailer, rra_staff
+    businessType: text('business_type').notNull().default('registered_business'), // registered_business, institution, government, large_bulk_buyer
     clearanceStatus: text('clearance_status').default('pending').notNull(),
     // "pending" | "approved" | "under_review" | "suspended"
     // New traders start as "pending" - RRA staff must approve before they can trade
@@ -132,6 +133,23 @@ export const rraStaff = pgTable(
   ],
 );
 
+// A worker may hold several predefined RRA role bundles. clearanceLevel stays
+// as the primary/legacy role while this table records every effective role.
+export const rraStaffRole = pgTable(
+  'rra_staff_role',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    staffRecordId: text('staff_record_id').notNull().references(() => rraStaff.id, { onDelete: 'cascade' }),
+    role: text('role').notNull(),
+    assignedBy: text('assigned_by').references(() => user.id),
+    assignedAt: timestamp('assigned_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('rra_staff_role_staff_role_uniq').on(table.staffRecordId, table.role),
+    index('rra_staff_role_role_idx').on(table.role),
+  ],
+);
+
 // ---------------------------------------------------------------------------
 // Products
 // ---------------------------------------------------------------------------
@@ -227,6 +245,11 @@ export const transaction = pgTable(
       .references(() => user.id),
     buyerId: text('buyer_id').references(() => user.id), // null for retail → consumer
     buyerName: text('buyer_name'), // final consumer name (retailer sales only)
+    transactionType: text('transaction_type').notNull().default('STANDARD_B2B_SALE'), // STANDARD_B2B_SALE | DIRECT_BULK_SALE | RETAIL_SALE
+    buyerType: text('buyer_type').notNull().default('registered_business'), // individual_consumer | registered_business | institution | government | large_bulk_buyer
+    invoiceReference: text('invoice_reference'),
+    deliveryInformation: jsonb('delivery_information').$type<{ address?: string; schedule?: string; notes?: string }>(),
+    paymentStatus: text('payment_status').notNull().default('unpaid'), // unpaid | partial | paid
     productId: text('product_id')
       .notNull()
       .references(() => product.id),
@@ -364,6 +387,47 @@ export const auditLog = pgTable(
     index('audit_action_idx').on(table.action),
     index('audit_target_idx').on(table.targetType, table.targetId),
   ],
+);
+
+// ---------------------------------------------------------------------------
+// RRA Case Management
+// ---------------------------------------------------------------------------
+
+export const rraCase = pgTable(
+  'rra_case',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    traderId: text('trader_id').notNull().references(() => user.id),
+    title: text('title').notNull(),
+    reason: text('reason').notNull(),
+    status: text('status').notNull().default('open'),
+    priority: text('priority').notNull().default('normal'),
+    assignedStaffId: text('assigned_staff_id').references(() => rraStaff.id, { onDelete: 'set null' }),
+    createdByStaffId: text('created_by_staff_id').references(() => rraStaff.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+    closedAt: timestamp('closed_at'),
+  },
+  (table) => [
+    index('rra_case_status_updated_idx').on(table.status, table.updatedAt),
+    index('rra_case_trader_created_idx').on(table.traderId, table.createdAt),
+    index('rra_case_assigned_status_idx').on(table.assignedStaffId, table.status),
+  ],
+);
+
+export const rraCaseEvent = pgTable(
+  'rra_case_event',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    caseId: text('case_id').notNull().references(() => rraCase.id, { onDelete: 'cascade' }),
+    actorStaffId: text('actor_staff_id').references(() => rraStaff.id, { onDelete: 'set null' }),
+    eventType: text('event_type').notNull(),
+    note: text('note'),
+    fromValue: text('from_value'),
+    toValue: text('to_value'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [index('rra_case_event_case_created_idx').on(table.caseId, table.createdAt)],
 );
 
 // ---------------------------------------------------------------------------
@@ -546,10 +610,18 @@ export const accountRelations = relations(account, ({ one }) => ({
   }),
 }));
 
-export const rraStaffRelations = relations(rraStaff, ({ one }) => ({
+export const rraStaffRelations = relations(rraStaff, ({ one, many }) => ({
   user: one(user, {
     fields: [rraStaff.userId],
     references: [user.id],
+  }),
+  roleAssignments: many(rraStaffRole),
+}));
+
+export const rraStaffRoleRelations = relations(rraStaffRole, ({ one }) => ({
+  staff: one(rraStaff, {
+    fields: [rraStaffRole.staffRecordId],
+    references: [rraStaff.id],
   }),
 }));
 
