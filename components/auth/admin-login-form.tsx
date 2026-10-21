@@ -48,25 +48,51 @@ export function AdminLoginForm() {
   const onSubmit = async (values: AdminLoginValues) => {
     setServerError(null);
 
-    await authClient.signIn.username(
-      { username: values.staffId, password: values.password },
-      {
-        onSuccess: async () => {
-          const result = await verifyRRAStaff();
+    // Usernames are stored lowercase in the database (e.g. "sa-001" not "SA-001")
+    const normalizedUsername = values.staffId.trim().toLowerCase();
 
-          if (!result.success) {
-            await authClient.signOut();
-            setServerError(result.error);
-            return;
-          }
+    try {
+      await authClient.signIn.username(
+        { username: normalizedUsername, password: values.password },
+        {
+          onSuccess: async () => {
+            try {
+              const result = await verifyRRAStaff();
 
-          router.push('/admin/dashboard');
+              if (!result.success) {
+                await authClient.signOut();
+                setServerError(
+                  result.error ?? 'Staff verification failed. Please contact your administrator.',
+                );
+                return;
+              }
+
+              router.push('/admin/dashboard');
+            } catch {
+              // verifyRRAStaff threw — sign out and show a safe message
+              await authClient.signOut();
+              setServerError('Staff verification failed. Please try again.');
+            }
+          },
+          onError: (ctx: { error: { message: string } }) => {
+            const msg = ctx.error?.message ?? '';
+            if (
+              msg.toLowerCase().includes('rate limit') ||
+              msg.toLowerCase().includes('too many')
+            ) {
+              setServerError('Too many login attempts. Please wait 60 seconds and try again.');
+            } else {
+              setServerError('Invalid Staff ID or password.');
+            }
+          },
         },
-        onError: (ctx: { error: { message: string } }) => {
-          setServerError(ctx.error.message);
-        },
-      },
-    );
+      );
+    } catch {
+      // Network error or misconfigured API URL — the request never reached the server
+      setServerError(
+        'Unable to reach the authentication service. Please check your connection and try again.',
+      );
+    }
   };
 
   return (
