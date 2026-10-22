@@ -13,7 +13,7 @@ import pg from 'pg';
 const { Client } = pg;
 
 const DATABASE_URL =
-  'postgresql://neondb_owner:npg_6XgNdhp1bHjP@ep-still-rain-b4rhpmff-pooler.c-6.us-east-2.aws.neon.tech/neondb?sslmode=require';
+  'postgresql://neondb_owner:npg_Hv6dFJ3QonEi@ep-still-rain-b4rhpmff-pooler.c-6.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require';
 
 const NEW_PASSWORD = 'Conf123%';
 
@@ -22,7 +22,10 @@ async function main() {
   const hashed = await hashPassword(NEW_PASSWORD);
   console.log('✅ Hash generated\n');
 
-  const client = new Client({ connectionString: DATABASE_URL });
+  const client = new Client({
+    connectionString: DATABASE_URL,
+    ssl: { rejectUnauthorized: false },
+  });
   await client.connect();
   console.log('✅ Connected to Neon DB\n');
 
@@ -43,7 +46,7 @@ async function main() {
 
     console.log(`📋 Found ${accounts.length} credential accounts to update:\n`);
     for (const acc of accounts) {
-      console.log(`  • ${acc.name} — username: ${acc.username} — email: ${acc.email}`);
+      console.log(`  • ${acc.name} — username: ${acc.username}`);
     }
 
     // Update all passwords at once
