@@ -92,6 +92,21 @@ export function SignInForm() {
 
   const isSubmitting = form.formState.isSubmitting;
 
+  const clearSessionAfterVerificationFailure = async (): Promise<void> => {
+    try {
+      const { error } = await authClient.signOut();
+      if (error) {
+        console.error('Failed to clear session after sign-in verification failed', {
+          status: error.status,
+        });
+      }
+    } catch (error) {
+      console.error('Failed to clear session after sign-in verification failed', {
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+      });
+    }
+  };
+
   const handleRoleChange = (r: Role) => {
     setRole(r);
     setRoleError('');
@@ -114,19 +129,21 @@ export function SignInForm() {
             try {
               const { data: session, error: sessionError } = await authClient.getSession();
               if (sessionError || !session?.user) {
+                await clearSessionAfterVerificationFailure();
                 setAuthError('Sign-in could not be completed. Please try again.');
                 return;
               }
 
               const userRole = (session.user as Record<string, unknown>).role as string | undefined;
               if (userRole && userRole !== role) {
-                await authClient.signOut();
+                await clearSessionAfterVerificationFailure();
                 setRoleError(`Your account is registered as a ${userRole}. Please select the correct role.`);
                 return;
               }
 
               router.replace('/dashboard');
             } catch (error) {
+              await clearSessionAfterVerificationFailure();
               console.error('Sign-in session verification failed', {
                 errorName: error instanceof Error ? error.name : 'UnknownError',
               });
