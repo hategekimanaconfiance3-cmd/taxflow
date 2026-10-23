@@ -47,6 +47,7 @@ interface DashboardTopbarProps {
 // ---------------------------------------------------------------------------
 function NotificationBell({ userId }: { userId: string }) {
     const [count, setCount] = useState(0);
+    const { lang } = useDashboardLayoutCtx();
 
     const fetchCount = useCallback(() => {
         fetch("/api/notification-count")

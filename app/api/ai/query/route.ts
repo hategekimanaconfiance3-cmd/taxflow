@@ -1,4 +1,4 @@
-﻿// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 // POST /api/ai/query — TaxFlow AI Assistant endpoint
 //
 // Security model:
@@ -83,8 +83,8 @@ function parseMessages(input: unknown): { rawMessages: Record<string, unknown>[]
         if (parsedParts.some((part) => part === null)) return null;
         const safeParts = parsedParts.filter((part) => part !== null);
         const content = safeParts
-            .filter((part) => "text" in part && typeof part.text === "string")
-            .map((part) => part.text as string)
+            .filter((part) => "text" in part && typeof (part as Record<string, unknown>).text === "string")
+            .map((part) => (part as Record<string, unknown>).text as string)
             .join("\n")
             .trim();
         totalCharacters += content.length;
@@ -269,9 +269,9 @@ export async function POST(request: Request) {
     try {
         const validatedMessages = await validateUIMessages({
             messages: parsedMessages.rawMessages,
-            tools,
+            tools: tools as Parameters<typeof validateUIMessages>[0]["tools"],
         });
-        const modelMessages = await convertToModelMessages(validatedMessages, { tools });
+        const modelMessages = await convertToModelMessages(validatedMessages, { tools: tools as Parameters<typeof convertToModelMessages>[1]["tools"] });
         const result = streamText({
             model: MODEL,
             system: isTrader ? getTraderSystemPrompt() : getRRASystemPrompt(),
