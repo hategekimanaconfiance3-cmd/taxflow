@@ -74,13 +74,13 @@ export function AdminLoginForm() {
               setServerError('Staff verification failed. Please try again.');
             }
           },
-          onError: (ctx: { error: { message: string } }) => {
-            const msg = ctx.error?.message ?? '';
-            if (
-              msg.toLowerCase().includes('rate limit') ||
-              msg.toLowerCase().includes('too many')
-            ) {
+          onError: (ctx) => {
+            const status = ctx.error.status;
+            if (status === 429) {
               setServerError('Too many login attempts. Please wait 60 seconds and try again.');
+            } else if (status !== undefined && status >= 500) {
+              console.error('Staff sign-in service failed', { status });
+              setServerError('Sign-in is temporarily unavailable. Please try again shortly.');
             } else {
               setServerError('Invalid Staff ID or password.');
             }
