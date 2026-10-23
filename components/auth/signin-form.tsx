@@ -31,12 +31,10 @@ function RoleSelector({
   value,
   onChange,
   disabled,
-  hasError,
 }: {
   value: RoleOrNull;
   onChange: (r: Role) => void;
   disabled?: boolean;
-  hasError?: boolean;
 }) {
   return (
     <div className="flex justify-center gap-2">
@@ -84,6 +82,7 @@ export function SignInForm() {
   const router = useRouter();
   const [role, setRole] = useState<RoleOrNull>(null);
   const [roleError, setRoleError] = useState('');
+  const [authError, setAuthError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
   const form = useForm<SignInValues>({
@@ -99,33 +98,59 @@ export function SignInForm() {
   };
 
   const onSubmit = async (values: SignInValues) => {
+    setAuthError('');
+    setRoleError('');
+
     if (!role) {
       setRoleError('Please select your role to continue');
       return;
     }
 
-    await authClient.signIn.username(
-      { username: values.tin, password: values.password },
-      {
-        onSuccess: async () => {
-          // Verify the user's stored role matches the selected role
-          const session = await authClient.getSession();
-          const userRole = (session?.data?.user as Record<string, unknown>)?.role as string | undefined;
+    try {
+      await authClient.signIn.username(
+        { username: values.tin.trim(), password: values.password },
+        {
+          onSuccess: async () => {
+            try {
+              const { data: session, error: sessionError } = await authClient.getSession();
+              if (sessionError || !session?.user) {
+                setAuthError('Sign-in could not be completed. Please try again.');
+                return;
+              }
 
-          if (userRole && userRole !== role) {
-            // Role mismatch — sign out and show error
-            await authClient.signOut();
-            setRoleError(`Your account is registered as a ${userRole}. Please select the correct role.`);
-            return;
-          }
+              const userRole = (session.user as Record<string, unknown>).role as string | undefined;
+              if (userRole && userRole !== role) {
+                await authClient.signOut();
+                setRoleError(`Your account is registered as a ${userRole}. Please select the correct role.`);
+                return;
+              }
 
-          router.push('/dashboard');
+              router.replace('/dashboard');
+            } catch (error) {
+              console.error('Sign-in session verification failed', {
+                errorName: error instanceof Error ? error.name : 'UnknownError',
+              });
+              setAuthError('Sign-in is temporarily unavailable. Please try again shortly.');
+            }
+          },
+          onError: (ctx) => {
+            const status = ctx.error.status;
+            setAuthError(
+              status === 429
+                ? 'Too many sign-in attempts. Please wait a moment and try again.'
+                : status !== undefined && status >= 500
+                  ? 'Sign-in is temporarily unavailable. Please try again shortly.'
+                  : 'Invalid TIN or password.',
+            );
+          },
         },
-        onError: (ctx: { error: { message: string } }) => {
-          form.setError('tin', { message: ctx.error.message });
-        },
-      },
-    );
+      );
+    } catch (error) {
+      console.error('Sign-in request failed', {
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+      });
+      setAuthError('Sign-in is temporarily unavailable. Please try again shortly.');
+    }
   };
 
   return (
@@ -134,7 +159,7 @@ export function SignInForm() {
         {/* ── Card Header: title + role selector ─────────────── */}
         <div className="border-b border-gray-100 bg-white px-8 py-5 text-center space-y-4">
           <p className="text-sm font-medium text-gray-500 tracking-wide">Sign in to continue</p>
-          <RoleSelector value={role} onChange={handleRoleChange} hasError={!!roleError} />
+          <RoleSelector value={role} onChange={handleRoleChange} />
           {roleError && <p className="text-xs text-red-500 font-medium mt-1">{roleError}</p>}
         </div>
 
@@ -195,11 +220,16 @@ export function SignInForm() {
 
               <Button
                 type="submit"
-                disabled={isSubmitting || !role}
+                disabled={isSubmitting}
                 className="w-full h-10 bg-gray-900 text-white hover:bg-gray-800"
               >
                 {isSubmitting ? <Loader2 className="animate-spin" /> : 'Sign in'}
               </Button>
+              {authError && (
+                <p role="alert" aria-live="polite" className="text-sm text-red-600">
+                  {authError}
+                </p>
+              )}
             </form>
           </Form>
 
