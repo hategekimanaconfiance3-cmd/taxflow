@@ -18,7 +18,8 @@ if (!process.env.BETTER_AUTH_SECRET) {
   }
 }
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+// Initialize Resend lazily to avoid crashing if RESEND_API_KEY is not set in production
+const getResend = () => new Resend(process.env.RESEND_API_KEY ?? 're_placeholder');
 
 export const auth = betterAuth({
   baseURL: process.env.BETTER_AUTH_URL || process.env.NEXT_PUBLIC_APP_URL,
@@ -51,7 +52,7 @@ export const auth = betterAuth({
     revokeSessionsOnPasswordReset: true,
     sendResetPassword: async ({ user, url }) => {
       try {
-        await resend.emails.send({
+        await getResend().emails.send({
           from: 'TaxFlow <onboarding@resend.dev>',
           to: user.email,
           subject: 'Reset your TaxFlow password',
@@ -69,7 +70,7 @@ export const auth = betterAuth({
   emailVerification: {
     sendVerificationEmail: async ({ user, url }) => {
       try {
-        await resend.emails.send({
+        await getResend().emails.send({
           from: 'TaxFlow <onboarding@resend.dev>',
           to: user.email,
           subject: 'Verify your TaxFlow email',
@@ -113,7 +114,7 @@ export const auth = betterAuth({
         }
 
         try {
-          await resend.emails.send({
+          await getResend().emails.send({
             from: 'TaxFlow <onboarding@resend.dev>',
             to: email,
             subject,
