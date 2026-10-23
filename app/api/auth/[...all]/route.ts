@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+export const dynamic = 'force-dynamic';
+
 // Use dynamic import so any module-level crash in auth is caught by our try/catch
 async function getHandler() {
   const { auth } = await import('@/lib/auth');
