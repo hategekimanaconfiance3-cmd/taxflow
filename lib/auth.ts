@@ -3,7 +3,6 @@ import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { username } from 'better-auth/plugins';
 import { phoneNumber } from 'better-auth/plugins';
 import { emailOTP } from 'better-auth/plugins';
-import { nextCookies } from 'better-auth/next-js';
 import db from '@/db/drizzle';
 import {
   user,
@@ -101,7 +100,6 @@ export const auth = betterAuth({
     },
   },
   plugins: [
-    nextCookies(),
     username({
       usernameValidator: (username) => {
         // Allow alphanumeric, hyphens, underscores, and dots (for RRA staff IDs like SA-001)

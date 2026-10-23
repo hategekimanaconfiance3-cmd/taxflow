@@ -2,17 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
-// Use dynamic import so any module-level crash in auth is caught by our try/catch
-async function getHandler() {
-  const { auth } = await import('@/lib/auth');
-  const { toNextJsHandler } = await import('better-auth/next-js');
-  return toNextJsHandler(auth);
-}
-
 export async function GET(req: NextRequest) {
   try {
-    const handler = await getHandler();
-    return await handler.GET(req);
+    const { auth } = await import('@/lib/auth');
+    return await auth.handler(req);
   } catch (error) {
     console.error('[Auth GET Error]', error);
     return NextResponse.json(
@@ -24,8 +17,8 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const handler = await getHandler();
-    return await handler.POST(req);
+    const { auth } = await import('@/lib/auth');
+    return await auth.handler(req);
   } catch (error) {
     console.error('[Auth POST Error]', error);
     return NextResponse.json(
