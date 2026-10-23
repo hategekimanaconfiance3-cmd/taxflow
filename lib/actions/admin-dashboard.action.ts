@@ -19,7 +19,7 @@ import { requireRRASession } from "@/lib/auth-guard";
 // ---------------------------------------------------------------------------
 
 export async function getDashboardOverview(from?: Date, to?: Date) {
-    await requireRRASession("compliance_officer", "audit_officer", "reporting_officer", "director_executive", "tax_compliance_officer", "audit_investigation_officer", "data_ai_analyst", "payments_reconciliation_officer", "product_traceability_officer", "customs_import_officer");
+    await requireRRASession("super_admin", "compliance_officer", "audit_officer", "reporting_officer", "director_executive", "tax_compliance_officer", "audit_investigation_officer", "data_ai_analyst", "payments_reconciliation_officer", "product_traceability_officer", "customs_import_officer");
 
     // Build date filter conditions for each table
     const txnDateFilter = from && to ? and(gte(transaction.createdAt, from), lte(transaction.createdAt, to)) : from ? gte(transaction.createdAt, from) : to ? lte(transaction.createdAt, to) : undefined;
@@ -408,7 +408,7 @@ export async function getDashboardOverview(from?: Date, to?: Date) {
 // ---------------------------------------------------------------------------
 
 export async function adminGlobalSearch(query: string) {
-    await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
+    await requireRRASession("super_admin", "compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
 
     if (!query?.trim() || query.trim().length < 2) {
         return { traders: [], transactions: [], imports: [], disputes: [] };
