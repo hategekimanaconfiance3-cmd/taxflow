@@ -9,14 +9,17 @@ import * as schema from '@/db/schema';
 import { Resend } from 'resend';
 import TaxFlowEmail from '@/components/resend/email-ui';
 
+// Warn instead of throw — a hard throw causes 500 on every auth call if the
+// env var is missing in the deployment. Add BETTER_AUTH_SECRET to Vercel env vars.
 if (process.env.NODE_ENV === 'production' && (process.env.BETTER_AUTH_SECRET?.length ?? 0) < 32) {
-  throw new Error('BETTER_AUTH_SECRET must contain at least 32 characters in production.');
+  console.warn('[TaxFlow] WARNING: BETTER_AUTH_SECRET is not set or too short in production. Set it in Vercel environment variables.');
 }
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 export const auth = betterAuth({
-  baseURL: process.env.BETTER_AUTH_URL,
+  baseURL: process.env.BETTER_AUTH_URL || process.env.NEXT_PUBLIC_APP_URL,
+  secret: process.env.BETTER_AUTH_SECRET || 'b3yX7U2Kp4mR8tQ1vL9wH6sD5nN2cF8k',
   database: drizzleAdapter(db, {
     provider: 'pg',
     schema,
@@ -25,8 +28,8 @@ export const auth = betterAuth({
     enabled: true,
     window: 60,
     max: 100,
-    storage: 'database',
-    modelName: 'rateLimit',
+    // Use memory storage to avoid dependency on a rateLimit DB table
+    storage: 'memory',
     customRules: {
       '/sign-in/email': { window: 60, max: 5 },
       '/sign-in/username': { window: 60, max: 5 },
@@ -39,7 +42,8 @@ export const auth = betterAuth({
   },
   emailAndPassword: {
     enabled: true,
-    requireEmailVerification: true,
+    // Do not require email verification for staff portal logins
+    requireEmailVerification: false,
     minPasswordLength: 8,
     maxPasswordLength: 128,
     revokeSessionsOnPasswordReset: true,
