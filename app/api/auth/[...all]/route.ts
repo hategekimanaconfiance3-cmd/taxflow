@@ -1,30 +1,34 @@
-import { auth } from '@/lib/auth';
-import { toNextJsHandler } from 'better-auth/next-js';
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
-// Wrap with error logging so we can see the actual crash reason
-const handler = toNextJsHandler(auth);
+// Use dynamic import so any module-level crash in auth is caught by our try/catch
+async function getHandler() {
+  const { auth } = await import('@/lib/auth');
+  const { toNextJsHandler } = await import('better-auth/next-js');
+  return toNextJsHandler(auth);
+}
 
-export async function GET(req: NextRequest, ctx: { params: Promise<{ all: string[] }> }) {
+export async function GET(req: NextRequest) {
   try {
-    return await handler.GET(req, ctx);
+    const handler = await getHandler();
+    return await handler.GET(req);
   } catch (error) {
-    console.error('[Auth API GET Error]', error);
-    return new Response(
-      JSON.stringify({ error: 'Auth service error', detail: String(error) }),
-      { status: 500, headers: { 'Content-Type': 'application/json' } },
+    console.error('[Auth GET Error]', error);
+    return NextResponse.json(
+      { error: 'Auth service unavailable', detail: String(error) },
+      { status: 500 },
     );
   }
 }
 
-export async function POST(req: NextRequest, ctx: { params: Promise<{ all: string[] }> }) {
+export async function POST(req: NextRequest) {
   try {
-    return await handler.POST(req, ctx);
+    const handler = await getHandler();
+    return await handler.POST(req);
   } catch (error) {
-    console.error('[Auth API POST Error]', error);
-    return new Response(
-      JSON.stringify({ error: 'Auth service error', detail: String(error) }),
-      { status: 500, headers: { 'Content-Type': 'application/json' } },
+    console.error('[Auth POST Error]', error);
+    return NextResponse.json(
+      { error: 'Auth service unavailable', detail: String(error) },
+      { status: 500 },
     );
   }
 }
