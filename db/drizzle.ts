@@ -1,4 +1,3 @@
-import 'dotenv/config';
 import * as schema from './schema';
 
 import { Pool } from '@neondatabase/serverless';
