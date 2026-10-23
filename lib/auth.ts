@@ -5,7 +5,13 @@ import { phoneNumber } from 'better-auth/plugins';
 import { emailOTP } from 'better-auth/plugins';
 import { nextCookies } from 'better-auth/next-js';
 import db from '@/db/drizzle';
-import * as schema from '@/db/schema';
+import {
+  user,
+  session,
+  account,
+  verification,
+  rateLimit,
+} from '@/db/schema';
 import { Resend } from 'resend';
 import TaxFlowEmail from '@/components/resend/email-ui';
 
@@ -25,7 +31,16 @@ export const auth = betterAuth({
   baseURL: process.env.BETTER_AUTH_URL || process.env.NEXT_PUBLIC_APP_URL,
   database: drizzleAdapter(db, {
     provider: 'pg',
-    schema,
+    // Only pass the auth-relevant tables — passing the full schema (51 tables)
+    // can cause the adapter to fail at initialization time in production.
+    schema: {
+      user,
+      session,
+      account,
+      verification,
+      rateLimit,
+    },
+    usePlural: false,
   }),
   rateLimit: {
     enabled: true,
