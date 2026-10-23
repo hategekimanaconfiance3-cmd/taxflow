@@ -5,11 +5,8 @@ const client = new Client({
   ssl: { rejectUnauthorized: false }
 });
 await client.connect();
-
 const { rows } = await client.query(
   "SELECT table_name FROM information_schema.tables WHERE table_schema='public' ORDER BY table_name"
 );
-console.log('All tables in Neon DB:');
-rows.forEach(r => console.log(' ', r.table_name));
-
+console.log('Tables:', rows.map(r => r.table_name).join(', '));
 await client.end();
