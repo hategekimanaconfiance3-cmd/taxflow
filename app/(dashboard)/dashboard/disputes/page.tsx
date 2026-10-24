@@ -1,24 +1,11 @@
 import { requireApprovedClearance } from '@/lib/auth-guard';
-import { getOutgoingTransactions } from '@/lib/actions/transaction.action';
+import { getDisputableTransactions } from '@/lib/actions/dispute.action';
 import { FileDisputeForm } from '@/components/dashboard/dispute-form/file-dispute-form';
 
 export default async function DisputesPage() {
   await requireApprovedClearance();
 
-  const outgoing = await getOutgoingTransactions();
-
-  // Only confirmed/completed transactions can be disputed
-  const disputableTransactions = outgoing
-    .filter((t) => ['confirmed', 'completed'].includes(t.status))
-    .map((t) => ({
-      id: t.id,
-      productName: t.productName,
-      quantity: t.quantity,
-      totalAmount: Number(t.totalAmount),
-      createdAt: t.createdAt instanceof Date
-        ? t.createdAt.toISOString()
-        : String(t.createdAt),
-    }));
+  const disputableTransactions = await getDisputableTransactions();
 
   return (
     <div className="space-y-6">

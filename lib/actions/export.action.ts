@@ -87,7 +87,13 @@ export async function generateTaxReportPDF(): Promise<{
 
     // 5. Recent payments (last 10)
     const recentPayments = await db
-        .select()
+        .select({
+            amount: taxPayment.amount,
+            method: taxPayment.method,
+            reference: taxPayment.reference,
+            status: taxPayment.status,
+            createdAt: taxPayment.createdAt,
+        })
         .from(taxPayment)
         .where(eq(taxPayment.businessId, userId))
         .orderBy(desc(taxPayment.createdAt))

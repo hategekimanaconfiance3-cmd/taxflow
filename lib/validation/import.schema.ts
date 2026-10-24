@@ -4,7 +4,9 @@ const positiveQuantity = z.number().finite().positive().max(1_000_000_000);
 export const importDeclarationIdSchema = z.string().uuid();
 
 export const declareImportSchema = z.object({
-  productId: z.string().uuid(),
+  // Product IDs are stored as text and production seed data uses stable IDs
+  // such as "prod-soap-001", not only UUIDs.
+  productId: z.string().trim().min(1).max(128),
   expectedQuantity: positiveQuantity,
   customsRef: z.string().trim().max(200).optional(),
   originCountry: z.string().trim().max(100).optional(),

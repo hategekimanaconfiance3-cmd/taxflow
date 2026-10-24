@@ -1,8 +1,8 @@
 "use server";
 
-import { eq, desc, and, or, sql } from "drizzle-orm";
+import { eq, desc, and, or, sql, gte, inArray } from "drizzle-orm";
 import db from "@/db/drizzle";
-import { auditLog, dispute, notification, stock, stockMovement, transaction, user, vatRecord } from "@/db/schema";
+import { auditLog, dispute, notification, product, stock, stockMovement, transaction, user, vatRecord } from "@/db/schema";
 import { requireTraderSession, requireRRASession } from "@/lib/auth-guard";
 import { emitToUser } from "@/lib/realtime";
 import { getSystemConfig } from "@/lib/actions/system-config.action";
@@ -20,6 +20,57 @@ function generateRefNumber(): string {
         ref += chars[Math.floor(Math.random() * chars.length)];
     }
     return ref;
+}
+
+/** Return transactions the current trader can actually dispute. */
+export async function getDisputableTransactions() {
+    const session = await requireTraderSession();
+    const disputeCutoff = new Date(Date.now() - DISPUTE_WINDOW_HOURS * 60 * 60 * 1000);
+
+    const transactions = await db
+        .select({
+            id: transaction.id,
+            productName: product.name,
+            quantity: transaction.quantity,
+            totalAmount: transaction.totalAmount,
+            createdAt: transaction.createdAt,
+        })
+        .from(transaction)
+        .innerJoin(product, eq(transaction.productId, product.id))
+        .where(and(
+            or(eq(transaction.sellerId, session.user.id), eq(transaction.buyerId, session.user.id)),
+            inArray(transaction.status, ["confirmed", "completed"]),
+            gte(transaction.confirmedAt, disputeCutoff),
+        ))
+        .orderBy(desc(transaction.createdAt));
+
+    if (transactions.length === 0) return [];
+
+    const transactionIds = transactions.map(({ id }) => id);
+    const [activeDisputes, vatRecords] = await Promise.all([
+        db.select({ transactionId: dispute.transactionId })
+            .from(dispute)
+            .where(and(
+                inArray(dispute.transactionId, transactionIds),
+                sql`${dispute.status} NOT IN ('resolved', 'dismissed')`,
+            )),
+        db.select({ transactionId: vatRecord.transactionId })
+            .from(vatRecord)
+            .where(and(
+                inArray(vatRecord.transactionId, transactionIds),
+                eq(vatRecord.businessId, session.user.id),
+            )),
+    ]);
+
+    const disputedIds = new Set(activeDisputes.map(({ transactionId }) => transactionId));
+    const transactionsWithVat = new Set(vatRecords.map(({ transactionId }) => transactionId));
+    return transactions
+        .filter(({ id }) => !disputedIds.has(id) && transactionsWithVat.has(id))
+        .map((txn) => ({
+            ...txn,
+            totalAmount: Number(txn.totalAmount),
+            createdAt: txn.createdAt.toISOString(),
+        }));
 }
 
 // ---------------------------------------------------------------------------

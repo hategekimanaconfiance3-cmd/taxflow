@@ -94,6 +94,7 @@ export function FileDisputeForm({ transactions }: FileDisputeFormProps) {
                     <Select
                         value={transactionId}
                         onValueChange={setTransactionId}
+                        disabled={transactions.length === 0 || isPending}
                     >
                         <SelectTrigger>
                             <SelectValue placeholder="Select a transaction to dispute" />
@@ -106,6 +107,11 @@ export function FileDisputeForm({ transactions }: FileDisputeFormProps) {
                             ))}
                         </SelectContent>
                     </Select>
+                    {transactions.length === 0 && (
+                        <p className="text-sm text-muted-foreground">
+                            No confirmed transactions are currently eligible to dispute. Disputes must be filed within 48 hours of confirmation.
+                        </p>
+                    )}
                 </div>
 
                 <div className="space-y-2">

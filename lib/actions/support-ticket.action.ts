@@ -17,16 +17,23 @@ export async function createTicket(data: {
 }): Promise<{ success: true; id: string }> {
     const session = await requireTraderSession();
 
-    if (!data.subject?.trim()) throw new Error("Subject is required.");
-    if (!data.description?.trim()) throw new Error("Description is required.");
+    const categories = ["general", "tax_query", "account_issue", "system_bug", "other"];
+    if (!categories.includes(data.category)) throw new Error("Choose a valid ticket category.");
+
+    const subject = data.subject?.trim();
+    const description = data.description?.trim();
+    if (!subject) throw new Error("Subject is required.");
+    if (subject.length > 200) throw new Error("Subject must be 200 characters or fewer.");
+    if (!description) throw new Error("Description is required.");
+    if (description.length > 10_000) throw new Error("Description must be 10,000 characters or fewer.");
 
     const [ticket] = await db
         .insert(supportTicket)
         .values({
             traderId: session.user.id,
             category: data.category,
-            subject: data.subject.trim(),
-            description: data.description.trim(),
+            subject,
+            description,
         })
         .returning({ id: supportTicket.id });
 
@@ -37,7 +44,7 @@ export async function createTicket(data: {
         targetId: ticket.id,
         metadata: {
             category: data.category,
-            subject: data.subject.trim(),
+            subject,
         },
     });
 
