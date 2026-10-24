@@ -1054,6 +1054,7 @@ export async function lookupBuyer(buyerTin: string) {
       role: buyer.role,
       businessType: buyer.businessType,
       clearanceStatus: buyer.clearanceStatus,
+      isActive: buyer.isActive,
       compliancePct: buyerCompliancePct,
       isEligible: isEligible && buyer.clearanceStatus === 'approved',
       reason:
