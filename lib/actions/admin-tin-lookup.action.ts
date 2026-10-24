@@ -25,8 +25,7 @@ import { requireRRAPermission, type RRARole } from "@/lib/auth-guard";
 import { logAudit } from "@/lib/audit";
 import { hasRRAPermission } from "@/lib/rra-rbac";
 import { consumeRateLimit, getRequestIdentity } from "@/lib/rate-limit";
-
-const tinSchema = z.string().trim().min(5).max(32).regex(/^[A-Za-z0-9-]+$/);
+import { TIN_SEARCH_INPUT_MESSAGE, tinSearchInputSchema } from "@/lib/validation/tin-search";
 
 type LookupData = {
   profile: {
@@ -59,6 +58,76 @@ type LookupData = {
   stock?: Array<{ productName: string; unit: string; quantity: number; price: number | null; source: string | null }>;
   corrections?: Array<{ productName: string; movementType: string; quantityDelta: number; reason: string | null; createdAt: Date }>;
 };
+
+type TinSearchFailureStatus = "INVALID_TIN" | "RATE_LIMITED" | "SERVER_ERROR";
+
+type TinSearchFailure = {
+  success: false;
+  status: TinSearchFailureStatus;
+  message: string;
+  correlationId: string;
+};
+
+type TinSearchFound = {
+  success: true;
+  status: "FOUND";
+  result: LookupData;
+  analysis: string | null;
+  aiUnavailable: boolean;
+  correlationId: string;
+};
+
+type TinSearchNotFound = {
+  success: true;
+  status: "NOT_FOUND";
+  result: null;
+  analysis: null;
+  aiUnavailable: false;
+  correlationId: string;
+};
+
+export type TinSearchResponse = TinSearchFailure | TinSearchFound | TinSearchNotFound;
+
+type TinSearchStage = "rate_limit" | "taxpayer_lookup_and_audit" | "ai_summary";
+
+function getPostgresErrorCode(error: unknown): string | undefined {
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && typeof current === "object" && current !== null; depth += 1) {
+    const record = current as Record<string, unknown>;
+    if (typeof record.code === "string") return record.code;
+    current = record.cause;
+  }
+  return undefined;
+}
+
+function getMissingRelation(error: unknown): string | undefined {
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && typeof current === "object" && current !== null; depth += 1) {
+    const record = current as Record<string, unknown>;
+    if (typeof record.message === "string") {
+      const match = record.message.match(/relation ["'](?:public\.)?([a-z_]+)["'] does not exist/i);
+      if (match?.[1]) return match[1];
+    }
+    current = record.cause;
+  }
+  return undefined;
+}
+
+function logTinSearchFailure(error: unknown, context: { correlationId: string; stage: TinSearchStage }): void {
+  if (process.env.NODE_ENV !== "production") {
+    console.error("TIN taxpayer search failed", context, error);
+    return;
+  }
+
+  const errorCode = getPostgresErrorCode(error);
+  const missingRelation = errorCode === "42P01" ? getMissingRelation(error) : undefined;
+  console.error("TIN taxpayer search failed", {
+    ...context,
+    errorName: error instanceof Error ? error.name : "UnknownError",
+    ...(errorCode ? { databaseErrorCode: errorCode } : {}),
+    ...(missingRelation ? { missingRelation } : {}),
+  });
+}
 
 function roleHasPermission(roles: RRARole[], permission: Parameters<typeof hasRRAPermission>[1]) {
   // Super Admin is a system-management role. Taxpayer-data access requires a
@@ -242,9 +311,10 @@ export async function getTaxpayerSearchHistory() {
   return rows.map((row) => {
     let metadata: Record<string, unknown> = {};
     try { metadata = row.metadata ? JSON.parse(row.metadata) as Record<string, unknown> : {}; } catch { /* Ignore malformed legacy metadata. */ }
+    const outcome = metadata.outcome === "found" ? "Found" : metadata.outcome === "not_found" ? "No match" : "Search status unavailable";
     return {
       taxpayerName: row.taxpayerName ?? row.personName ?? (metadata.outcome === "not_found" ? "No match found" : "Taxpayer record"),
-      outcome: metadata.outcome === "found" ? "Found" : "No match",
+      outcome,
       categories: Array.isArray(metadata.categoriesAccessed) ? metadata.categoriesAccessed.filter((value): value is string => typeof value === "string") : [],
       createdAt: row.createdAt,
     };
@@ -252,8 +322,8 @@ export async function getTaxpayerSearchHistory() {
 }
 
 async function getAuthorizedTinResult(input: string, staff: Awaited<ReturnType<typeof requireRRAPermission>>["staff"], correlationId: string) {
-  const parsedTin = tinSchema.safeParse(input);
-  if (!parsedTin.success) throw new Error("Enter a valid TIN using 5 to 32 letters, numbers, or hyphens.");
+  const parsedTin = tinSearchInputSchema.safeParse(input);
+  if (!parsedTin.success) throw new Error(TIN_SEARCH_INPUT_MESSAGE);
 
   const tin = parsedTin.data;
   const staffRoles = staff.clearanceRoles as RRARole[];
@@ -303,25 +373,55 @@ async function generateTaxpayerAnswer(result: LookupData, question: string, role
 }
 
 /** Search, permission-filter, audit, and summarize an RRA taxpayer record. */
-export async function searchTaxpayerIntelligence(input: string) {
+export async function searchTaxpayerIntelligence(input: string): Promise<TinSearchResponse> {
   const { user: actor, staff } = await requireRRAPermission("taxpayer.intelligence.search");
-  const requestHeaders = await headers();
-  const limit = await consumeRateLimit("tin-intelligence", `${actor.id}:${getRequestIdentity(requestHeaders)}`, 20, 60);
-  if (!limit.allowed) throw new Error("TIN search limit reached. Please wait a moment before trying again.");
   const correlationId = randomUUID();
-  const result = await getAuthorizedTinResult(input, staff, correlationId);
-  if (!result) return { result: null, analysis: null, aiUnavailable: false, correlationId };
+  const parsedTin = tinSearchInputSchema.safeParse(input);
+  if (!parsedTin.success) {
+    return { success: false, status: "INVALID_TIN", message: TIN_SEARCH_INPUT_MESSAGE, correlationId };
+  }
+
+  let stage: TinSearchStage = "rate_limit";
+  let result: LookupData | null;
+  try {
+    const requestHeaders = await headers();
+    const limit = await consumeRateLimit("tin-intelligence", `${actor.id}:${getRequestIdentity(requestHeaders)}`, 20, 60);
+    if (!limit.allowed) {
+      return {
+        success: false,
+        status: "RATE_LIMITED",
+        message: "TIN search limit reached. Please wait a moment before trying again.",
+        correlationId,
+      };
+    }
+
+    stage = "taxpayer_lookup_and_audit";
+    result = await getAuthorizedTinResult(parsedTin.data, staff, correlationId);
+  } catch (error) {
+    logTinSearchFailure(error, { correlationId, stage });
+    return {
+      success: false,
+      status: "SERVER_ERROR",
+      message: `Search temporarily unavailable. Please try again. Reference: ${correlationId}.`,
+      correlationId,
+    };
+  }
+
+  if (!result) {
+    return { success: true, status: "NOT_FOUND", result: null, analysis: null, aiUnavailable: false, correlationId };
+  }
 
   let analysis: string | null = null;
   let aiUnavailable = false;
+  stage = "ai_summary";
   try {
     analysis = await generateTaxpayerAnswer(result, "Provide an initial role-specific summary of this taxpayer record.", staff.clearanceRoles as RRARole[]);
     aiUnavailable = !analysis;
   } catch (error) {
-    console.error("TIN intelligence summary unavailable", { userId: actor.id, correlationId, errorName: error instanceof Error ? error.name : typeof error });
+    logTinSearchFailure(error, { correlationId, stage });
     aiUnavailable = true;
   }
-  return { result, analysis, aiUnavailable, correlationId };
+  return { success: true, status: "FOUND", result, analysis, aiUnavailable, correlationId };
 }
 
 /** Re-check permissions and reload currently authorized fields for every follow-up. */

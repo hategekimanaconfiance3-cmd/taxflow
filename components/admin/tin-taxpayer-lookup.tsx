@@ -7,8 +7,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { TIN_SEARCH_INPUT_MESSAGE, tinSearchInputSchema } from "@/lib/validation/tin-search";
 
-type LookupResult = NonNullable<Awaited<ReturnType<typeof searchTaxpayerIntelligence>>["result"]>;
+type LookupResult = Extract<Awaited<ReturnType<typeof searchTaxpayerIntelligence>>, { status: "FOUND" }>["result"];
 
 const money = (amount: number) => new Intl.NumberFormat("en-RW", { style: "currency", currency: "RWF", maximumFractionDigits: 0 }).format(amount);
 const date = (value: Date | string) => new Date(value).toLocaleDateString();
@@ -76,8 +77,7 @@ export function TinTaxpayerLookup() {
     getTaxpayerSearchHistory().then(setHistory).catch(() => setHistory([]));
   }, []);
 
-  function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  function runSearch(searchTin: string) {
     setError("");
     setResult(null);
     setAnalysis(null);
@@ -85,18 +85,41 @@ export function TinTaxpayerLookup() {
     setFollowupAnswer("");
     startTransition(async () => {
       try {
-        const response = await searchTaxpayerIntelligence(tin);
-        getTaxpayerSearchHistory().then(setHistory).catch(() => undefined);
-        if (!response.result) setError("No taxpayer record was found with that TIN.");
-        else {
+        const response = await searchTaxpayerIntelligence(searchTin);
+        if (response.status === "FOUND") {
           setResult(response.result);
           setAnalysis(response.analysis);
           setAiUnavailable(response.aiUnavailable);
+          getTaxpayerSearchHistory().then(setHistory).catch(() => undefined);
+        } else if (response.status === "NOT_FOUND") {
+          setError("No taxpayer found for this TIN.");
+          getTaxpayerSearchHistory().then(setHistory).catch(() => undefined);
+        } else {
+          setError(response.message);
         }
-      } catch (caught) {
-        setError(caught instanceof Error ? caught.message : "TIN search failed. Please try again.");
+      } catch {
+        setError("Search temporarily unavailable. Please try again.");
       }
     });
+  }
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const parsedTin = tinSearchInputSchema.safeParse(tin);
+    if (!parsedTin.success) {
+      setError(TIN_SEARCH_INPUT_MESSAGE);
+      return;
+    }
+    runSearch(parsedTin.data);
+  }
+
+  function retrySearch() {
+    const parsedTin = tinSearchInputSchema.safeParse(tin);
+    if (!parsedTin.success) {
+      setError(TIN_SEARCH_INPUT_MESSAGE);
+      return;
+    }
+    runSearch(parsedTin.data);
   }
 
   function submitFollowup(event: FormEvent<HTMLFormElement>) {
@@ -119,9 +142,9 @@ export function TinTaxpayerLookup() {
     <Card>
       <CardHeader><CardTitle className="flex items-center gap-2 text-base"><UserRoundSearch className="h-4 w-4" />Taxpayer Intelligence Search</CardTitle><p className="text-sm text-muted-foreground">Search by TIN. Results and AI analysis are limited to the information your verified RRA roles may access.</p></CardHeader>
       <CardContent><form className="flex flex-col gap-2 sm:flex-row" onSubmit={submit}>
-        <Input value={tin} onChange={(event) => setTin(event.target.value)} placeholder="Enter taxpayer TIN number" inputMode="numeric" autoComplete="off" maxLength={32} aria-label="Taxpayer TIN" />
-        <Button type="submit" disabled={isPending || tin.trim().length < 5} className="gap-2 sm:min-w-32">{isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}{isPending ? "Searching…" : "Search TIN"}</Button>
-      </form>{error && <p role="alert" className="mt-3 text-sm text-destructive">{error}</p>}</CardContent>
+        <Input value={tin} onChange={(event) => setTin(event.target.value)} placeholder="Enter taxpayer TIN number" inputMode="numeric" autoComplete="off" maxLength={32} aria-label="Taxpayer TIN" aria-invalid={Boolean(error)} />
+        <Button type="submit" disabled={isPending} className="gap-2 sm:min-w-32">{isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}{isPending ? "Searching…" : "Search TIN"}</Button>
+      </form>{isPending && <p role="status" className="mt-3 text-sm text-muted-foreground">Searching taxpayer information…</p>}{error && <div role="alert" className="mt-3 space-y-2 text-sm text-destructive"><p>{error}</p>{error.startsWith("Search temporarily unavailable") && <Button type="button" variant="outline" disabled={isPending} onClick={retrySearch} className="text-foreground">Try again</Button>}</div>}</CardContent>
     </Card>
     {history.length > 0 && <Card>
       <CardHeader className="pb-2"><CardTitle className="text-sm">Your Recent TIN Searches</CardTitle></CardHeader>
