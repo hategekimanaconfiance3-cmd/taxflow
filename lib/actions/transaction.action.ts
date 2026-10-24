@@ -191,9 +191,11 @@ async function createSaleForConfirmationInternal(data: {
   transactionType?: 'STANDARD_B2B_SALE' | 'DIRECT_BULK_SALE';
   invoiceReference?: string;
   deliveryInformation?: { address?: string; schedule?: string; notes?: string };
-}) {
+}, setFailureStage: (stage: string) => void) {
+  setFailureStage('verify seller clearance');
   const { suspended, clearanceStatus, ...session } = await requireApprovedClearance();
   if (suspended) throw new Error(`Your account is ${clearanceStatus}. Cannot create transactions.`);
+  setFailureStage('expire stale sales');
   await expireStalePendingTransactions();
   const sellerRole = session.user.role as TraderRole;
   if (sellerRole === 'retailer') throw new Error('Retailers must use consumer sales instead.');
@@ -218,6 +220,7 @@ async function createSaleForConfirmationInternal(data: {
     throw new Error('Delivery information fields must be text with at most 500 characters.');
   }
 
+  setFailureStage('look up buyer');
   const [buyer] = await db.select().from(user).where(eq(user.tinNumber, data.buyerTin)).limit(1);
   if (!buyer) throw new Error('Buyer not found with that TIN.');
   if (buyer.id === session.user.id) throw new Error('Cannot sell to yourself.');
@@ -226,12 +229,14 @@ async function createSaleForConfirmationInternal(data: {
   validateRoleCompatibility(sellerRole, buyer.role as TraderRole);
   if (buyer.clearanceStatus !== 'approved') throw new Error(`Buyer account is ${buyer.clearanceStatus}; RRA approval is required.`);
 
+  setFailureStage('check tax compliance');
   const [sellerCompliance, buyerCompliance, config] = await Promise.all([
     getBusinessComplianceStatus(session.user.id), getBusinessComplianceStatus(buyer.id), getSystemConfig(),
   ]);
   if (!sellerCompliance.isCompliant) throw new Error(`You must pay at least ${sellerCompliance.threshold}% of your tax to sell. Current: ${sellerCompliance.compliancePct}%.`);
   if (!buyerCompliance.isCompliant) throw new Error(`Buyer has not met tax compliance (${buyerCompliance.compliancePct}% paid). They must pay at least ${buyerCompliance.threshold}% to purchase.`);
 
+  setFailureStage('check product price and access');
   const validatedItems = await Promise.all(data.items.map(async (item) => {
     const priceCheck = await validatePriceFloor(item.productId, session.user.id, item.unitPrice);
     if (!priceCheck.valid) throw new Error(priceCheck.error ?? 'Price is below the AI-computed minimum.');
@@ -247,6 +252,7 @@ async function createSaleForConfirmationInternal(data: {
 
   const transactionType = data.transactionType ?? 'STANDARD_B2B_SALE';
   if (!['STANDARD_B2B_SALE', 'DIRECT_BULK_SALE'].includes(transactionType)) throw new Error('Invalid transaction type.');
+  setFailureStage('reserve inventory and save sale');
   const expiresAt = new Date(Date.now() + config.buyerConfirmationWindowHours * 60 * 60 * 1000);
   const created = await withTransactionRetry(() => db.transaction(async (tx) => {
     const lockedStocks = await tx.select().from(stock).where(and(
@@ -345,13 +351,14 @@ export async function createSaleForConfirmation(data: {
   invoiceReference?: string;
   deliveryInformation?: { address?: string; schedule?: string; notes?: string };
 }): Promise<SaleCreationResult> {
+  let failureStage = 'validate sale request';
   try {
-    return { success: true, transactions: await createSaleForConfirmationInternal(data) };
+    return { success: true, transactions: await createSaleForConfirmationInternal(data, (stage) => { failureStage = stage; }) };
   } catch (error) {
     const reference = crypto.randomUUID();
     const errorCode = typeof error === 'object' && error !== null && 'code' in error
       && typeof error.code === 'string' ? error.code : null;
-    console.error(`[sale-create:${reference}] Sale creation failed (${errorCode ?? 'server validation or unexpected error'})`);
+    console.error(`[sale-create:${reference}] Sale creation failed during ${failureStage} (${errorCode ?? 'server validation or unexpected error'})`);
 
     // Domain validation/auth errors are already safe messages created by this action.
     const message = error instanceof Error && [
@@ -363,7 +370,7 @@ export async function createSaleForConfirmation(data: {
       'A selected product', 'Sale total is', 'Invalid transaction type', 'Insufficient stock',
     ].some((prefix) => error.message.startsWith(prefix))
       ? error.message
-      : `Sale could not be saved. Reference ${reference}${errorCode ? ` (database code: ${errorCode})` : ''}.`;
+      : `Sale could not be saved during ${failureStage}. Reference ${reference}${errorCode ? ` (database code: ${errorCode})` : ''}.`;
 
     return { success: false, error: message, reference };
   }

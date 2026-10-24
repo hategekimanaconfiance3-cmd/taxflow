@@ -202,8 +202,10 @@ export async function confirmImportArrival(
         quantityToActivate: number;
         discrepancy: number;
     };
+    let failureStage = "read submitted declaration";
     try {
         confirmation = await db.transaction(async (tx) => {
+        failureStage = "read submitted declaration";
         // Lock the row for the duration of this transaction
         const [declaration] = await tx
             .select()
@@ -232,6 +234,7 @@ export async function confirmImportArrival(
         const discrepancyFlag = discrepancyPct > 10;
 
         // Atomic status check + update — prevents double-activation
+        failureStage = "mark declaration approved";
         const [activated] = await tx
             .update(importDeclaration)
             .set({
@@ -253,6 +256,7 @@ export async function confirmImportArrival(
         if (!activated) throw new Error("Declaration status changed concurrently; import was not activated.");
 
         // Add inspected quantity to stock (upsert within same transaction)
+        failureStage = "add inspected quantity to stock";
         await tx
             .insert(stock)
             .values({
@@ -266,12 +270,14 @@ export async function confirmImportArrival(
             })
             .returning({ quantity: stock.quantity });
 
+        failureStage = "verify updated stock quantity";
         const [updatedStock] = await tx.select({ quantity: stock.quantity })
             .from(stock)
             .where(and(eq(stock.businessId, declaration.businessId), eq(stock.productId, declaration.productId)))
             .for("update").limit(1);
         if (!updatedStock) throw new Error("Import stock activation could not be confirmed.");
         const quantityBefore = updatedStock.quantity - quantityToActivate;
+        failureStage = "write stock movement";
         await tx.insert(stockMovement).values({
             businessId: declaration.businessId,
             productId: declaration.productId,
@@ -284,6 +290,7 @@ export async function confirmImportArrival(
             actorUserId: session.user.id,
         });
 
+        failureStage = "write audit record";
         await tx.insert(auditLog).values({
             userId: session.user.id,
             action: "IMPORT_CONFIRMED_BY_RRA",
@@ -308,11 +315,12 @@ export async function confirmImportArrival(
         const errorCode = getPostgresErrorCode(error);
         console.error("[confirmImportArrival] Transaction failed", {
             reference,
+            failureStage,
             errorCode,
         });
         return {
             success: false as const,
-            error: `Import confirmation failed. Reference: ${reference} (database code: ${errorCode}).`,
+            error: `Import confirmation failed during ${failureStage}. Reference: ${reference} (database code: ${errorCode}).`,
         };
     }
 
