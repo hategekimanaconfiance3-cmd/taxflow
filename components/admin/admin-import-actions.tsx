@@ -56,7 +56,11 @@ export function AdminImportActions({
         startTransition(async () => {
             try {
                 setError("");
-                await confirmImportArrival(declarationId);
+                const result = await confirmImportArrival(declarationId);
+                if (!result.success) {
+                    setError(result.error);
+                    return;
+                }
                 router.refresh();
             } catch (err) {
                 setError(

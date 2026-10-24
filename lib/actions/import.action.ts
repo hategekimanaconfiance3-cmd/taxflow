@@ -188,7 +188,13 @@ export async function confirmImportArrival(
     if (!parsedOpts.success) throw new Error("Inspection details are invalid. Quantity must be finite and positive.");
     const review = parsedOpts.data;
 
-    const { declaration, quantityToActivate, discrepancy } = await db.transaction(async (tx) => {
+    let confirmation: {
+        declaration: typeof importDeclaration.$inferSelect;
+        quantityToActivate: number;
+        discrepancy: number;
+    };
+    try {
+        confirmation = await db.transaction(async (tx) => {
         // Lock the row for the duration of this transaction
         const [declaration] = await tx
             .select()
@@ -286,17 +292,38 @@ export async function confirmImportArrival(
             }),
         });
 
-        return { declaration, quantityToActivate, discrepancy };
-    });
+            return { declaration, quantityToActivate, discrepancy };
+        });
+    } catch (error) {
+        const reference = crypto.randomUUID();
+        console.error("[confirmImportArrival] Transaction failed", {
+            reference,
+            message: error instanceof Error ? error.message.slice(0, 500) : "Unknown database error",
+        });
+        return {
+            success: false as const,
+            error: `Import confirmation failed. Reference: ${reference}`,
+        };
+    }
+
+    const { declaration, quantityToActivate, discrepancy } = confirmation;
 
     // Notify the trader (outside transaction — non-critical)
-    await createNotification({
-        userId: declaration.businessId,
-        type: "system",
-        title: "Import Approved",
-        message: `Your import declaration has been approved by RRA. ${quantityToActivate} units have been added to your stock.`,
-        link: "/dashboard/imports",
-    });
+    try {
+        await createNotification({
+            userId: declaration.businessId,
+            type: "system",
+            title: "Import Approved",
+            message: `Your import declaration has been approved by RRA. ${quantityToActivate} units have been added to your stock.`,
+            link: "/dashboard/imports",
+        });
+    } catch (error) {
+        const reference = crypto.randomUUID();
+        console.error("[confirmImportArrival] Notification failed after commit", {
+            reference,
+            message: error instanceof Error ? error.message.slice(0, 500) : "Unknown notification error",
+        });
+    }
 
     emitToUser(declaration.businessId, "import:confirmed", {
         declarationId: safeDeclarationId,
@@ -304,7 +331,7 @@ export async function confirmImportArrival(
     });
 
     return {
-        success: true,
+        success: true as const,
         quantityToActivate,
         expectedQuantity: declaration.expectedQuantity,
         discrepancy,
