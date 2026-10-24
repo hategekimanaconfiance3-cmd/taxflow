@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
+import { createContext, Fragment, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
 import { DashboardSidebar } from '@/components/dashboard/sidebar/sidebar';
 import { DashboardTopbar } from '@/components/dashboard/topbar/topbar';
 import { Button } from '@/components/ui/button';
@@ -111,7 +111,7 @@ export function LangSelector({ value, onChange }: { value: LangCode; onChange: (
 function AIPanel({ onClose, role }: { onClose: () => void; role: TraderRole }) {
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const { messages, sendMessage, status, setMessages } = useChat({
+  const { messages, sendMessage, status, error, setMessages } = useChat({
     transport: new DefaultChatTransport({ api: '/api/ai/query' }),
   });
   const isLoading = status === 'streaming' || status === 'submitted';
@@ -208,13 +208,21 @@ function AIPanel({ onClose, role }: { onClose: () => void; role: TraderRole }) {
                       <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/60 animate-bounce [animation-delay:150ms]" />
                       <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/60 animate-bounce [animation-delay:300ms]" />
                     </div>
-                  ) : (
-                    <p className="whitespace-pre-wrap leading-relaxed">{content}</p>
+                    ) : (
+                    <p className="whitespace-pre-wrap leading-relaxed">{renderAssistantMarkdown(content)}</p>
                   )}
                 </div>
               </div>
             );
           })
+        )}
+        {status === 'error' && (
+          <div
+            role="alert"
+            className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive"
+          >
+            {error?.message || 'The AI assistant could not respond. Please try again in a moment.'}
+          </div>
         )}
         <div ref={messagesEndRef} />
       </div>
@@ -245,6 +253,31 @@ function AIPanel({ onClose, role }: { onClose: () => void; role: TraderRole }) {
       </div>
     </div>
   );
+}
+
+function renderAssistantMarkdown(text: string) {
+  return text.split('\n').map((line, lineIndex) => {
+    const normalizedLine = line.replace(/^\s*[*-]\s+(?=\*\*)/, '• ');
+    const parts = normalizedLine.split(/(\*\*[^*]+\*\*|`[^`]+`|\*[^*]+\*)/g);
+
+    return (
+      <Fragment key={`line-${lineIndex}`}>
+        {parts.map((part, partIndex) => {
+          if (part.startsWith('**') && part.endsWith('**')) {
+            return <strong key={partIndex}>{part.slice(2, -2)}</strong>;
+          }
+          if (part.startsWith('`') && part.endsWith('`')) {
+            return <code key={partIndex} className="rounded bg-background/70 px-1 font-mono text-[0.95em]">{part.slice(1, -1)}</code>;
+          }
+          if (part.startsWith('*') && part.endsWith('*')) {
+            return <em key={partIndex}>{part.slice(1, -1)}</em>;
+          }
+          return <Fragment key={partIndex}>{part}</Fragment>;
+        })}
+        {lineIndex < text.split('\n').length - 1 && <br />}
+      </Fragment>
+    );
+  });
 }
 
 // ---------------------------------------------------------------------------
