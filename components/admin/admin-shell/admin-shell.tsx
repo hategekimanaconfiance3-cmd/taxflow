@@ -270,6 +270,7 @@ export function AdminShell({ userName, staffId, clearanceLevel, clearanceRoles, 
   const groups = getAdminSidebarGroups(clearanceRoles.length ? clearanceRoles : [clearanceLevel]);
 
   const [isSigningOut, setIsSigningOut] = useState(false);
+  const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isAiOpen, setIsAiOpen] = useState(false);
   const [lang, setLang] = useLanguagePreference();
@@ -626,7 +627,7 @@ export function AdminShell({ userName, staffId, clearanceLevel, clearanceRoles, 
 
       {/* User section */}
       <div className="p-3">
-        <Popover>
+        <Popover open={isAccountMenuOpen} onOpenChange={setIsAccountMenuOpen}>
           <PopoverTrigger asChild>
             <button className="flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
               <Avatar className="h-7 w-7 border border-border/60">
@@ -661,12 +662,12 @@ export function AdminShell({ userName, staffId, clearanceLevel, clearanceRoles, 
             </div>
             <Separator className="opacity-60" />
             <div className="py-1">
-              <button className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
+              <Link href="/admin/profile" onClick={() => setIsAccountMenuOpen(false)} className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
                 <User className="h-3.5 w-3.5" /> Profile
-              </button>
-              <button className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
+              </Link>
+              <Link href="/admin/support" onClick={() => setIsAccountMenuOpen(false)} className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
                 <HelpCircle className="h-3.5 w-3.5" /> Help & Support
-              </button>
+              </Link>
             </div>
             <Separator className="opacity-60" />
             <div className="py-1">
