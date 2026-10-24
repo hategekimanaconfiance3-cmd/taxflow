@@ -19,6 +19,7 @@ export interface BuyerInfo {
   role: string;
   businessType: string;
   clearanceStatus: string;
+  isActive: boolean;
   compliancePct: number;
   isEligible: boolean;
   reason: string;
@@ -67,8 +68,7 @@ export function BuyerLookup({ onBuyerFound, onBuyerCleared }: BuyerLookupProps) 
     });
   }
 
-  function handleClear() {
-    setTin('');
+  function clearBuyerResult() {
     setBuyer(null);
     setError('');
     onBuyerCleared();
@@ -88,7 +88,7 @@ export function BuyerLookup({ onBuyerFound, onBuyerCleared }: BuyerLookupProps) 
               // Limit to 9 digits
               if (value.length <= 9) {
                 setTin(value);
-                if (buyer) handleClear();
+                if (buyer) clearBuyerResult();
               }
             }}
             maxLength={9}
@@ -113,9 +113,11 @@ export function BuyerLookup({ onBuyerFound, onBuyerCleared }: BuyerLookupProps) 
 
       {/* Buyer info display */}
       {buyer && (
-        <div className="rounded-lg border p-3 space-y-2 bg-muted/20">
+        <div className={`rounded-lg border p-3 space-y-3 ${buyer.isEligible ? 'border-emerald-200 bg-emerald-50/50' : 'border-red-200 bg-red-50/60'}`}>
           <div className="flex items-center gap-2">
-            <span className="text-xs font-medium text-muted-foreground">Buyer Info</span>
+            <span className={`text-sm font-semibold ${buyer.isEligible ? 'text-emerald-800' : 'text-red-800'}`}>
+              {buyer.isEligible ? 'Buyer Verified & Eligible' : 'Buyer Not Eligible'}
+            </span>
             {buyer.isEligible ? (
               <Badge variant="outline" className="text-xs bg-emerald-50 text-emerald-600 border-emerald-200 gap-1">
                 <CheckCircle className="h-3 w-3" />
@@ -129,15 +131,25 @@ export function BuyerLookup({ onBuyerFound, onBuyerCleared }: BuyerLookupProps) 
             )}
           </div>
 
-          <div className="grid grid-cols-4 gap-3 text-sm">
+          <div className="grid grid-cols-2 gap-3 text-sm md:grid-cols-3 xl:grid-cols-5">
             <div>
-              <p className="text-xs text-muted-foreground">Name</p>
+              <p className="text-xs text-muted-foreground">Business name</p>
               <p className="font-medium">{buyer.businessName ?? buyer.name}</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">TIN</p>
+              <p className="font-mono font-medium">{buyer.tinNumber ?? '—'}</p>
             </div>
             <div>
               <p className="text-xs text-muted-foreground">Category</p>
               <Badge variant="outline" className="text-xs capitalize">
                 {buyer.businessType.replaceAll('_', ' ')}
+              </Badge>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Account status</p>
+              <Badge variant="outline" className={`text-xs capitalize ${buyer.isActive ? 'border-emerald-200 text-emerald-700' : 'border-red-200 text-red-700'}`}>
+                {buyer.isActive ? 'Active' : 'Inactive'}
               </Badge>
             </div>
             <div>
@@ -163,7 +175,7 @@ export function BuyerLookup({ onBuyerFound, onBuyerCleared }: BuyerLookupProps) 
             </div>
           </div>
 
-          {!buyer.isEligible && buyer.reason && <p className="text-xs text-red-500">{buyer.reason}</p>}
+          {!buyer.isEligible && buyer.reason && <p className="text-sm font-medium text-red-700">{buyer.reason}</p>}
         </div>
       )}
     </div>

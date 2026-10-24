@@ -2,7 +2,7 @@
 
 import { eq, sql, desc, and, or, gte, lte, ilike } from "drizzle-orm";
 import db from "@/db/drizzle";
-import { dispute, user, transaction, vatRecord, auditLog, stock, stockMovement, product, taxPayment } from "@/db/schema";
+import { dispute, user, transaction, vatRecord, auditLog, stock, stockMovement, stockReservation, product, taxPayment, notification } from "@/db/schema";
 import {
     requireRRASession,
     type RRARole,
@@ -572,6 +572,36 @@ export async function cancelTransaction(
             .limit(1);
         if (activeDispute) throw new Error("Resolve the active dispute before cancelling this transaction.");
 
+        let reservationId: string | null = null;
+        if (txn.status === "pending") {
+            const [reservation] = await tx.select().from(stockReservation)
+                .where(eq(stockReservation.transactionId, txn.id)).for("update").limit(1);
+            if (reservation && reservation.status !== "active") {
+                throw new Error(`Pending transaction has a ${reservation.status} reservation; cancellation needs reconciliation.`);
+            }
+            if (reservation?.status === "active") {
+                const [released] = await tx.update(stockReservation)
+                    .set({ status: "cancelled", releasedAt: new Date() })
+                    .where(and(eq(stockReservation.id, reservation.id), eq(stockReservation.status, "active")))
+                    .returning({ id: stockReservation.id });
+                if (released) {
+                    reservationId = reservation.id;
+                    const [sellerStock] = await tx.select().from(stock)
+                        .where(and(eq(stock.businessId, reservation.sellerId), eq(stock.productId, reservation.productId)))
+                        .for("update").limit(1);
+                    if (!sellerStock) throw new Error("Reserved inventory row is missing; cancellation was not applied.");
+                    const restored = sellerStock.quantity + reservation.quantity;
+                    await tx.update(stock).set({ quantity: restored }).where(eq(stock.id, sellerStock.id));
+                    await tx.insert(stockMovement).values({
+                        businessId: reservation.sellerId, productId: reservation.productId,
+                        quantityDelta: reservation.quantity, quantityBefore: sellerStock.quantity, quantityAfter: restored,
+                        movementType: "sale_reservation_released", sourceType: "stock_reservation", sourceId: reservation.id,
+                        actorUserId: session.user.id, reason: `RRA cancelled pending transaction: ${reason.trim()}`,
+                    });
+                }
+            }
+        }
+
         if (txn.status === "confirmed" || txn.status === "completed") {
             const [sellerStock] = await tx
                 .select()
@@ -649,9 +679,24 @@ export async function cancelTransaction(
                 previousStatus: txn.status,
                 cancelledBy: staff.staffId,
                 quantity: txn.quantity,
+                reservationId,
                 vatAmountReversed: txn.status === "confirmed" || txn.status === "completed" ? txn.vatAmount : 0,
             }),
         });
+        if (txn.status === "pending" && txn.buyerId) {
+            await tx.insert(notification).values([
+                {
+                    userId: txn.sellerId, type: "txn_cancelled", title: "Pending sale cancelled by RRA",
+                    message: `RRA cancelled transaction ${txn.id}: ${reason.trim()}. Reserved stock was released when applicable.`,
+                    link: "/dashboard/pending",
+                },
+                {
+                    userId: txn.buyerId, type: "txn_cancelled", title: "Purchase request cancelled by RRA",
+                    message: `RRA cancelled transaction ${txn.id}: ${reason.trim()}.`,
+                    link: "/dashboard/pending",
+                },
+            ]);
+        }
     });
 
     return { success: true };

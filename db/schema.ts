@@ -1,5 +1,5 @@
 import { relations, sql } from 'drizzle-orm';
-import { pgTable, text, timestamp, boolean, integer, real, jsonb, index, uniqueIndex, bigint } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, boolean, integer, real, jsonb, index, uniqueIndex, bigint, check } from 'drizzle-orm/pg-core';
 
 // auth models
 
@@ -274,6 +274,31 @@ export const transaction = pgTable(
     index('txn_buyer_idx').on(table.buyerId),
     index('txn_status_idx').on(table.status),
     index('txn_product_idx').on(table.productId),
+  ],
+);
+
+// B2B inventory holds. An active reservation has already been removed from
+// available stock; confirmation converts the hold, while every release path
+// transitions the row out of ACTIVE exactly once.
+export const stockReservation = pgTable(
+  'stock_reservation',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    transactionId: text('transaction_id').notNull().unique().references(() => transaction.id, { onDelete: 'cascade' }),
+    productId: text('product_id').notNull().references(() => product.id),
+    quantity: real('quantity').notNull(),
+    sellerId: text('seller_id').notNull().references(() => user.id),
+    buyerId: text('buyer_id').notNull().references(() => user.id),
+    status: text('status').notNull().default('active'),
+    reservedAt: timestamp('reserved_at').defaultNow().notNull(),
+    expiresAt: timestamp('expires_at').notNull(),
+    releasedAt: timestamp('released_at'),
+  },
+  (table) => [
+    index('stock_reservation_seller_status_expires_idx').on(table.sellerId, table.status, table.expiresAt),
+    index('stock_reservation_buyer_status_expires_idx').on(table.buyerId, table.status, table.expiresAt),
+    check('stock_reservation_status_check', sql`${table.status} IN ('active', 'converted', 'released', 'expired', 'cancelled')`),
+    check('stock_reservation_quantity_check', sql`${table.quantity} > 0`),
   ],
 );
 

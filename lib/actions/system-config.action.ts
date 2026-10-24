@@ -15,6 +15,7 @@ const DEFAULTS: Record<string, string> = {
     compliance_threshold: "0.95",
     vat_rate: "0.18",
     dispute_window_hours: "72",
+    buyer_confirmation_window_hours: "24",
     auto_suspension_threshold: "0.50",
 };
 
@@ -26,6 +27,7 @@ export interface SystemConfigValues {
     complianceThreshold: number;      // e.g. 0.95
     vatRate: number;                  // e.g. 0.18
     disputeWindowHours: number;       // e.g. 72
+    buyerConfirmationWindowHours: number; // e.g. 24
     autoSuspensionThreshold: number;  // e.g. 0.50 — auto-suspend below this
 }
 
@@ -41,6 +43,7 @@ export async function getSystemConfig(): Promise<SystemConfigValues> {
         complianceThreshold: parseFloat(map.get("compliance_threshold") ?? DEFAULTS.compliance_threshold),
         vatRate: parseFloat(map.get("vat_rate") ?? DEFAULTS.vat_rate),
         disputeWindowHours: parseInt(map.get("dispute_window_hours") ?? DEFAULTS.dispute_window_hours, 10),
+        buyerConfirmationWindowHours: parseInt(map.get("buyer_confirmation_window_hours") ?? DEFAULTS.buyer_confirmation_window_hours, 10),
         autoSuspensionThreshold: parseFloat(map.get("auto_suspension_threshold") ?? DEFAULTS.auto_suspension_threshold),
     };
 }
@@ -50,7 +53,7 @@ export async function getSystemConfig(): Promise<SystemConfigValues> {
 // ---------------------------------------------------------------------------
 
 const updateSchema = z.object({
-    key: z.enum(["compliance_threshold", "vat_rate", "dispute_window_hours", "auto_suspension_threshold"]),
+    key: z.enum(["compliance_threshold", "vat_rate", "dispute_window_hours", "buyer_confirmation_window_hours", "auto_suspension_threshold"]),
     value: z.string().min(1, "Value is required"),
 });
 
@@ -68,6 +71,11 @@ const VALUE_VALIDATORS: Record<string, (v: string) => string | null> = {
     dispute_window_hours: (v) => {
         const n = Number(v);
         if (isNaN(n) || n < 1 || n > 720) return "Must be between 1 and 720 hours";
+        return null;
+    },
+    buyer_confirmation_window_hours: (v) => {
+        const n = Number(v);
+        if (!Number.isInteger(n) || n < 1 || n > 720) return "Must be a whole number between 1 and 720 hours";
         return null;
     },
     auto_suspension_threshold: (v) => {

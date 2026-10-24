@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useTransition, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { confirmTransaction, rejectTransaction } from '@/lib/actions/transaction.action';
+import { cancelTransaction, confirmTransaction, rejectTransaction } from '@/lib/actions/transaction.action';
 import { useSocket } from '@/lib/socket-client';
 import { useSocketContext } from '@/components/providers/socket-provider';
 import { formatRWF } from '@/components/dashboard/stat-card/stat-card';
@@ -13,32 +13,28 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Clock, ArrowDownLeft, ArrowUpRight, Check, X, Loader2, RefreshCw, Send, Timer } from 'lucide-react';
 
 /** Pending transactions expire after 10 minutes (must match server constant). */
-const PENDING_EXPIRY_MS = 10 * 60 * 1000;
-
 /** Returns remaining ms until expiry, or 0 if already expired. */
-function getRemainingMs(createdAt: Date): number {
-  const elapsed = Date.now() - new Date(createdAt).getTime();
-  return Math.max(0, PENDING_EXPIRY_MS - elapsed);
+function getRemainingMs(expiresAt: Date): number {
+  return Math.max(0, new Date(expiresAt).getTime() - Date.now());
 }
 
-/** Returns true if the pending transaction is still within the 10-min window. */
-function isStillPending(createdAt: Date): boolean {
-  return getRemainingMs(createdAt) > 0;
+function isStillPending(expiresAt: Date): boolean {
+  return getRemainingMs(expiresAt) > 0;
 }
 
 // ---------------------------------------------------------------------------
 // Expiry Countdown — shows "Expires in M:SS" next to each pending row
 // ---------------------------------------------------------------------------
 
-function ExpiryCountdown({ createdAt }: { createdAt: Date }) {
-  const [remaining, setRemaining] = useState(() => getRemainingMs(createdAt));
+function ExpiryCountdown({ expiresAt }: { expiresAt: Date }) {
+  const [remaining, setRemaining] = useState(() => getRemainingMs(expiresAt));
 
   useEffect(() => {
     const timer = setInterval(() => {
-      setRemaining(getRemainingMs(createdAt));
+      setRemaining(getRemainingMs(expiresAt));
     }, 1000);
     return () => clearInterval(timer);
-  }, [createdAt]);
+  }, [expiresAt]);
 
   if (remaining <= 0) return null;
 
@@ -68,6 +64,7 @@ interface IncomingTxn {
   vatAmount: number;
   status: string;
   createdAt: Date;
+  expiresAt: Date;
 }
 
 interface OutgoingTxn {
@@ -80,6 +77,7 @@ interface OutgoingTxn {
   vatAmount: number;
   status: string;
   createdAt: Date;
+  expiresAt: Date;
   confirmedAt: Date | null;
 }
 
@@ -156,6 +154,32 @@ function ConfirmRejectActions({ transactionId }: { transactionId: string }) {
   );
 }
 
+function CancelPendingAction({ transactionId }: { transactionId: string }) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [error, setError] = useState('');
+
+  function handleCancel() {
+    startTransition(async () => {
+      try {
+        setError('');
+        await cancelTransaction(transactionId);
+        router.refresh();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Unable to cancel this pending sale.');
+      }
+    });
+  }
+
+  return <div className="flex flex-col items-end gap-1">
+    <Button variant="outline" size="sm" onClick={handleCancel} disabled={isPending}>
+      {isPending ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <X className="mr-1 h-3.5 w-3.5" />}
+      Cancel sale
+    </Button>
+    {error && <span className="max-w-40 text-right text-xs text-red-600">{error}</span>}
+  </div>;
+}
+
 // ---------------------------------------------------------------------------
 // Pending Page Client Component
 // ---------------------------------------------------------------------------
@@ -181,6 +205,7 @@ export function PendingPageClient({ incoming, outgoing }: PendingPageClientProps
     'txn:incoming': handleRefresh,
     'txn:confirmed': handleRefresh,
     'txn:rejected': handleRefresh,
+    'txn:cancelled': handleRefresh,
   });
 
   // Periodic client-side check — evicts expired rows and triggers server refresh
@@ -190,8 +215,8 @@ export function PendingPageClient({ incoming, outgoing }: PendingPageClientProps
 
       // If any pending item just crossed the expiry boundary, refresh from server
       const anyExpired =
-        incoming.some((t) => t.status === 'pending' && !isStillPending(t.createdAt)) ||
-        outgoing.some((t) => t.status === 'pending' && !isStillPending(t.createdAt));
+        incoming.some((t) => t.status === 'pending' && !isStillPending(t.expiresAt)) ||
+        outgoing.some((t) => t.status === 'pending' && !isStillPending(t.expiresAt));
 
       if (anyExpired) {
         router.refresh();
@@ -200,10 +225,10 @@ export function PendingPageClient({ incoming, outgoing }: PendingPageClientProps
     return () => clearInterval(interval);
   }, [incoming, outgoing, router]);
 
-  // Filter pending items: only those still within the 10-minute window
-  const pendingIncoming = incoming.filter((t) => t.status === 'pending' && isStillPending(t.createdAt));
+  // Filter pending items using the persisted reservation expiry time.
+  const pendingIncoming = incoming.filter((t) => t.status === 'pending' && isStillPending(t.expiresAt));
   const processedIncoming = incoming.filter((t) => t.status !== 'pending');
-  const pendingOutgoing = outgoing.filter((t) => t.status === 'pending' && isStillPending(t.createdAt));
+  const pendingOutgoing = outgoing.filter((t) => t.status === 'pending' && isStillPending(t.expiresAt));
   const processedOutgoing = outgoing.filter((t) => t.status !== 'pending');
 
   return (
@@ -293,7 +318,7 @@ export function PendingPageClient({ incoming, outgoing }: PendingPageClientProps
                         <TableCell>
                           <span className="inline-flex items-center">
                             <TransactionStatusBadge status={txn.status} />
-                            <ExpiryCountdown createdAt={txn.createdAt} />
+                            <ExpiryCountdown expiresAt={txn.expiresAt} />
                           </span>
                         </TableCell>
                         <TableCell className="text-right">
@@ -381,6 +406,7 @@ export function PendingPageClient({ incoming, outgoing }: PendingPageClientProps
                           <TableHead className="text-right">Total</TableHead>
                           <TableHead>Status</TableHead>
                           <TableHead className="text-right">Sent</TableHead>
+                          <TableHead className="text-right">Action</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -396,12 +422,13 @@ export function PendingPageClient({ incoming, outgoing }: PendingPageClientProps
                             <TableCell>
                               <span className="inline-flex items-center">
                                 <TransactionStatusBadge status={txn.status} />
-                                <ExpiryCountdown createdAt={txn.createdAt} />
+                                <ExpiryCountdown expiresAt={txn.expiresAt} />
                               </span>
                             </TableCell>
                             <TableCell className="text-right text-sm text-muted-foreground">
                               {new Date(txn.createdAt).toLocaleDateString()}
                             </TableCell>
+                            <TableCell className="text-right"><CancelPendingAction transactionId={txn.id} /></TableCell>
                           </TableRow>
                         ))}
                       </TableBody>

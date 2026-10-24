@@ -68,6 +68,7 @@ export default async function AdminSettingsPage() {
             complianceThreshold={config.complianceThreshold}
             vatRate={config.vatRate}
             disputeWindowHours={config.disputeWindowHours}
+            buyerConfirmationWindowHours={config.buyerConfirmationWindowHours}
           />
         </CardContent>
       </Card>
