@@ -25,6 +25,15 @@ async function requireApprovedImportTrader() {
     return session;
 }
 
+function getPostgresErrorCode(error: unknown, depth = 0): string {
+    if (depth > 4 || typeof error !== "object" || error === null) return "unknown";
+    if ("code" in error && typeof error.code === "string" && /^[0-9A-Z]{5}$/.test(error.code)) {
+        return error.code;
+    }
+    if ("cause" in error) return getPostgresErrorCode(error.cause, depth + 1);
+    return "unknown";
+}
+
 // ---------------------------------------------------------------------------
 // Declare Import — manufacturer or wholesaler declares expected goods
 // ---------------------------------------------------------------------------
@@ -296,13 +305,14 @@ export async function confirmImportArrival(
         });
     } catch (error) {
         const reference = crypto.randomUUID();
+        const errorCode = getPostgresErrorCode(error);
         console.error("[confirmImportArrival] Transaction failed", {
             reference,
-            message: error instanceof Error ? error.message.slice(0, 500) : "Unknown database error",
+            errorCode,
         });
         return {
             success: false as const,
-            error: `Import confirmation failed. Reference: ${reference}`,
+            error: `Import confirmation failed. Reference: ${reference} (database code: ${errorCode}).`,
         };
     }
 
