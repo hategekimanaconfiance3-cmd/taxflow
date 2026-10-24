@@ -1,4 +1,4 @@
-import { requireRRASession } from '@/lib/auth-guard';
+import { requireRRAPermission } from '@/lib/auth-guard';
 import { getTraderLookupById } from '@/lib/actions/admin-tin-lookup.action';
 import { TraderLookupDetails } from '@/components/admin/tin-taxpayer-lookup';
 import { notFound } from 'next/navigation';
@@ -8,7 +8,7 @@ export default async function AdminTraderDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
+  await requireRRAPermission("taxpayer.intelligence.search");
   const { id } = await params;
   const trader = await getTraderLookupById(id);
   if (!trader) notFound();

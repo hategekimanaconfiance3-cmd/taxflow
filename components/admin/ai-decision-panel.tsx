@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { DecisionPanelData, DecisionAction } from "@/app/api/ai/decision-panel/route";
+import type { DecisionItem, DecisionPanelData } from "@/app/api/ai/decision-panel/route";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -64,9 +64,8 @@ const IMPACT_CONFIG = {
   },
 } as const;
 
-function ActionCard({ action, index }: { action: DecisionAction; index: number }) {
-  const cfg = IMPACT_CONFIG[action.impact];
-  const Icon = cfg.icon;
+function ActionCard({ decision, index }: { decision: DecisionItem; index: number }) {
+  const cfg = IMPACT_CONFIG[decision.severity];
 
   return (
     <div className={`rounded-lg border ${cfg.bg} overflow-hidden`}>
@@ -79,8 +78,8 @@ function ActionCard({ action, index }: { action: DecisionAction; index: number }
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-start justify-between gap-2">
-              <p className={`text-xs font-bold leading-snug ${cfg.text}`}>{action.title}</p>
-              <Badge variant="secondary" className={`text-[9px] shrink-0 ${cfg.badge}`}>{cfg.label}</Badge>
+            <p className={`text-xs font-bold leading-snug ${cfg.text}`}>{decision.title}</p>
+              <Badge variant="secondary" className={`text-[9px] shrink-0 ${cfg.badge}`}>Potential · {cfg.label}</Badge>
             </div>
           </div>
         </div>
@@ -89,25 +88,16 @@ function ActionCard({ action, index }: { action: DecisionAction; index: number }
         <div className="ml-7 space-y-2">
           <div className="flex items-start gap-1.5 rounded-md bg-background/70 px-2.5 py-2">
             <Lightbulb className="h-3 w-3 text-muted-foreground mt-0.5 shrink-0" />
-            <p className="text-[11px] text-muted-foreground leading-relaxed">{action.reason}</p>
+            <p className="text-[11px] text-muted-foreground leading-relaxed">{decision.description}</p>
           </div>
+          {decision.targetName && <p className="text-[11px] text-muted-foreground">Record: {decision.targetName}</p>}
 
-          {/* Impact label */}
-          <p className={`text-[11px] font-semibold ${cfg.subtext}`}>{action.impactLabel}</p>
-
-          {/* Action button */}
-          {action.href ? (
-            <Link href={action.href}>
-              <Button size="sm" className={`h-7 text-[11px] px-3 gap-1.5 mt-0.5 ${cfg.btnClass}`}>
-                Take Action
-                <ArrowRight className="h-3 w-3" />
-              </Button>
-            </Link>
-          ) : (
-            <Button size="sm" disabled className="h-7 text-[11px] px-3 gap-1.5 mt-0.5 opacity-50">
-              No action available
+          {decision.actions.map((action) => <Link key={action.id} href={action.href}>
+            <Button size="sm" variant="outline" className="h-7 text-[11px] px-3 gap-1.5 mt-0.5">
+              {action.label === "View Audit Trail" ? "Review Evidence" : "Review Taxpayer Record"}
+              <ArrowRight className="h-3 w-3" />
             </Button>
-          )}
+          </Link>)}
         </div>
       </div>
     </div>
@@ -130,20 +120,20 @@ export function AIDecisionPanel() {
     return <DecisionPanelSkeleton />;
   }
 
-  if (!data || data.actions.length === 0) {
+  if (!data || data.decisions.length === 0) {
     return (
       <Card>
         <CardContent className="py-8 text-center">
           <CheckCircle2 className="h-8 w-8 mx-auto text-emerald-500 mb-2" />
-          <p className="text-sm font-medium">No urgent actions required</p>
-          <p className="text-xs text-muted-foreground mt-1">No critical signals detected — system operating normally.</p>
+          <p className="text-sm font-medium">No findings currently require review</p>
+          <p className="text-xs text-muted-foreground mt-1">AI indicators are advisory and do not represent official decisions.</p>
         </CardContent>
       </Card>
     );
   }
 
-  const criticalCount = data.actions.filter(a => a.impact === "critical").length;
-  const highCount = data.actions.filter(a => a.impact === "high").length;
+  const criticalCount = data.decisions.filter(a => a.severity === "critical").length;
+  const highCount = data.decisions.filter(a => a.severity === "high").length;
 
   return (
     <Card>
@@ -151,7 +141,7 @@ export function AIDecisionPanel() {
         <div className="flex items-center justify-between">
           <CardTitle className="text-base font-semibold flex items-center gap-2">
             <BrainCircuit className="h-4 w-4 text-violet-500" />
-            AI Decision Panel
+            AI Findings — Requires Human Review
           </CardTitle>
           <div className="flex items-center gap-1.5">
             {criticalCount > 0 && (
@@ -167,11 +157,11 @@ export function AIDecisionPanel() {
             )}
           </div>
         </div>
-        <p className="text-[10px] text-muted-foreground mt-0.5">AI-generated action recommendations · each action has a reason and measurable impact</p>
+        <p className="text-[10px] text-muted-foreground mt-0.5">Potential indicators only. Review the evidence and make decisions through authorized RRA workflows.</p>
       </CardHeader>
       <CardContent className="space-y-2">
-        {data.actions.map((action, i) => (
-          <ActionCard key={action.id} action={action} index={i} />
+        {data.decisions.map((decision, i) => (
+          <ActionCard key={decision.id} decision={decision} index={i} />
         ))}
       </CardContent>
     </Card>

@@ -8,10 +8,13 @@ import { TaxOpsCompact } from '@/components/admin/overview/tax-ops-compact';
 import { formatRWF } from '@/components/dashboard/stat-card/stat-card';
 import { TrendingUp, Users, DollarSign } from 'lucide-react';
 import type { PriorityAlert } from '@/components/admin/overview/priority-alerts';
+import { TinTaxpayerLookup } from '@/components/admin/tin-taxpayer-lookup';
+import { hasRRAPermission } from '@/lib/rra-rbac';
 
 export default async function AdminOverviewPage() {
   const { user, staff } = await requireRRASession("compliance_officer", "audit_officer", "reporting_officer", "director_executive", "tax_compliance_officer", "audit_investigation_officer", "data_ai_analyst", "super_admin", "payments_reconciliation_officer", "product_traceability_officer", "customs_import_officer");
   const stats = await getDashboardOverview();
+  const canSearchTaxpayers = staff.clearanceRoles.some((role) => hasRRAPermission(role, "taxpayer.intelligence.search"));
 
   // Build priority alerts from live stats
   const alerts: PriorityAlert[] = [];
@@ -60,6 +63,8 @@ export default async function AdminOverviewPage() {
 
   return (
     <div className="space-y-5">
+      {canSearchTaxpayers && <TinTaxpayerLookup />}
+
       {/* Priority alerts */}
       {alerts.length > 0 && <PriorityAlerts alerts={alerts} />}
 

@@ -16,6 +16,8 @@ const DEFAULTS: Record<string, string> = {
     vat_rate: "0.18",
     dispute_window_hours: "72",
     buyer_confirmation_window_hours: "24",
+    // Keep reading the old setting as a notification threshold only. It must
+    // never trigger an automatic account restriction.
     auto_suspension_threshold: "0.50",
 };
 
@@ -28,7 +30,7 @@ export interface SystemConfigValues {
     vatRate: number;                  // e.g. 0.18
     disputeWindowHours: number;       // e.g. 72
     buyerConfirmationWindowHours: number; // e.g. 24
-    autoSuspensionThreshold: number;  // e.g. 0.50 — auto-suspend below this
+    reviewRecommendationThreshold: number; // Legacy threshold, used only to request human review
 }
 
 // ---------------------------------------------------------------------------
@@ -44,7 +46,7 @@ export async function getSystemConfig(): Promise<SystemConfigValues> {
         vatRate: parseFloat(map.get("vat_rate") ?? DEFAULTS.vat_rate),
         disputeWindowHours: parseInt(map.get("dispute_window_hours") ?? DEFAULTS.dispute_window_hours, 10),
         buyerConfirmationWindowHours: parseInt(map.get("buyer_confirmation_window_hours") ?? DEFAULTS.buyer_confirmation_window_hours, 10),
-        autoSuspensionThreshold: parseFloat(map.get("auto_suspension_threshold") ?? DEFAULTS.auto_suspension_threshold),
+        reviewRecommendationThreshold: parseFloat(map.get("auto_suspension_threshold") ?? DEFAULTS.auto_suspension_threshold),
     };
 }
 
@@ -53,7 +55,7 @@ export async function getSystemConfig(): Promise<SystemConfigValues> {
 // ---------------------------------------------------------------------------
 
 const updateSchema = z.object({
-    key: z.enum(["compliance_threshold", "vat_rate", "dispute_window_hours", "buyer_confirmation_window_hours", "auto_suspension_threshold"]),
+    key: z.enum(["compliance_threshold", "vat_rate", "dispute_window_hours", "buyer_confirmation_window_hours"]),
     value: z.string().min(1, "Value is required"),
 });
 
@@ -76,11 +78,6 @@ const VALUE_VALIDATORS: Record<string, (v: string) => string | null> = {
     buyer_confirmation_window_hours: (v) => {
         const n = Number(v);
         if (!Number.isInteger(n) || n < 1 || n > 720) return "Must be a whole number between 1 and 720 hours";
-        return null;
-    },
-    auto_suspension_threshold: (v) => {
-        const n = Number(v);
-        if (isNaN(n) || n < 0.01 || n > 1) return "Must be between 0.01 and 1 (e.g. 0.50 for 50%)";
         return null;
     },
 };

@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useChat } from "@ai-sdk/react";
-import { DefaultChatTransport, lastAssistantMessageIsCompleteWithApprovalResponses } from "ai";
+import { DefaultChatTransport } from "ai";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -14,8 +14,6 @@ import {
     User,
     Sparkles,
     RotateCcw,
-    Check,
-    X,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -35,9 +33,8 @@ export function IntelligenceChat() {
     const [input, setInput] = useState("");
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
-    const { messages, sendMessage, status, setMessages, addToolApprovalResponse, error } = useChat({
+    const { messages, sendMessage, status, setMessages, error } = useChat({
         transport: new DefaultChatTransport({ api: "/api/ai/query" }),
-        sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
     });
 
     const isLoading = status === "streaming" || status === "submitted";
@@ -68,6 +65,7 @@ export function IntelligenceChat() {
                         Powered by Qwen 2.5
                     </span>
                 </CardTitle>
+                <p className="mt-2 text-xs text-muted-foreground">AI findings are advisory and require human review. Only authorized RRA employees make official decisions; the assistant cannot execute them.</p>
             </CardHeader>
 
             <CardContent className="flex-1 overflow-y-auto p-4 space-y-4">
@@ -129,36 +127,7 @@ export function IntelligenceChat() {
                                         />
                                     );
                                 }
-                                if (part.type.startsWith("tool-")) {
-                                    const toolPart = part as typeof part & {
-                                        state?: string;
-                                        input?: unknown;
-                                        output?: unknown;
-                                        approval?: { id: string; approved?: boolean };
-                                    };
-                                    if (toolPart.state === "approval-requested" && toolPart.approval?.id) {
-                                        return (
-                                            <div key={`${msg.id}-${i}`} className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-amber-950 dark:bg-amber-950/30 dark:text-amber-100">
-                                                <p className="font-semibold">Officer approval required: {part.type.replace("tool-", "")}</p>
-                                                <pre className="my-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs">{JSON.stringify(toolPart.input, null, 2)}</pre>
-                                                <div className="flex gap-2">
-                                                    <Button size="sm" onClick={() => addToolApprovalResponse({ id: toolPart.approval!.id, approved: true })}>
-                                                        <Check className="mr-1 h-3.5 w-3.5" /> Approve action
-                                                    </Button>
-                                                    <Button size="sm" variant="outline" onClick={() => addToolApprovalResponse({ id: toolPart.approval!.id, approved: false })}>
-                                                        <X className="mr-1 h-3.5 w-3.5" /> Reject
-                                                    </Button>
-                                                </div>
-                                            </div>
-                                        );
-                                    }
-                                    if (toolPart.state === "output-available") {
-                                        return <pre key={`${msg.id}-${i}`} className="mt-2 whitespace-pre-wrap break-words text-xs">{JSON.stringify(toolPart.output, null, 2)}</pre>;
-                                    }
-                                    if (toolPart.state === "output-denied") {
-                                        return <p key={`${msg.id}-${i}`} className="mt-2 text-xs text-muted-foreground">Action rejected. No action was taken.</p>;
-                                    }
-                                }
+                                if (part.type.startsWith("tool-")) return null;
                                 return null;
                             })}
                             {msg.role === "assistant" && status === "ready" && msg.parts.some((part) => part.type === "text") && (

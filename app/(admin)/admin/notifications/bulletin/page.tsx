@@ -11,7 +11,7 @@ const PRIORITY_CONFIG: Record<string, { label: string; cls: string }> = {
 };
 
 export default async function AdminBulletinPage() {
-  await requireRRASession("compliance_officer", "audit_officer", "stock_officer", "correction_officer", "reporting_officer", "director_executive", "tax_compliance_officer", "audit_investigation_officer", "product_traceability_officer", "customs_import_officer", "payments_reconciliation_officer", "data_ai_analyst");
+  await requireRRASession("super_admin", "compliance_officer", "audit_officer", "stock_officer", "correction_officer", "reporting_officer", "director_executive", "tax_compliance_officer", "audit_investigation_officer", "product_traceability_officer", "customs_import_officer", "payments_reconciliation_officer", "data_ai_analyst");
 
   const bulletins = await getBulletins();
 

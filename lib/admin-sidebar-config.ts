@@ -118,6 +118,9 @@ const ALL: RRARole[] = [
     "director_executive",
 ];
 
+// System-admin access does not itself grant access to confidential taxpayer data.
+const TAXPAYER_SEARCH_ROLES = ALL.filter((role) => role !== "super_admin");
+
 // ---------------------------------------------------------------------------
 // Navigation groups — ordered by operational priority
 // ---------------------------------------------------------------------------
@@ -161,7 +164,7 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 label: "Traders",
                 href: "/admin/traders",
                 icon: Users,
-                allowedRoles: ALL,
+                allowedRoles: TAXPAYER_SEARCH_ROLES,
             },
             {
                 label: "Transactions",

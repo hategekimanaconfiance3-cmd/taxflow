@@ -22,7 +22,6 @@ import { headers } from "next/headers";
 import { createHash } from "node:crypto";
 import { consumeRateLimit, getRequestIdentity } from "@/lib/rate-limit";
 import { createTraderTools } from "@/lib/ai/tools/trader-tools";
-import { createRraActionTools } from "@/lib/ai/tools/rra-action-tools";
 import {
     lookupTrader,
     searchTraders,
@@ -99,11 +98,10 @@ function parseMessages(input: unknown): { rawMessages: Record<string, unknown>[]
     }
 
     const lastMessage = rawMessages.at(-1);
-    const isApprovalResponse = lastMessage?.role === "assistant" && Array.isArray(lastMessage.parts) && lastMessage.parts.some((part) =>
-        typeof part === "object" && part !== null && "type" in part && typeof part.type === "string" && part.type.startsWith("tool-") &&
-        "approval" in part && typeof part.approval === "object" && part.approval !== null && "approved" in part.approval,
-    );
-    if (messages.length === 0 || (lastMessage?.role !== "user" && !isApprovalResponse)) return null;
+    // Each request must begin with a new user instruction. In particular, never
+    // accept a client-submitted tool approval as authorization to execute a
+    // consequential action. The assistant has read-only tools only.
+    if (messages.length === 0 || lastMessage?.role !== "user") return null;
     return { rawMessages, textMessages: messages };
 }
 
@@ -266,9 +264,10 @@ export async function POST(request: Request) {
     const rraReadTools: ToolSet = isRRAStaff
         ? Object.fromEntries(allowedRraTools.map((name) => [name, rraToolRegistry[name]])) as ToolSet
         : {};
-    const tools: ToolSet = isTrader
-        ? createTraderTools(userId)
-        : { ...rraReadTools, ...createRraActionTools(staffClearance) };
+    // The assistant is intentionally read-only. Consequential operations must
+    // be started in their dedicated authenticated human workflows, never by an
+    // AI tool call or a client-supplied approval part.
+    const tools: ToolSet = isTrader ? createTraderTools(userId) : rraReadTools;
 
     // ── 7. Stream the response ───────────────────────────────────────────────
     try {
@@ -276,7 +275,9 @@ export async function POST(request: Request) {
             messages: parsedMessages.rawMessages,
             tools: tools as Parameters<typeof validateUIMessages>[0]["tools"],
         });
-        const modelMessages = await convertToModelMessages(validatedMessages, { tools: tools as Parameters<typeof convertToModelMessages>[1]["tools"] });
+        const modelMessages = await convertToModelMessages(validatedMessages, {
+            tools: tools as NonNullable<Parameters<typeof convertToModelMessages>[1]>["tools"],
+        });
         const result = streamText({
             model: MODEL,
             system: isTrader ? getTraderSystemPrompt() : getRRASystemPrompt(),

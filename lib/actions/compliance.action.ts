@@ -309,7 +309,9 @@ export async function getTaxPayments() {
  *
  * - Below 95%: notify the trader
  * - Below 80%: also notify all RRA admin users
- * - Below auto_suspension_threshold (50%): auto-suspend trader
+ * - Below the legacy suspension threshold (50% by default): notify RRA staff
+ *   that an authorized officer should review the case. This check never changes
+ *   taxpayer status or initiates an enforcement action.
  */
 export async function checkAndAlertCompliance(traderId: string) {
   const session = await auth.api.getSession({ headers: await headers() });
@@ -353,7 +355,6 @@ export async function checkAndAlertCompliance(traderId: string) {
       .select({
         businessName: user.businessName,
         name: user.name,
-        clearanceStatus: user.clearanceStatus,
       })
       .from(user)
       .where(eq(user.id, traderId))
@@ -361,52 +362,19 @@ export async function checkAndAlertCompliance(traderId: string) {
 
     const traderName = trader?.businessName || trader?.name || 'Unknown';
 
-    // ── Auto-suspend if below suspension threshold ──────────────────
-    if (compliancePct < config.autoSuspensionThreshold * 100) {
-      // Only suspend if not already suspended
-      if (trader && trader.clearanceStatus !== 'suspended') {
-        await db.transaction(async (tx) => {
-          const [updatedTrader] = await tx
-            .update(user)
-            .set({ clearanceStatus: 'suspended' })
-            .where(and(eq(user.id, traderId), eq(user.clearanceStatus, trader.clearanceStatus)))
-            .returning({ id: user.id });
-          if (!updatedTrader) return;
-          await tx.insert(auditLog).values({
-            userId: traderId,
-            action: 'AUTO_SUSPENDED',
-            targetType: 'user',
-            targetId: traderId,
-            metadata: JSON.stringify({
-              compliancePct: Math.round(compliancePct),
-              outstanding,
-              threshold: config.autoSuspensionThreshold * 100,
-              reason: 'Compliance below auto-suspension threshold',
-            }),
-          });
-        });
-
-        // Notify the trader
+    // A threshold crossing is only a signal for human review. Automated
+    // compliance checks must never suspend, restrict, or otherwise decide a
+    // taxpayer's status.
+    if (compliancePct < config.reviewRecommendationThreshold * 100) {
+      const rraUsers = await db.select({ id: user.id }).from(user).where(eq(user.role, 'rra_staff'));
+      for (const rraUser of rraUsers) {
         await createNotification({
-          userId: traderId,
+          userId: rraUser.id,
           type: 'compliance_alert',
-          title: 'Account Suspended — Non-Compliance',
-          message: `Your account has been automatically suspended. Tax compliance is at ${Math.round(compliancePct)}% (minimum: ${config.autoSuspensionThreshold * 100}%). Outstanding: ${outstanding.toLocaleString()} RWF. Pay your outstanding balance to restore trading.`,
-          link: '/dashboard/payments',
+          title: 'Potential Compliance Risk — Requires Human Review',
+          message: `"${traderName}" has a TaxFlow payment indicator of ${Math.round(compliancePct)}%. Recorded outstanding amount: ${outstanding.toLocaleString()} RWF. This is not a confirmed violation or official assessment; review the authorized records before deciding any action.`,
+          link: '/admin/traders',
         });
-
-        // Notify all RRA staff
-        const rraUsers = await db.select({ id: user.id }).from(user).where(eq(user.role, 'rra_staff'));
-
-        for (const rraUser of rraUsers) {
-          await createNotification({
-            userId: rraUser.id,
-            type: 'compliance_alert',
-            title: 'Trader Auto-Suspended',
-            message: `"${traderName}" has been auto-suspended. Compliance: ${Math.round(compliancePct)}%. Outstanding: ${outstanding.toLocaleString()} RWF.`,
-            link: '/admin/traders',
-          });
-        }
       }
     }
 
@@ -415,8 +383,8 @@ export async function checkAndAlertCompliance(traderId: string) {
       await createNotification({
         userId: traderId,
         type: 'compliance_alert',
-        title: 'Tax Compliance Warning',
-        message: `Your tax compliance is at ${Math.round(compliancePct)}% (minimum: 95%). Outstanding balance: ${outstanding.toLocaleString()} RWF. Pay now to avoid trade restrictions.`,
+        title: 'TaxFlow Payment Indicator — Review',
+        message: `Your TaxFlow payment indicator is ${Math.round(compliancePct)}%. The recorded outstanding amount is ${outstanding.toLocaleString()} RWF. Please review your records or contact support if you believe this information is incorrect.`,
         link: '/dashboard/payments',
       });
     }
@@ -429,8 +397,8 @@ export async function checkAndAlertCompliance(traderId: string) {
         await createNotification({
           userId: rraUser.id,
           type: 'compliance_alert',
-          title: 'Critical Compliance Alert',
-          message: `Trader "${traderName}" is at ${Math.round(compliancePct)}% tax compliance (critical threshold: 80%). Outstanding: ${outstanding.toLocaleString()} RWF.`,
+          title: 'Potential Compliance Risk — Requires Human Review',
+          message: `Trader "${traderName}" has a TaxFlow payment indicator of ${Math.round(compliancePct)}%. Recorded outstanding amount: ${outstanding.toLocaleString()} RWF. This is not a confirmed violation or official assessment.`,
           link: `/admin/traders`,
         });
       }
@@ -457,16 +425,16 @@ export async function runSystemComplianceCheck() {
     .from(user)
     .where(sql`${user.role} IN ('manufacturer', 'wholesaler', 'retailer')`);
 
-  let compliant = 0;
-  let nonCompliant = 0;
-  let suspended = 0;
+  let meetingConfiguredThreshold = 0;
+  let belowConfiguredThreshold = 0;
+  let reviewRecommended = 0;
   let alerts = 0;
 
   const complianceConfig = await getSystemConfig();
 
   for (const trader of traders) {
     try {
-      // Delegate to checkAndAlertCompliance — includes auto-suspension logic
+      // Delegate to checkAndAlertCompliance — this only creates notifications.
       await checkAndAlertCompliance(trader.id);
 
       // Re-read compliance to classify result for the summary
@@ -484,7 +452,7 @@ export async function runSystemComplianceCheck() {
       const netOwed = Math.max(0, vatOutput - vatInput);
 
       if (netOwed === 0) {
-        compliant++;
+        meetingConfiguredThreshold++;
         continue;
       }
 
@@ -498,15 +466,15 @@ export async function runSystemComplianceCheck() {
       const totalPaid = Number(paymentResult?.totalPaid) || 0;
       const compliancePct = Math.min(100, (totalPaid / netOwed) * 100);
 
-      if (compliancePct < complianceConfig.autoSuspensionThreshold * 100) {
-        suspended++;
-        nonCompliant++;
+      if (compliancePct < complianceConfig.reviewRecommendationThreshold * 100) {
+        reviewRecommended++;
+        belowConfiguredThreshold++;
         alerts++;
       } else if (compliancePct < complianceConfig.complianceThreshold * 100) {
-        nonCompliant++;
+        belowConfiguredThreshold++;
         alerts++;
       } else {
-        compliant++;
+        meetingConfiguredThreshold++;
       }
     } catch {
       // Skip individual trader errors
@@ -515,9 +483,9 @@ export async function runSystemComplianceCheck() {
 
   return {
     totalChecked: traders.length,
-    compliant,
-    nonCompliant,
-    suspended,
+    meetingConfiguredThreshold,
+    belowConfiguredThreshold,
+    reviewRecommended,
     alerts,
   };
 }
