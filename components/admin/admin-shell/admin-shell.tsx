@@ -95,6 +95,8 @@ function NotificationBell({ href }: { href: string }) {
       <TooltipTrigger asChild>
         <Link
           href={href}
+          aria-label={count > 0 ? `Notifications, ${count} unread` : 'Notifications'}
+          title="Notifications"
           className="relative flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
         >
           <Bell className="h-4 w-4" />

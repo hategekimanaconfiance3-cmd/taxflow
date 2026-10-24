@@ -1,6 +1,6 @@
 "use server";
 
-import { eq, desc, sql, and, inArray } from "drizzle-orm";
+import { eq, desc, sql, and } from "drizzle-orm";
 import db from "@/db/drizzle";
 import { notification, rraStaff, user } from "@/db/schema";
 import { requireRRASession } from "@/lib/auth-guard";
@@ -10,7 +10,7 @@ import { requireRRASession } from "@/lib/auth-guard";
 // ---------------------------------------------------------------------------
 
 export async function getAdminNotifications(limit = 50) {
-    await requireRRASession();
+    const session = await requireRRASession();
 
     // Get notifications sent to RRA staff users
     const results = await db
@@ -28,11 +28,22 @@ export async function getAdminNotifications(limit = 50) {
         .from(notification)
         .innerJoin(user, eq(notification.userId, user.id))
         .innerJoin(rraStaff, eq(rraStaff.userId, user.id))
-        .where(eq(rraStaff.isActive, true))
+        .where(and(eq(rraStaff.isActive, true), eq(notification.userId, session.user.id)))
         .orderBy(desc(notification.createdAt))
         .limit(Math.min(Math.max(Math.floor(limit), 1), 100));
 
     return results;
+}
+
+/** Return the unread notification count for the signed-in RRA staff member. */
+export async function getAdminUnreadNotificationCount(): Promise<number> {
+    const session = await requireRRASession();
+    const [result] = await db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(notification)
+        .where(and(eq(notification.userId, session.user.id), eq(notification.read, false)));
+
+    return result?.count ?? 0;
 }
 
 // ---------------------------------------------------------------------------
