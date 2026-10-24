@@ -350,19 +350,20 @@ export async function createSaleForConfirmation(data: {
   } catch (error) {
     const reference = crypto.randomUUID();
     const errorCode = typeof error === 'object' && error !== null && 'code' in error
-      && typeof error.code === 'string' ? error.code : 'unknown';
-    console.error(`[sale-create:${reference}] Sale creation failed (code: ${errorCode})`);
+      && typeof error.code === 'string' ? error.code : null;
+    console.error(`[sale-create:${reference}] Sale creation failed (${errorCode ?? 'server validation or unexpected error'})`);
 
     // Domain validation/auth errors are already safe messages created by this action.
     const message = error instanceof Error && [
       'Your account is', 'Retailers must', 'Buyer TIN must', 'Add between',
       'Each product', 'Every quantity', 'Invoice/reference', 'Delivery information',
       'Buyer not found', 'Cannot sell to yourself', 'Buyer account is', 'Buyer has no',
+      'A ', 'The minimum price for this product', 'Price is below', 'Could not create the stock reservation',
       'Incompatible', 'You must pay at least', 'Buyer has not met tax compliance',
       'A selected product', 'Sale total is', 'Invalid transaction type', 'Insufficient stock',
     ].some((prefix) => error.message.startsWith(prefix))
       ? error.message
-      : `Sale could not be saved. Reference ${reference} (database code: ${errorCode}).`;
+      : `Sale could not be saved. Reference ${reference}${errorCode ? ` (database code: ${errorCode})` : ''}.`;
 
     return { success: false, error: message, reference };
   }
