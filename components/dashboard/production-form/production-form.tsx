@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { createProduct, recordProduction } from "@/lib/actions/stock.action";
+import { useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,12 +14,14 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { formatRWF } from "@/components/dashboard/stat-card/stat-card";
+import { productionEntrySchema, productRegistrationSchema } from "@/lib/validation/production.schema";
 import { Plus, Save, Loader2 } from "lucide-react";
 
 interface Product {
     id: string;
     name: string;
     unit: string;
+    categoryCode: string | null;
 }
 
 interface ProductionFormProps {
@@ -27,92 +29,111 @@ interface ProductionFormProps {
     vatRate: number;
 }
 
+interface ApiError {
+    error?: string;
+    requestId?: string;
+}
 
 export function ProductionForm({ products, vatRate }: ProductionFormProps) {
+    const router = useRouter();
     const [isPending, startTransition] = useTransition();
     const [availableProducts, setAvailableProducts] = useState(products);
-
-    // Product creation state
     const [showNewProduct, setShowNewProduct] = useState(false);
     const [newProductName, setNewProductName] = useState("");
-    const [newProductUnit, setNewProductUnit] = useState("kg");
-
-    // Production entry state
+    const [newProductUnit, setNewProductUnit] = useState("box");
+    const [newProductCategory, setNewProductCategory] = useState("");
     const [selectedProductId, setSelectedProductId] = useState("");
     const [quantity, setQuantity] = useState("");
     const [unitPrice, setUnitPrice] = useState("");
-    const [message, setMessage] = useState<{
-        text: string;
-        type: "success" | "error";
-    } | null>(null);
+    const [message, setMessage] = useState<{ text: string; type: "success" | "error" } | null>(null);
+    const idempotencyKey = useRef<string | null>(null);
 
-    // Auto-calculation
-    const qty = parseInt(quantity) || 0;
-    const price = parseInt(unitPrice) || 0;
-    const totalValue = qty * price;
+    const qty = Number(quantity) || 0;
+    const price = Number(unitPrice) || 0;
+    const totalValue = Math.round(qty * price);
     const potentialTax = Math.round(totalValue * vatRate);
 
+    function resetSubmissionKey() {
+        idempotencyKey.current = null;
+    }
+
     async function handleCreateProduct() {
-        if (!newProductName.trim()) return;
+        const parsed = productRegistrationSchema.safeParse({
+            name: newProductName,
+            unit: newProductUnit,
+            categoryCode: newProductCategory,
+        });
+        if (!parsed.success) {
+            setMessage({ text: parsed.error.issues[0]?.message ?? "Enter valid product details.", type: "error" });
+            return;
+        }
 
         startTransition(async () => {
             try {
-                const product = await createProduct({
-                    name: newProductName.trim(),
-                    unit: newProductUnit,
+                const response = await fetch("/api/products", {
+                    method: "POST",
+                    headers: { "content-type": "application/json" },
+                    body: JSON.stringify(parsed.data),
                 });
-                setAvailableProducts((current) =>
-                    current.some((item) => item.id === product.id)
-                        ? current
-                        : [...current, {
-                            id: product.id,
-                            name: product.name,
-                            unit: product.unit,
-                        }],
-                );
-                setSelectedProductId(product.id);
+                const body: { product?: Product } & ApiError = await response.json();
+                if (!response.ok || !body.product) {
+                    setMessage({ text: body.error ?? "Unable to register this product. Please try again.", type: "error" });
+                    return;
+                }
+
+                setAvailableProducts((current) => current.some((item) => item.id === body.product?.id)
+                    ? current
+                    : [...current, body.product!]);
+                setSelectedProductId(body.product.id);
                 setNewProductName("");
+                setNewProductCategory("");
                 setShowNewProduct(false);
-                setMessage({
-                    text: "Product created successfully",
-                    type: "success",
-                });
-            } catch (err) {
-                setMessage({
-                    text:
-                        err instanceof Error
-                            ? err.message
-                            : "Failed to create product",
-                    type: "error",
-                });
+                setMessage({ text: `Product registered · ${body.product.id}`, type: "success" });
+                router.refresh();
+            } catch {
+                setMessage({ text: "Unable to register this product. Check your connection and try again.", type: "error" });
             }
         });
     }
 
     async function handleRecordProduction() {
-        if (!selectedProductId || qty <= 0) return;
+        const parsed = productionEntrySchema.safeParse({
+            productId: selectedProductId,
+            quantity: qty,
+            unitPrice: price,
+            idempotencyKey: idempotencyKey.current ?? crypto.randomUUID(),
+        });
+        if (!parsed.success) {
+            setMessage({ text: parsed.error.issues[0]?.message ?? "Enter valid production details.", type: "error" });
+            return;
+        }
+        idempotencyKey.current = parsed.data.idempotencyKey;
 
         startTransition(async () => {
             try {
-                await recordProduction({
-                    productId: selectedProductId,
-                    quantity: qty,
+                const response = await fetch("/api/production", {
+                    method: "POST",
+                    headers: { "content-type": "application/json" },
+                    body: JSON.stringify(parsed.data),
+                });
+                const body: { record?: { batchReference: string; quantity: number; unit: string } } & ApiError = await response.json();
+                if (!response.ok || !body.record) {
+                    const reference = body.requestId ? ` Reference: ${body.requestId}` : "";
+                    setMessage({ text: `${body.error ?? "Unable to save production. Please try again."}${reference}`, type: "error" });
+                    return;
+                }
+
+                setMessage({
+                    text: `Production recorded · ${body.record.batchReference} · ${body.record.quantity.toLocaleString()} ${body.record.unit}`,
+                    type: "success",
                 });
                 setQuantity("");
                 setUnitPrice("");
                 setSelectedProductId("");
-                setMessage({
-                    text: `Production of ${qty} units recorded`,
-                    type: "success",
-                });
-            } catch (err) {
-                setMessage({
-                    text:
-                        err instanceof Error
-                            ? err.message
-                            : "Failed to record production",
-                    type: "error",
-                });
+                resetSubmissionKey();
+                router.refresh();
+            } catch {
+                setMessage({ text: "Unable to save production. Please try again. If you retry, the same submission will not be counted twice.", type: "error" });
             }
         });
     }
@@ -120,55 +141,33 @@ export function ProductionForm({ products, vatRate }: ProductionFormProps) {
     return (
         <Card>
             <CardHeader className="pb-4">
-                <CardTitle className="text-base font-semibold flex items-center justify-between">
+                <CardTitle className="flex items-center justify-between text-base font-semibold">
                     <span>1. Production Entry</span>
-                    <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setShowNewProduct(!showNewProduct)}
-                    >
-                        <Plus className="h-3.5 w-3.5 mr-1" />
+                    <Button variant="outline" size="sm" onClick={() => setShowNewProduct(!showNewProduct)} disabled={isPending}>
+                        <Plus className="mr-1 h-3.5 w-3.5" />
                         {showNewProduct ? "Cancel" : "New Product"}
                     </Button>
                 </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-                {/* Status message */}
                 {message && (
-                    <div
-                        className={`text-sm rounded-md px-3 py-2 ${message.type === "success"
-                                ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                                : "bg-red-50 text-red-700 border border-red-200"
-                            }`}
-                    >
+                    <div role={message.type === "error" ? "alert" : "status"} className={`rounded-md border px-3 py-2 text-sm ${message.type === "success" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-red-200 bg-red-50 text-red-700"}`}>
                         {message.text}
                     </div>
                 )}
 
-                {/* New product form (collapsible) */}
                 {showNewProduct && (
-                    <div className="rounded-lg border border-dashed p-4 space-y-3 bg-muted/20">
+                    <div className="space-y-3 rounded-lg border border-dashed bg-muted/20 p-4">
                         <p className="text-sm font-medium">Register New Product</p>
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                             <div className="space-y-1.5">
-                                <Label className="text-xs">Product Name</Label>
-                                <Input
-                                    placeholder="e.g., Soap"
-                                    value={newProductName}
-                                    onChange={(e) =>
-                                        setNewProductName(e.target.value)
-                                    }
-                                />
+                                <Label htmlFor="new-product-name" className="text-xs">Product Name</Label>
+                                <Input id="new-product-name" placeholder="e.g., Soap" value={newProductName} onChange={(event) => setNewProductName(event.target.value)} maxLength={160} />
                             </div>
                             <div className="space-y-1.5">
                                 <Label className="text-xs">Unit</Label>
-                                <Select
-                                    value={newProductUnit}
-                                    onValueChange={setNewProductUnit}
-                                >
-                                    <SelectTrigger>
-                                        <SelectValue />
-                                    </SelectTrigger>
+                                <Select value={newProductUnit} onValueChange={setNewProductUnit}>
+                                    <SelectTrigger><SelectValue /></SelectTrigger>
                                     <SelectContent>
                                         <SelectItem value="kg">Kilogram (kg)</SelectItem>
                                         <SelectItem value="unit">Unit</SelectItem>
@@ -179,108 +178,59 @@ export function ProductionForm({ products, vatRate }: ProductionFormProps) {
                                     </SelectContent>
                                 </Select>
                             </div>
+                            <div className="space-y-1.5">
+                                <Label htmlFor="new-product-category" className="text-xs">Category code (optional)</Label>
+                                <Input id="new-product-category" placeholder="RRA category" value={newProductCategory} onChange={(event) => setNewProductCategory(event.target.value)} maxLength={64} />
+                            </div>
                         </div>
-                        <Button
-                            size="sm"
-                            onClick={handleCreateProduct}
-                            disabled={isPending || !newProductName.trim()}
-                        >
-                            {isPending && (
-                                <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                            )}
+                        <Button size="sm" onClick={handleCreateProduct} disabled={isPending || !newProductName.trim()}>
+                            {isPending && <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />}
                             Create Product
                         </Button>
                     </div>
                 )}
 
-                {/* Production entry form */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {/* Left: inputs */}
+                <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
                     <div className="space-y-3">
                         <div className="space-y-1.5">
                             <Label className="text-xs">Product Name</Label>
-                            <Select
-                                value={selectedProductId}
-                                onValueChange={setSelectedProductId}
-                            >
-                                <SelectTrigger>
-                                    <SelectValue placeholder="Select product" />
-                                </SelectTrigger>
+                            <Select value={selectedProductId} onValueChange={(value) => { setSelectedProductId(value); resetSubmissionKey(); }}>
+                                <SelectTrigger><SelectValue placeholder="Select your registered product" /></SelectTrigger>
                                 <SelectContent>
-                                    {availableProducts.map((p) => (
-                                        <SelectItem key={p.id} value={p.id}>
-                                            {p.name} ({p.unit})
-                                        </SelectItem>
+                                    {availableProducts.map((product) => (
+                                        <SelectItem key={product.id} value={product.id}>{product.name} ({product.unit})</SelectItem>
                                     ))}
                                 </SelectContent>
                             </Select>
                         </div>
-
                         <div className="space-y-1.5">
-                            <Label className="text-xs">Quantity Produced</Label>
-                            <Input
-                                type="number"
-                                placeholder="1000"
-                                value={quantity}
-                                onChange={(e) => setQuantity(e.target.value)}
-                                min={1}
-                            />
+                            <Label htmlFor="production-quantity" className="text-xs">Quantity Produced</Label>
+                            <Input id="production-quantity" type="number" placeholder="1000" value={quantity} onChange={(event) => { setQuantity(event.target.value); resetSubmissionKey(); }} min="0.0001" step="any" />
                         </div>
-
                         <div className="space-y-1.5">
-                            <Label className="text-xs">Price Per Unit (RWF)</Label>
-                            <Input
-                                type="number"
-                                placeholder="500"
-                                value={unitPrice}
-                                onChange={(e) => setUnitPrice(e.target.value)}
-                                min={0}
-                            />
+                            <Label htmlFor="production-unit-price" className="text-xs">Price Per Unit (RWF)</Label>
+                            <Input id="production-unit-price" type="number" placeholder="7000" value={unitPrice} onChange={(event) => { setUnitPrice(event.target.value); resetSubmissionKey(); }} min="0" step="1" />
                         </div>
                     </div>
 
-                    {/* Right: auto-calculation */}
-                    <div className="rounded-lg border bg-muted/30 p-4 space-y-3">
-                        <p className="text-sm font-medium text-muted-foreground">
-                            Automatic Calculation
-                        </p>
+                    <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+                        <p className="text-sm font-medium text-muted-foreground">Automatic Calculation · Preview</p>
                         <div className="space-y-2 text-sm">
-                            <div className="flex justify-between">
-                                <span className="text-muted-foreground">
-                                    Total Value = {qty.toLocaleString()} ×{" "}
-                                    {price.toLocaleString()}
-                                </span>
-                            </div>
-                            <div className="text-lg font-bold">
-                                = {formatRWF(totalValue)}
-                            </div>
+                            <p className="text-muted-foreground">Total Value = {qty.toLocaleString()} × {price.toLocaleString()}</p>
+                            <p className="text-lg font-bold">= {formatRWF(totalValue)}</p>
                         </div>
-                        <div className="border-t pt-3 space-y-1">
-                            <p className="text-xs text-muted-foreground">
-                                Potential Tax ({Math.round(vatRate * 100)}%) =
-                            </p>
-                            <p className="text-xl font-bold text-emerald-600">
-                                {formatRWF(potentialTax)}
-                            </p>
+                        <div className="space-y-1 border-t pt-3">
+                            <p className="text-xs text-muted-foreground">Potential Tax ({Math.round(vatRate * 100)}%)</p>
+                            <p className="text-xl font-bold text-emerald-600">{formatRWF(potentialTax)}</p>
+                            <p className="text-xs text-muted-foreground">Final values are calculated again on the server.</p>
                         </div>
                     </div>
                 </div>
 
-                {/* Buttons */}
-                <div className="flex gap-3 pt-2">
-                    <Button
-                        onClick={handleRecordProduction}
-                        disabled={isPending || !selectedProductId || qty <= 0}
-                        className="gap-2"
-                    >
-                        {isPending ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                            <Save className="h-4 w-4" />
-                        )}
-                        Save Production
-                    </Button>
-                </div>
+                <Button onClick={handleRecordProduction} disabled={isPending || !selectedProductId || qty <= 0 || !Number.isInteger(price) || !Number.isFinite(qty * price)} className="gap-2">
+                    {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                    Save Production
+                </Button>
             </CardContent>
         </Card>
     );

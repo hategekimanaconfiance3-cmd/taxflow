@@ -855,6 +855,9 @@ export const productionBatch = pgTable(
       .references(() => product.id),
     batchReference: text('batch_reference').notNull().unique(), // e.g. BATCH-SOAP-2026-000123
     declaredQuantity: real('declared_quantity').notNull(),
+    unitPrice: integer('unit_price').notNull().default(0),
+    vatRateBasisPoints: integer('vat_rate_basis_points').notNull().default(0),
+    idempotencyKey: text('idempotency_key'),
     openingStock: real('opening_stock').default(0),
     approvedLosses: real('approved_losses').default(0),
     status: text('status').default('declared'), // 'declared' | 'reconciled' | 'independently_supported'
@@ -872,6 +875,7 @@ export const productionBatch = pgTable(
     index('prod_batch_product_idx').on(table.productId),
     index('prod_batch_status_idx').on(table.status),
     uniqueIndex('prod_batch_ref_uniq').on(table.batchReference),
+    uniqueIndex('prod_batch_idempotency_key_uniq').on(table.idempotencyKey),
   ],
 );
 

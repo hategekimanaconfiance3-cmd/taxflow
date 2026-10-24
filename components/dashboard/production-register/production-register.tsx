@@ -8,103 +8,57 @@ import {
     TableHeader,
     TableRow,
 } from "@/components/ui/table";
-
-interface ProductWithStock {
-    id: string;
-    name: string;
-    unit: string;
-    categoryCode: string | null;
-    createdAt: Date;
-    quantity: number;
-    latestUnitPrice?: number | null;
-}
+import type { ProductionHistoryItem } from "@/lib/production-service";
 
 interface ProductionRegisterProps {
-    products: ProductWithStock[];
+    records: ProductionHistoryItem[];
 }
 
-export function ProductionRegister({ products }: ProductionRegisterProps) {
+export function ProductionRegister({ records }: ProductionRegisterProps) {
     return (
         <Card>
             <CardHeader>
-                <CardTitle className="text-base font-semibold">
-                    Production Register
-                </CardTitle>
+                <CardTitle className="text-base font-semibold">Production Register</CardTitle>
             </CardHeader>
             <CardContent>
-                {products.length === 0 ? (
-                    <p className="text-sm text-muted-foreground py-8 text-center">
-                        No products registered yet. Create your first product
-                        above.
-                    </p>
+                {records.length === 0 ? (
+                    <div className="py-8 text-center">
+                        <p className="text-sm font-medium">No production recorded yet.</p>
+                        <p className="mt-1 text-sm text-muted-foreground">Record a production run to see its batch and inventory trace here.</p>
+                    </div>
                 ) : (
-                    <Table>
-                        <TableHeader>
-                            <TableRow>
-                                <TableHead className="w-12">#</TableHead>
-                                <TableHead>Product</TableHead>
-                                <TableHead className="text-right">
-                                    Quantity
-                                </TableHead>
-                                <TableHead className="text-right">
-                                    Unit Price
-                                </TableHead>
-                                <TableHead className="text-right">
-                                    Total Value
-                                </TableHead>
-                                <TableHead className="text-right">
-                                    Potential Tax
-                                </TableHead>
-                                <TableHead className="text-right">
-                                    Date
-                                </TableHead>
-                            </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                            {products.map((prod, idx) => {
-                                const price = prod.latestUnitPrice
-                                    ? Number(prod.latestUnitPrice)
-                                    : 0;
-                                const totalValue = prod.quantity * price;
-                                const potentialTax = Math.round(
-                                    totalValue * 0.18,
-                                );
-                                return (
-                                    <TableRow key={prod.id}>
-                                        <TableCell className="text-muted-foreground">
-                                            {idx + 1}
-                                        </TableCell>
-                                        <TableCell className="font-medium">
-                                            {prod.name}
-                                        </TableCell>
-                                        <TableCell className="text-right font-mono">
-                                            {prod.quantity.toLocaleString()}
-                                        </TableCell>
-                                        <TableCell className="text-right font-mono text-sm">
-                                            {price > 0
-                                                ? formatRWF(price)
-                                                : "—"}
-                                        </TableCell>
-                                        <TableCell className="text-right font-mono font-medium">
-                                            {totalValue > 0
-                                                ? formatRWF(totalValue)
-                                                : "—"}
-                                        </TableCell>
-                                        <TableCell className="text-right font-mono text-emerald-600">
-                                            {potentialTax > 0
-                                                ? formatRWF(potentialTax)
-                                                : "—"}
-                                        </TableCell>
-                                        <TableCell className="text-right text-sm text-muted-foreground">
-                                            {new Date(
-                                                prod.createdAt,
-                                            ).toLocaleDateString()}
+                    <div className="overflow-x-auto">
+                        <Table>
+                            <TableHeader>
+                                <TableRow>
+                                    <TableHead>Product</TableHead>
+                                    <TableHead>Product ID</TableHead>
+                                    <TableHead>Batch ID</TableHead>
+                                    <TableHead className="text-right">Quantity</TableHead>
+                                    <TableHead className="text-right">Unit Price</TableHead>
+                                    <TableHead className="text-right">Total Value</TableHead>
+                                    <TableHead className="text-right">Potential Tax</TableHead>
+                                    <TableHead>Date</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {records.map((record) => (
+                                    <TableRow key={record.id}>
+                                        <TableCell className="min-w-32 font-medium">{record.productName}</TableCell>
+                                        <TableCell className="whitespace-nowrap font-mono text-xs">{record.productId}</TableCell>
+                                        <TableCell className="whitespace-nowrap font-mono text-xs">{record.batchReference}</TableCell>
+                                        <TableCell className="text-right font-mono">{record.quantity.toLocaleString()} {record.unit}</TableCell>
+                                        <TableCell className="text-right font-mono">{formatRWF(record.unitPrice)}</TableCell>
+                                        <TableCell className="text-right font-mono font-medium">{formatRWF(record.totalValue)}</TableCell>
+                                        <TableCell className="text-right font-mono text-emerald-600">{formatRWF(record.potentialTax)}</TableCell>
+                                        <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
+                                            {new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(new Date(record.createdAt))}
                                         </TableCell>
                                     </TableRow>
-                                );
-                            })}
-                        </TableBody>
-                    </Table>
+                                ))}
+                            </TableBody>
+                        </Table>
+                    </div>
                 )}
             </CardContent>
         </Card>

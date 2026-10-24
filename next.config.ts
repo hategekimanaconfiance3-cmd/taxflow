@@ -31,6 +31,10 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   reactCompiler: true,
+  // Keep tracing and Turbopack scoped to this checkout. The repository may be
+  // nested under a user profile with inaccessible parent symlinks in CI/Work.
+  outputFileTracingRoot: process.cwd(),
+  turbopack: { root: process.cwd() },
   typescript: {
     // This forces Vercel to bypass the stuck TypeScript check during deployment
     ignoreBuildErrors: true,
