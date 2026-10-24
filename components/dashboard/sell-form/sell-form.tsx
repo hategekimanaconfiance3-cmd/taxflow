@@ -121,9 +121,9 @@ export function SellForm({ inventory, products, vatRate }: SellFormProps) {
   // Older page versions passed the same stock list as `products`. Treat an
   // absent or malformed prop as an empty list so rendering never crashes.
   const sellableInventory = Array.isArray(inventory)
-    ? inventory
+    ? inventory.filter((item) => Number.isFinite(item.quantity) && item.quantity > 0)
     : Array.isArray(products)
-      ? products
+      ? products.filter((item) => Number.isFinite(item.quantity) && item.quantity > 0)
       : [];
   const [isPending, startTransition] = useTransition();
   const [buyer, setBuyer] = useState<BuyerInfo | null>(null);
@@ -184,7 +184,7 @@ export function SellForm({ inventory, products, vatRate }: SellFormProps) {
         }
 
         setMessage({
-          text: `Sale of ${activeItems.length} product(s) submitted for confirmation`,
+          text: `Sale of ${activeItems.length} product(s) submitted. The buyer has been notified to confirm receipt.`,
           type: 'success',
         });
 
@@ -291,9 +291,17 @@ export function SellForm({ inventory, products, vatRate }: SellFormProps) {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {saleItems.map((item, idx) => (
-                    <SaleItemRow key={item.productId} item={item} idx={idx} vatRate={vatRate} onUpdate={updateItem} />
-                  ))}
+                  {saleItems.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={6} className="py-6 text-center text-sm text-muted-foreground">
+                        No sellable stock is available. Manufacturers can record production; wholesalers can confirm an incoming purchase to add stock.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    saleItems.map((item, idx) => (
+                      <SaleItemRow key={item.productId} item={item} idx={idx} vatRate={vatRate} onUpdate={updateItem} />
+                    ))
+                  )}
                 </TableBody>
               </Table>
             </div>

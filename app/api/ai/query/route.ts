@@ -54,6 +54,11 @@ const MODEL = google(process.env.GOOGLE_GENERATIVE_AI_MODEL?.trim() || "gemini-3
 
 const requestSchema = z.object({
     messages: z.array(z.unknown()).min(1).max(20),
+    // DefaultChatTransport includes chat/request metadata alongside messages.
+    // Validate recognized fields so the strict schema accepts real SDK requests.
+    id: z.string().max(128).optional(),
+    trigger: z.enum(["submit-message", "regenerate-message"]).optional(),
+    messageId: z.string().max(128).optional(),
 }).strict();
 
 const messageSchema = z.object({

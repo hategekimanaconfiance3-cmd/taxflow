@@ -815,7 +815,7 @@ export async function lookupBuyer(buyerTin: string) {
     }
 
     // Tax compliance check for buyer
-    let buyerCompliancePct = 100;
+    let buyerCompliancePct = 0;
     let buyerTaxReason = '';
     try {
       const compliance = await getBusinessComplianceStatus(buyer.id);
@@ -825,7 +825,10 @@ export async function lookupBuyer(buyerTin: string) {
         buyerTaxReason = `Tax compliance: ${compliance.compliancePct}% (need ${compliance.threshold}%). Outstanding: ${compliance.outstanding.toLocaleString()} RWF`;
       }
     } catch {
-      // If compliance check fails, don't block — just report clearance
+      // Fail closed: a buyer must not be marked eligible unless their tax
+      // compliance has been successfully verified.
+      isEligible = false;
+      buyerTaxReason = 'Could not verify buyer tax compliance. Please try again.';
     }
 
     return {
