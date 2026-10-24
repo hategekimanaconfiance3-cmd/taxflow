@@ -204,8 +204,9 @@ export async function confirmImportArrival(
     };
     let failureStage = "read submitted declaration";
     try {
+        failureStage = "start database transaction";
         confirmation = await db.transaction(async (tx) => {
-        failureStage = "read submitted declaration";
+        failureStage = "load and lock declaration";
         // Lock the row for the duration of this transaction
         const [declaration] = await tx
             .select()
@@ -215,14 +216,17 @@ export async function confirmImportArrival(
             .limit(1);
 
         if (!declaration) throw new Error("Import declaration not found");
+        failureStage = "validate declaration status";
         if (declaration.status !== "submitted") {
             throw new Error("Only submitted declarations can be confirmed. Current status: " + declaration.status);
         }
+        failureStage = "validate arrival details";
         if (declaration.actualQuantity == null || !declaration.invoiceRef) {
             throw new Error("Declaration is missing arrival details / invoice reference");
         }
 
         // RRA officer may override with inspected quantity; fall back to trader-declared
+        failureStage = "validate inspected quantity";
         const quantityToActivate = review.inspectedQuantity ?? declaration.actualQuantity;
         if (!Number.isFinite(quantityToActivate) || quantityToActivate <= 0 || quantityToActivate > 1_000_000_000) {
             throw new Error("Inspected quantity must be finite and between 0 and 1,000,000,000.");
@@ -313,14 +317,27 @@ export async function confirmImportArrival(
     } catch (error) {
         const reference = crypto.randomUUID();
         const errorCode = getPostgresErrorCode(error);
+        const safeValidationMessage = error instanceof Error ? [
+            "Import declaration not found",
+            "Only submitted declarations can be confirmed.",
+            "Declaration is missing arrival details / invoice reference",
+            "Inspected quantity must be finite and between 0 and 1,000,000,000.",
+            "Declaration status changed concurrently; import was not activated.",
+            "Import stock activation could not be confirmed.",
+        ].find((message) => error.message.startsWith(message)) : undefined;
+        const errorType = error instanceof Error && /^[A-Za-z0-9_.-]{1,60}$/.test(error.name)
+            ? error.name : "UnknownError";
         console.error("[confirmImportArrival] Transaction failed", {
             reference,
             failureStage,
             errorCode,
+            errorType,
         });
         return {
             success: false as const,
-            error: `Import confirmation failed during ${failureStage}. Reference: ${reference} (database code: ${errorCode}).`,
+            error: safeValidationMessage
+                ? `Import confirmation failed: ${safeValidationMessage} Reference: ${reference}.`
+                : `Import confirmation failed during ${failureStage}. Reference: ${reference} (error type: ${errorType}; database code: ${errorCode}).`,
         };
     }
 
