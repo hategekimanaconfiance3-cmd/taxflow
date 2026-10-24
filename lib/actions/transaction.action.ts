@@ -185,7 +185,7 @@ async function expireStalePendingTransactions(): Promise<void> {
 // Create an atomic multi-product B2B sale with stock reservations
 // ---------------------------------------------------------------------------
 
-export async function createSaleForConfirmation(data: {
+async function createSaleForConfirmationInternal(data: {
   buyerTin: string;
   items: Array<{ productId: string; quantity: number; unitPrice: number }>;
   transactionType?: 'STANDARD_B2B_SALE' | 'DIRECT_BULK_SALE';
@@ -333,6 +333,41 @@ export async function createSaleForConfirmation(data: {
   return created.txns;
 }
 
+type SaleCreationResult =
+  | { success: true; transactions: Awaited<ReturnType<typeof createSaleForConfirmationInternal>> }
+  | { success: false; error: string; reference: string };
+
+/** Keep production action failures user-safe while returning a reference for support. */
+export async function createSaleForConfirmation(data: {
+  buyerTin: string;
+  items: Array<{ productId: string; quantity: number; unitPrice: number }>;
+  transactionType?: 'STANDARD_B2B_SALE' | 'DIRECT_BULK_SALE';
+  invoiceReference?: string;
+  deliveryInformation?: { address?: string; schedule?: string; notes?: string };
+}): Promise<SaleCreationResult> {
+  try {
+    return { success: true, transactions: await createSaleForConfirmationInternal(data) };
+  } catch (error) {
+    const reference = crypto.randomUUID();
+    const errorCode = typeof error === 'object' && error !== null && 'code' in error
+      && typeof error.code === 'string' ? error.code : 'unknown';
+    console.error(`[sale-create:${reference}] Sale creation failed (code: ${errorCode})`);
+
+    // Domain validation/auth errors are already safe messages created by this action.
+    const message = error instanceof Error && [
+      'Your account is', 'Retailers must', 'Buyer TIN must', 'Add between',
+      'Each product', 'Every quantity', 'Invoice/reference', 'Delivery information',
+      'Buyer not found', 'Cannot sell to yourself', 'Buyer account is', 'Buyer has no',
+      'Incompatible', 'You must pay at least', 'Buyer has not met tax compliance',
+      'A selected product', 'Sale total is', 'Invalid transaction type', 'Insufficient stock',
+    ].some((prefix) => error.message.startsWith(prefix))
+      ? error.message
+      : `Sale could not be saved. Reference ${reference} (database code: ${errorCode}).`;
+
+    return { success: false, error: message, reference };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Create B2B Transaction (Manufacturer/Wholesaler → Buyer)
 // ---------------------------------------------------------------------------
@@ -346,13 +381,16 @@ export async function createTransaction(data: {
   invoiceReference?: string;
   deliveryInformation?: { address?: string; schedule?: string; notes?: string };
 }) {
-  const [created] = await createSaleForConfirmation({
+  const result = await createSaleForConfirmation({
     buyerTin: data.buyerTin,
     items: [{ productId: data.productId, quantity: data.quantity, unitPrice: data.unitPrice }],
     transactionType: data.transactionType,
     invoiceReference: data.invoiceReference,
     deliveryInformation: data.deliveryInformation,
   });
+  if (!result.success) throw new Error(result.error);
+  const [created] = result.transactions;
+  if (!created) throw new Error('Sale could not be saved.');
   return created;
 }
 

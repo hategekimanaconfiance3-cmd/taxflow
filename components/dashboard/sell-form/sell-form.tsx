@@ -219,8 +219,12 @@ export function SellForm({ inventory, vatRate, recentTransactions }: SellFormPro
           invoiceReference,
           deliveryInformation: isDirectBulkSale ? { address: deliveryAddress, schedule: deliverySchedule, notes: deliveryNotes } : undefined,
         });
-        const ids = result.map((transaction) => transaction.id);
-        const firstTransaction = result[0];
+        if (!result.success) {
+          setMessage({ text: result.error, type: 'error' });
+          return;
+        }
+        const ids = result.transactions.map((transaction) => transaction.id);
+        const firstTransaction = result.transactions[0];
         if (firstTransaction) setLocalTransaction({
           id: firstTransaction.id,
           buyerName: buyer.businessName ?? buyer.name,
