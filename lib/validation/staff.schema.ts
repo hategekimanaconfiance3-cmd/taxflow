@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { RRA_ROLE_OPTIONS, RRA_ROLE_PERMISSIONS, RRA_ROLE_VALUES, type RRARole } from '@/lib/rra-rbac';
+import { RRA_ROLE_OPTIONS, RRA_ROLE_PERMISSIONS, RRA_ROLE_VALUES, type RRAProposedRole, type RRARole } from '@/lib/rra-rbac';
 
 const LEGACY_ROLE_LABELS: Partial<Record<RRARole, string>> = {
   compliance_officer: 'Legacy · Compliance Officer',
@@ -17,11 +17,20 @@ export const STAFF_ROLE_OPTIONS = RRA_ROLE_VALUES.map((value) => {
     permissions: (RRA_ROLE_PERMISSIONS[value] ?? []).join(', '),
   };
 }) as readonly { value: RRARole; label: string; permissions: string }[];
+export const STAFF_ASSIGNMENT_ROLE_OPTIONS = RRA_ROLE_OPTIONS.map((role) => ({
+  value: role.value,
+  label: role.label,
+  permissions: (RRA_ROLE_PERMISSIONS[role.value] ?? []).join(', '),
+}));
 
 const STAFF_ROLES = STAFF_ROLE_OPTIONS.map((option) => option.value) as [RRARole, ...RRARole[]];
+const ASSIGNABLE_STAFF_ROLES = RRA_ROLE_OPTIONS.map((option) => option.value) as [RRAProposedRole, ...RRAProposedRole[]];
 export const staffRoleSchema = z.enum(STAFF_ROLES);
-export const staffAssignmentRoleSchema = staffRoleSchema;
+export const staffAssignmentRoleSchema = z.enum(ASSIGNABLE_STAFF_ROLES);
 export const staffRolesSchema = z.array(staffRoleSchema).min(1, 'Choose at least one role.').max(STAFF_ROLE_OPTIONS.length)
+  .refine((roles) => new Set(roles).size === roles.length, 'Each role can only be assigned once.')
+  .refine((roles) => !roles.includes('super_admin') || roles.length === 1, 'Super Admin must be the only assigned role.');
+const staffAccountRolesSchema = z.array(staffAssignmentRoleSchema).min(1, 'Choose at least one role.').max(RRA_ROLE_OPTIONS.length)
   .refine((roles) => new Set(roles).size === roles.length, 'Each role can only be assigned once.')
   .refine((roles) => !roles.includes('super_admin') || roles.length === 1, 'Super Admin must be the only assigned role.');
 
@@ -45,7 +54,7 @@ export const staffAccountSchema = z
       .max(20, 'Staff ID must be at most 20 characters.')
       .regex(/^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/, 'Use letters, numbers, and single dashes only.'),
     department: z.string().trim().min(2, 'Enter a department.').max(100),
-    roles: staffRolesSchema,
+    roles: staffAccountRolesSchema,
     password: passwordSchema,
     confirmPassword: z.string().min(1, 'Confirm the password.'),
   })

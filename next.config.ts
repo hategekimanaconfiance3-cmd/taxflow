@@ -31,6 +31,12 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   reactCompiler: true,
+  // Keep build tracing inside this checkout instead of inferring a parent
+  // workspace root from unrelated lockfiles above the project directory.
+  outputFileTracingRoot: process.cwd(),
+  turbopack: {
+    root: process.cwd(),
+  },
   typescript: {
     // This forces Vercel to bypass the stuck TypeScript check during deployment
     ignoreBuildErrors: true,

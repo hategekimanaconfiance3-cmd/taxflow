@@ -2693,11 +2693,12 @@ async function seedTaxFlowFull(): Promise<void> {
       },
     ];
 
-    for (const t of TICKETS) {
+    for (const [ticketIndex, t] of TICKETS.entries()) {
       const createdAt = daysAgo(t.daysAgo);
       const resolvedAt = t.status === 'resolved' ? daysAgo(t.daysAgo - 3) : null;
       await db.insert(supportTicket).values({
         id: crypto.randomUUID(),
+        ticketReference: 'TKT-SEED-' + String(ticketIndex + 1).padStart(6, '0'),
         traderId: t.traderId,
         category: t.category,
         subject: t.subject,
@@ -2705,7 +2706,7 @@ async function seedTaxFlowFull(): Promise<void> {
         status: t.status,
         priority: t.priority,
         assignedToId: t.assignedTo ?? null,
-        resolution: (t as any).resolution ?? null,
+        resolution: 'resolution' in t ? t.resolution : null,
         createdAt,
         updatedAt: resolvedAt ?? createdAt,
         resolvedAt,

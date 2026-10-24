@@ -7,7 +7,7 @@ import { Eye, EyeOff, Loader2, UserPlus, WandSparkles } from "lucide-react";
 import { createStaffAccount } from "@/lib/actions/admin-staff.action";
 import {
     staffAccountSchema,
-    STAFF_ROLE_OPTIONS,
+    STAFF_ASSIGNMENT_ROLE_OPTIONS,
     type StaffAccountFields,
     type StaffAccountInput,
 } from "@/lib/validation/staff.schema";
@@ -68,7 +68,7 @@ export function StaffAccountDialog({ onNotice, onCreated }: Props) {
             email: "",
             staffId: "",
             department: "",
-            roles: ["compliance_officer"],
+            roles: ["tax_compliance_officer"],
             password: "",
             confirmPassword: "",
         },
@@ -156,7 +156,7 @@ export function StaffAccountDialog({ onNotice, onCreated }: Props) {
                                 <FormItem className="sm:col-span-2">
                                     <FormLabel>Staff role assignments</FormLabel>
                                     <div className="space-y-2">
-                                        {STAFF_ROLE_OPTIONS.map((role) => (
+                                        {STAFF_ASSIGNMENT_ROLE_OPTIONS.map((role) => (
                                             <label key={role.value} className="flex cursor-pointer items-start gap-3 rounded-md border p-3 hover:bg-muted/50">
                                                 <input type="checkbox" className="mt-1 size-4 accent-primary" checked={field.value.includes(role.value)}
                                                     onChange={(event) => {

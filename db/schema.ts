@@ -802,6 +802,7 @@ export const supportTicket = pgTable(
     id: text('id')
       .primaryKey()
       .$defaultFn(() => crypto.randomUUID()),
+    ticketReference: text('ticket_reference').notNull(),
     traderId: text('trader_id')
       .notNull()
       .references(() => user.id),
@@ -811,15 +812,67 @@ export const supportTicket = pgTable(
     status: text('status').notNull().default('open'), // open | in_progress | resolved | closed
     priority: text('priority').notNull().default('medium'), // low | medium | high
     assignedToId: text('assigned_to_id').references(() => user.id),
+    assignedDepartment: text('assigned_department'),
     resolution: text('resolution'),
+    resolutionCategory: text('resolution_category'),
+    resolvedById: text('resolved_by_id').references(() => user.id),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
+    firstResponseAt: timestamp('first_response_at'),
     resolvedAt: timestamp('resolved_at'),
+    closedAt: timestamp('closed_at'),
+    reopenedAt: timestamp('reopened_at'),
   },
   (t) => [
+    uniqueIndex('support_ticket_reference_unique').on(t.ticketReference),
     index('support_ticket_trader_idx').on(t.traderId),
     index('support_ticket_status_idx').on(t.status),
     index('support_ticket_assigned_idx').on(t.assignedToId),
+    index('support_ticket_department_status_idx').on(t.assignedDepartment, t.status),
+    index('support_ticket_updated_idx').on(t.updatedAt),
+  ],
+);
+
+export const supportTicketMessage = pgTable(
+  'support_ticket_message',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    ticketId: text('ticket_id').notNull().references(() => supportTicket.id, { onDelete: 'cascade' }),
+    senderUserId: text('sender_user_id').references(() => user.id, { onDelete: 'set null' }),
+    body: text('body').notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [index('support_ticket_message_ticket_created_idx').on(table.ticketId, table.createdAt)],
+);
+
+export const supportTicketInternalNote = pgTable(
+  'support_ticket_internal_note',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    ticketId: text('ticket_id').notNull().references(() => supportTicket.id, { onDelete: 'cascade' }),
+    authorUserId: text('author_user_id').references(() => user.id, { onDelete: 'set null' }),
+    category: text('category'),
+    body: text('body').notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [index('support_ticket_internal_note_ticket_created_idx').on(table.ticketId, table.createdAt)],
+);
+
+export const supportTicketEvent = pgTable(
+  'support_ticket_event',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    ticketId: text('ticket_id').notNull().references(() => supportTicket.id, { onDelete: 'cascade' }),
+    actorUserId: text('actor_user_id').references(() => user.id, { onDelete: 'set null' }),
+    eventType: text('event_type').notNull(),
+    previousStatus: text('previous_status'),
+    newStatus: text('new_status'),
+    details: jsonb('details').$type<Record<string, unknown>>(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('support_ticket_event_ticket_created_idx').on(table.ticketId, table.createdAt),
+    index('support_ticket_event_actor_idx').on(table.actorUserId, table.createdAt),
   ],
 );
 
