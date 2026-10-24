@@ -35,7 +35,7 @@ export function SupportTicketForm() {
   const [error, setError] = useState('');
   const [submitted, setSubmitted] = useState(false);
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const trimmedSubject = subject.trim();
     const trimmedDescription = description.trim();
