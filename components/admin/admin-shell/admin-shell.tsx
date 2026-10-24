@@ -116,7 +116,7 @@ function NotificationBell({ href }: { href: string }) {
 function AIPanel({ onClose }: { onClose: () => void }) {
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const { messages, sendMessage, status, setMessages } = useChat({
+  const { messages, sendMessage, status, error, setMessages } = useChat({
     transport: new DefaultChatTransport({ api: '/api/ai/query' }),
   });
   const isLoading = status === 'streaming' || status === 'submitted';
@@ -169,8 +169,8 @@ function AIPanel({ onClose }: { onClose: () => void }) {
               <Sparkles className="h-7 w-7 text-blue-500" />
             </div>
             <div className="text-center space-y-1">
-              <p className="text-sm font-semibold">Ask about traders, risk &amp; revenue</p>
-              <p className="text-xs text-muted-foreground">Natural language queries on all RRA data</p>
+              <p className="text-sm font-semibold">Ask an RRA or business question</p>
+              <p className="text-xs text-muted-foreground">Enter a TIN or ask about records, evidence, risks, and workflows. Official decisions stay with authorized staff.</p>
             </div>
             <div className="w-full space-y-1.5">
               {AI_SUGGESTIONS.map((s) => (
@@ -213,13 +213,20 @@ function AIPanel({ onClose }: { onClose: () => void }) {
                       <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/60 animate-bounce [animation-delay:150ms]" />
                       <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/60 animate-bounce [animation-delay:300ms]" />
                     </div>
-                  ) : (
+                  ) : content ? (
                     <p className="whitespace-pre-wrap leading-relaxed">{content}</p>
-                  )}
+                  ) : !isUser ? (
+                    <p className="whitespace-pre-wrap leading-relaxed text-muted-foreground">I couldn&apos;t produce a written answer. Please ask what you want to know about the TIN or record, or try your question again.</p>
+                  ) : null}
                 </div>
               </div>
             );
           })
+        )}
+        {status === 'error' && (
+          <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+            {error ? "I couldn't complete that answer. Please try again or clear this chat and resend your question." : "The AI assistant could not complete this request. Please try again."}
+          </div>
         )}
         <div ref={messagesEndRef} />
       </div>

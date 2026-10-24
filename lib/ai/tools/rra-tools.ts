@@ -22,7 +22,7 @@ import { searchProductJourney } from "@/lib/actions/product-journey.action";
 
 /** Look up a trader by TIN, name, or email. */
 export const lookupTrader = tool({
-    description: "Look up a trader/merchant by TIN number, business name, or email. Returns their profile, role, clearance status, and district.",
+    description: "Look up a trader/merchant by TIN number, business name, or email. Returns their profile, role, clearance status, and district. If an RRA officer sends only a TIN, use this tool to identify the authorized record, summarize it briefly, and ask what they want to review next.",
     inputSchema: z.object({
         query: z.string().describe("TIN number, business name, or email to search for"),
     }),
