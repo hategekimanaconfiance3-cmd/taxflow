@@ -30,6 +30,7 @@ interface ProductionFormProps {
 
 export function ProductionForm({ products, vatRate }: ProductionFormProps) {
     const [isPending, startTransition] = useTransition();
+    const [availableProducts, setAvailableProducts] = useState(products);
 
     // Product creation state
     const [showNewProduct, setShowNewProduct] = useState(false);
@@ -56,10 +57,20 @@ export function ProductionForm({ products, vatRate }: ProductionFormProps) {
 
         startTransition(async () => {
             try {
-                await createProduct({
+                const product = await createProduct({
                     name: newProductName.trim(),
                     unit: newProductUnit,
                 });
+                setAvailableProducts((current) =>
+                    current.some((item) => item.id === product.id)
+                        ? current
+                        : [...current, {
+                            id: product.id,
+                            name: product.name,
+                            unit: product.unit,
+                        }],
+                );
+                setSelectedProductId(product.id);
                 setNewProductName("");
                 setShowNewProduct(false);
                 setMessage({
@@ -196,7 +207,7 @@ export function ProductionForm({ products, vatRate }: ProductionFormProps) {
                                     <SelectValue placeholder="Select product" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    {products.map((p) => (
+                                    {availableProducts.map((p) => (
                                         <SelectItem key={p.id} value={p.id}>
                                             {p.name} ({p.unit})
                                         </SelectItem>

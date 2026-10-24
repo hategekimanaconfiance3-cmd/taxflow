@@ -7,8 +7,9 @@ import { ProductionForm } from '@/components/dashboard/production-form/productio
 export default async function ProductionPage() {
   const session = await requireTraderSession(['manufacturer']);
 
-  const [inventory, config] = await Promise.all([
+  const [inventory, registeredProducts, config] = await Promise.all([
     getInventory(),
+    getProducts(session.user.id),
     getSystemConfig(),
   ]);
 
@@ -22,7 +23,7 @@ export default async function ProductionPage() {
     latestUnitPrice: item.latestUnitPrice ?? null,
   }));
 
-  const formProducts = products.map((p) => ({
+  const formProducts = registeredProducts.map((p) => ({
     id: p.id,
     name: p.name,
     unit: p.unit,
