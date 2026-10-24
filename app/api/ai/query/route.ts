@@ -52,57 +52,77 @@ const google = createGoogleGenerativeAI({
 const MODEL = google(process.env.GOOGLE_GENERATIVE_AI_MODEL?.trim() || "gemini-3.6-flash");
 
 const requestSchema = z.object({
-    messages: z.array(z.unknown()).min(1).max(20),
-    // DefaultChatTransport includes chat/request metadata alongside messages.
-    // Validate recognized fields so the strict schema accepts real SDK requests.
+    // A long-running chat can exceed the context window we send to the model;
+    // parse the newest messages below instead of rejecting the whole request.
+    messages: z.array(z.unknown()).min(1).max(100),
+    // DefaultChatTransport and future SDK versions can add request metadata.
+    // It is ignored; identity, role, and tool access always come from the session.
     id: z.string().max(128).optional(),
     trigger: z.enum(["submit-message", "regenerate-message"]).optional(),
     messageId: z.string().max(128).optional(),
-}).strict();
+}).passthrough();
 
 const messageSchema = z.object({
     role: z.enum(["user", "assistant"]),
-    parts: z.array(z.unknown()).max(40),
+    id: z.string().max(128).optional(),
+    parts: z.array(z.unknown()).max(100),
 }).passthrough();
 
-const textPartSchema = z.object({ type: z.literal("text"), text: z.string().max(4_000) }).passthrough();
+const textPartSchema = z.object({ type: z.literal("text"), text: z.string().max(12_000) }).passthrough();
+const MAX_CONTEXT_MESSAGES = 20;
+const MAX_CONTEXT_CHARACTERS = 12_000;
 
 function parseMessages(input: unknown): { rawMessages: Record<string, unknown>[]; textMessages: { role: "user" | "assistant"; content: string }[] } | null {
     const parsed = requestSchema.safeParse(input);
     if (!parsed.success) return null;
 
     const messages: { role: "user" | "assistant"; content: string }[] = [];
-    const rawMessages: Record<string, unknown>[] = [];
-    let totalCharacters = 0;
     for (const candidate of parsed.data.messages) {
         const message = messageSchema.safeParse(candidate);
         if (!message.success) return null;
 
-        const parsedParts = message.data.parts.map((part) => {
+        const textParts = message.data.parts.flatMap((part) => {
             const textPart = textPartSchema.safeParse(part);
-            if (textPart.success) return textPart.data;
-            if (typeof part === "object" && part !== null && "type" in part && typeof part.type === "string" && part.type.startsWith("tool-")) return part;
-            return null;
+            // Only send visible text back to the model. Tool invocations and
+            // tool results are client-controlled historical payloads; omitting
+            // them avoids trusting forged results and accepts SDK step markers.
+            return textPart.success ? [textPart.data.text] : [];
         });
-        if (parsedParts.some((part) => part === null)) return null;
-        const safeParts = parsedParts.filter((part) => part !== null);
-        const content = safeParts
-            .filter((part) => "text" in part && typeof (part as Record<string, unknown>).text === "string")
-            .map((part) => (part as Record<string, unknown>).text as string)
-            .join("\n")
-            .trim();
-        totalCharacters += content.length;
-        if (totalCharacters > 12_000) return null;
-        rawMessages.push({ ...message.data, parts: safeParts });
-        if (content) messages.push({ role: message.data.role, content });
+        const content = textParts.join("\n").trim();
+        if (content) {
+            const previousMessage = messages.at(-1);
+            if (previousMessage?.role === message.data.role) {
+                previousMessage.content = `${previousMessage.content}\n${content}`;
+            } else {
+                messages.push({ role: message.data.role, content });
+            }
+        }
     }
 
-    const lastMessage = rawMessages.at(-1);
-    // Each request must begin with a new user instruction. In particular, never
+    const lastMessage = messageSchema.safeParse(parsed.data.messages.at(-1));
+    // Each request must end with a new user instruction. In particular, never
     // accept a client-submitted tool approval as authorization to execute a
     // consequential action. The assistant has read-only tools only.
-    if (messages.length === 0 || lastMessage?.role !== "user") return null;
-    return { rawMessages, textMessages: messages };
+    if (!lastMessage.success || lastMessage.data.role !== "user" || messages.at(-1)?.role !== "user") return null;
+
+    // Keep a bounded, recent text-only history. This lets old chats continue
+    // without rejecting a short new question once they exceed the model window.
+    const context: typeof messages = [];
+    let contextCharacters = 0;
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const message = messages[index];
+        if (context.length >= MAX_CONTEXT_MESSAGES || contextCharacters + message.content.length > MAX_CONTEXT_CHARACTERS) break;
+        context.unshift(message);
+        contextCharacters += message.content.length;
+    }
+    if (context.at(-1)?.role !== "user") return null;
+
+    const rawMessages = context.map((message, index) => ({
+        id: `ai-context-${index}`,
+        role: message.role,
+        parts: [{ type: "text", text: message.content }],
+    }));
+    return { rawMessages, textMessages: context };
 }
 
 // ---------------------------------------------------------------------------
@@ -201,7 +221,7 @@ export async function POST(request: Request) {
 
     const parsedMessages = parseMessages(body);
     if (!parsedMessages) {
-        return Response.json({ error: "Invalid chat request. Please shorten your message and try again." }, { status: 400 });
+        return Response.json({ error: "I couldn't read this chat message. Please resend your question, or clear the chat if the problem continues." }, { status: 400 });
     }
 
     // Extract the latest user message for audit logging

@@ -26,18 +26,21 @@ const AI_PANEL_W = 420;
 const SUGGESTIONS: Record<string, string[]> = {
   manufacturer: [
     'Show my recent sales',
+    'How can I improve my profit?',
     "What's my current stock?",
     'What is my tax status?',
     'How do I sell to a wholesaler?',
   ],
   wholesaler: [
     'Show my recent purchases',
+    'How can I improve my profit?',
     "What's my current inventory?",
     'How much VAT do I owe?',
     'How do I confirm a transaction?',
   ],
   retailer: [
     'Show my recent sales',
+    'How can I improve my profit?',
     "What's my current stock?",
     'Why is my VAT higher this month?',
     'How do I file a dispute?',
@@ -165,8 +168,8 @@ function AIPanel({ onClose, role }: { onClose: () => void; role: TraderRole }) {
               <Sparkles className="h-7 w-7 text-blue-500" />
             </div>
             <div className="text-center space-y-1">
-              <p className="text-sm font-semibold">Ask about your taxes &amp; business</p>
-              <p className="text-xs text-muted-foreground">Get instant answers about compliance &amp; stock</p>
+              <p className="text-sm font-semibold">Ask about your business</p>
+              <p className="text-xs text-muted-foreground">Get advice on sales, profit, stock, operations, and TaxFlow</p>
             </div>
             <div className="w-full space-y-1.5">
               {suggestions.map((s) => (
@@ -234,7 +237,7 @@ function AIPanel({ onClose, role }: { onClose: () => void; role: TraderRole }) {
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Ask a question…"
+            placeholder="Ask about your business…"
             disabled={isLoading}
             className="flex-1 bg-transparent text-[13px] outline-none placeholder:text-muted-foreground/60 disabled:opacity-50"
           />

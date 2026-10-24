@@ -36,6 +36,7 @@ const SUGGESTIONS: Record<string, string[]> = {
     ],
     manufacturer: [
         "Show my recent sales",
+        "How can I improve my profit?",
         "What's my current stock?",
         "How is VAT calculated?",
         "What is my tax status?",
@@ -44,6 +45,7 @@ const SUGGESTIONS: Record<string, string[]> = {
     ],
     wholesaler: [
         "Show my recent purchases",
+        "How can I improve my profit?",
         "What's my current inventory?",
         "How much VAT do I owe?",
         "Show my sales this week",
@@ -52,6 +54,7 @@ const SUGGESTIONS: Record<string, string[]> = {
     ],
     retailer: [
         "Show my recent sales",
+        "How can I improve my profit?",
         "What's my current stock?",
         "Why is my VAT higher this month?",
         "How do I record a sale?",
@@ -176,12 +179,12 @@ export function AIChatWidget({ role }: AIChatWidgetProps) {
                                     <h4 className="font-semibold text-sm">
                                         {role === "rra_staff"
                                             ? "Ask about traders, risk, and revenue"
-                                            : "Ask about your business data"}
+                                            : "Ask about your business"}
                                     </h4>
                                     <p className="text-xs text-muted-foreground max-w-[280px]">
                                         {role === "rra_staff"
                                             ? "Query any trader, trace supply chains, check risk scores, and get revenue forecasts."
-                                            : "View your sales, stock, tax status, and get help using the platform."}
+                                            : "Get advice on sales, profit, stock, operations, and how to use TaxFlow."}
                                     </p>
                                 </div>
                                 <div className="grid grid-cols-1 gap-1.5 w-full max-w-xs">
@@ -376,7 +379,7 @@ export function AIChatWidget({ role }: AIChatWidgetProps) {
                                 placeholder={
                                     role === "rra_staff"
                                         ? "Ask about traders, tax, risk…"
-                                        : "Ask about your sales, stock, tax…"
+                                        : "Ask about your business…"
                                 }
                                 className="flex-1 h-9 text-sm"
                                 disabled={isLoading}

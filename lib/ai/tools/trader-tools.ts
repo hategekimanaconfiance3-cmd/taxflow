@@ -29,7 +29,7 @@ export function createTraderTools(userId: string) {
      * This is the primary tool for questions about totals, revenue, stock, VAT.
      */
     const getDashboardOverview = tool({
-        description: "Get the trader's dashboard overview stats — total produced, total sold, remaining stock, sales value, VAT output, VAT input, net tax due, and pending counts. This is the most accurate source for summary numbers. Use this tool first when the user asks about their totals, revenue, stock levels, or tax status.",
+        description: "Get the trader's dashboard overview stats — total produced, total sold, remaining stock, sales value, VAT output, VAT input, net tax due, and pending counts. This is the most accurate source for summary numbers. Use for totals, revenue, stock levels, tax status, or to ground business performance and profitability advice. Sales value is revenue, not profit; TaxFlow does not provide all business costs.",
         inputSchema: z.object({}),
         execute: async () => {
             // 1. Total stock (remaining) — matches dashboard.action.ts
@@ -337,7 +337,7 @@ export function createTraderTools(userId: string) {
 
     /** Get monthly stats — matches getMonthlyStats() for charts. */
     const getMonthlyStats = tool({
-        description: "Get the trader's monthly sales and production data — same numbers shown in the dashboard charts. Use when asked about monthly trends or performance.",
+        description: "Get the trader's monthly sales and production data — same numbers shown in the dashboard charts. Use when asked about monthly trends, business performance, or ways to improve sales. This data does not include costs or profit margins.",
         inputSchema: z.object({}),
         execute: async () => {
             const now = new Date();
