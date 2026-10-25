@@ -7,9 +7,9 @@ export default async function AdminTradersPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Taxpayer Intelligence Search</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Taxpayer Workspace</h1>
         <p className="text-muted-foreground text-sm mt-1">
-          Search by TIN and review records and AI analysis available to your verified RRA permissions.
+          Search a TIN to review the taxpayer records available to your verified RRA permissions.
         </p>
       </div>
       <TinTaxpayerLookup />

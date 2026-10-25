@@ -27,6 +27,7 @@ import { logAudit } from "@/lib/audit";
 import { hasRRAPermission } from "@/lib/rra-rbac";
 import { consumeRateLimit, getRequestIdentity } from "@/lib/rate-limit";
 import { isRRAAIInjectionAttempt } from "@/lib/ai/rra-tool-access";
+import { taxpayerAccessReasonSchema, type TaxpayerAccessReason } from "@/lib/validation/taxpayer-workspace.schema";
 
 const tinSchema = z.string().trim().min(5).max(32).regex(/^[A-Za-z0-9-]+$/);
 
@@ -242,6 +243,7 @@ async function recordTinAccess(args: {
   result: LookupData | null;
   outcome: "found" | "not_found";
   correlationId: string;
+  accessReason?: TaxpayerAccessReason;
   action?: "TIN_TAXPAYER_SEARCH" | "TIN_INTELLIGENCE_FOLLOWUP";
   questionHash?: string;
   questionLength?: number;
@@ -256,6 +258,7 @@ async function recordTinAccess(args: {
       outcome: args.outcome,
       categoriesAccessed: categoriesInView(args.result),
       correlationId: args.correlationId,
+      ...(args.accessReason ? { accessReason: args.accessReason } : {}),
       ...(args.questionHash ? { questionHash: args.questionHash, questionLength: args.questionLength } : {}),
     },
   });
@@ -279,23 +282,30 @@ export async function getTaxpayerSearchHistory() {
   return rows.map((row) => {
     let metadata: Record<string, unknown> = {};
     try { metadata = row.metadata ? JSON.parse(row.metadata) as Record<string, unknown> : {}; } catch { /* Ignore malformed legacy metadata. */ }
+    const accessReason = taxpayerAccessReasonSchema.safeParse(metadata.accessReason);
     return {
       taxpayerName: row.taxpayerName ?? row.personName ?? (metadata.outcome === "not_found" ? "No match found" : "Taxpayer record"),
       outcome: metadata.outcome === "found" ? "Found" : "No match",
       categories: Array.isArray(metadata.categoriesAccessed) ? metadata.categoriesAccessed.filter((value): value is string => typeof value === "string") : [],
+      accessReason: accessReason.success ? accessReason.data : null,
       createdAt: row.createdAt,
     };
   });
 }
 
-async function getAuthorizedTinResult(input: string, staff: Awaited<ReturnType<typeof requireRRAPermission>>["staff"], correlationId: string) {
+async function getAuthorizedTinResult(
+  input: string,
+  staff: Awaited<ReturnType<typeof requireRRAPermission>>["staff"],
+  correlationId: string,
+  accessReason?: TaxpayerAccessReason,
+) {
   const parsedTin = tinSchema.safeParse(input);
   if (!parsedTin.success) throw new Error("Enter a valid TIN using 5 to 32 letters, numbers, or hyphens.");
 
   const tin = parsedTin.data;
   const staffRoles = staff.clearanceRoles as RRARole[];
   const result = await buildLookup(tin, staffRoles, staff.id);
-  await recordTinAccess({ userId: staff.userId, staffRoles, result, outcome: result ? "found" : "not_found", correlationId });
+  await recordTinAccess({ userId: staff.userId, staffRoles, result, outcome: result ? "found" : "not_found", correlationId, accessReason });
   return result;
 }
 
@@ -332,13 +342,15 @@ async function generateTaxpayerAnswer(result: LookupData, question: string, role
 }
 
 /** Search, permission-filter, audit, and summarize an RRA taxpayer record. */
-export async function searchTaxpayerIntelligence(input: string) {
+export async function searchTaxpayerIntelligence(input: { tin: string; accessReason: string }) {
   const { user: actor, staff } = await requireRRAPermission("taxpayer.intelligence.search");
+  const parsedInput = z.object({ tin: tinSchema, accessReason: taxpayerAccessReasonSchema }).safeParse(input);
+  if (!parsedInput.success) throw new Error("Enter a valid TIN and select an authorized reason for access.");
   const requestHeaders = await headers();
   const limit = await consumeRateLimit("tin-intelligence", `${actor.id}:${getRequestIdentity(requestHeaders)}`, 20, 60);
   if (!limit.allowed) throw new Error("TIN search limit reached. Please wait a moment before trying again.");
   const correlationId = randomUUID();
-  const result = await getAuthorizedTinResult(input, staff, correlationId);
+  const result = await getAuthorizedTinResult(parsedInput.data.tin, staff, correlationId, parsedInput.data.accessReason);
   if (!result) return { result: null, analysis: null, aiUnavailable: false, correlationId };
 
   let analysis: string | null = null;
@@ -354,11 +366,13 @@ export async function searchTaxpayerIntelligence(input: string) {
 }
 
 /** Re-check permissions and reload currently authorized fields for every follow-up. */
-export async function askTaxpayerIntelligence(input: { tin: string; question: string }) {
+export async function askTaxpayerIntelligence(input: { tin: string; question: string; accessReason?: string }) {
   const { user: actor, staff } = await requireRRAPermission("taxpayer.intelligence.search");
   const parsedQuestion = z.string().trim().min(2).max(1200).safeParse(input.question);
   if (!parsedQuestion.success) throw new Error("Enter a question between 2 and 1,200 characters.");
   const question = parsedQuestion.data;
+  const parsedReason = taxpayerAccessReasonSchema.safeParse(input.accessReason);
+  if (!parsedReason.success) throw new Error("Select an authorized reason before asking about taxpayer records.");
   if (isRRAAIInjectionAttempt(question)) {
     throw new Error("That question could not be processed. Ask about the taxpayer's authorized records instead.");
   }
@@ -368,7 +382,9 @@ export async function askTaxpayerIntelligence(input: { tin: string; question: st
   if (!limit.allowed) throw new Error("TIN AI query limit reached. Please wait a moment before trying again.");
 
   const correlationId = randomUUID();
-  const result = await getAuthorizedTinResult(input.tin, staff, correlationId);
+  const parsedTin = tinSchema.safeParse(input.tin);
+  if (!parsedTin.success) throw new Error("Enter a valid TIN using 5 to 32 letters, numbers, or hyphens.");
+  const result = await getAuthorizedTinResult(parsedTin.data, staff, correlationId, parsedReason.data);
   if (!result) throw new Error("The taxpayer record was not found. Search the TIN again before asking a follow-up.");
 
   const questionHash = createHash("sha256").update(question).digest("hex");
@@ -380,7 +396,7 @@ export async function askTaxpayerIntelligence(input: { tin: string; question: st
     throw new Error("The AI assistant is temporarily unavailable. Your authorized taxpayer records remain available below.");
   }
 
-  await recordTinAccess({ userId: actor.id, staffRoles: staff.clearanceRoles as RRARole[], result, outcome: "found", correlationId, action: "TIN_INTELLIGENCE_FOLLOWUP", questionHash, questionLength: question.length });
+  await recordTinAccess({ userId: actor.id, staffRoles: staff.clearanceRoles as RRARole[], result, outcome: "found", correlationId, accessReason: parsedReason.data, action: "TIN_INTELLIGENCE_FOLLOWUP", questionHash, questionLength: question.length });
   if (!answer) throw new Error("The AI assistant is not configured. Contact your system administrator.");
   return { answer, correlationId };
 }
@@ -397,7 +413,7 @@ export async function getTaxpayerIntelligenceForAI(input: { tin: string }) {
   if (!limit.allowed) return { found: false, message: "TIN search limit reached. Please wait before trying again." };
 
   const correlationId = randomUUID();
-  const result = await getAuthorizedTinResult(parsedTin.data, staff, correlationId);
+  const result = await getAuthorizedTinResult(parsedTin.data, staff, correlationId, "rra_assistant");
   if (!result) return { found: false, message: "No registered taxpayer was found with that TIN." };
 
   const { name, businessName, tinNumber, role, clearanceStatus, registeredAt, updatedAt } = result.profile;
