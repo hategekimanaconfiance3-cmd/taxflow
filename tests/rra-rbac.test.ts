@@ -9,6 +9,7 @@ import { test } from "node:test";
 import {
     hasRRAPermission,
     hasOperationalRRAPermission,
+    getOperationalRRARolesWithAnyPermission,
     isRRARoleAllowed,
     isRRARole,
     RRA_ROLE_OPTIONS,
@@ -92,6 +93,13 @@ test("super_admin has every defined permission after hardening", () => {
     }
 });
 
+test("super_admin alone remains excluded from operational taxpayer access", () => {
+    assert.equal(hasOperationalRRAPermission(["super_admin"], "taxpayer.intelligence.search"), false);
+    assert.equal(hasOperationalRRAPermission(["super_admin"], "taxpayer.compliance.read"), false);
+    assert.equal(hasOperationalRRAPermission(["super_admin", "tax_compliance_officer"], "taxpayer.intelligence.search"), true);
+    assert.equal(getOperationalRRARolesWithAnyPermission(["taxpayer.intelligence.search"]).includes("super_admin"), false);
+});
+
 // ---------------------------------------------------------------------------
 // Per-role permission matrix — positive grants
 // ---------------------------------------------------------------------------
@@ -117,8 +125,8 @@ test("tax_compliance_officer: compliance read + follow-up + support", () => {
 test("reporting officers can read support tickets but cannot manage them", () => {
     assert.ok(hasOperationalRRAPermission(["reporting_officer"], "support.read"));
     assert.equal(hasOperationalRRAPermission(["reporting_officer"], "support.manage"), false);
-    assert.ok(hasOperationalRRAPermission(["super_admin"], "support.read"));
-    assert.ok(hasOperationalRRAPermission(["super_admin"], "support.manage"));
+    assert.equal(hasOperationalRRAPermission(["super_admin"], "support.read"), false);
+    assert.equal(hasOperationalRRAPermission(["super_admin"], "support.manage"), false);
 });
 
 test("Support Tickets navigation is visible exactly to roles with operational support.read", () => {
@@ -245,16 +253,17 @@ test("legacy compliance_officer has compliance and import review permissions", (
     assert.ok(hasRRAPermission("compliance_officer", "taxpayer.clearance.update"));
 });
 
-test("super_admin receives its explicitly assigned operational permissions", () => {
+test("super_admin alone cannot use operational permissions without an operational role", () => {
     for (const permission of RRA_PERMISSIONS) {
-        assert.equal(hasOperationalRRAPermission(["super_admin"], permission), true, `super_admin operational permission ${permission}`);
+        assert.equal(hasOperationalRRAPermission(["super_admin"], permission), false, `super_admin operational permission ${permission}`);
     }
-    assert.equal(hasOperationalRRAPermission(["super_admin"], "taxpayer.profile.update"), true);
-    assert.equal(hasOperationalRRAPermission(["super_admin"], "taxpayer.intelligence.search"), true);
+    assert.equal(hasOperationalRRAPermission(["super_admin"], "taxpayer.profile.update"), false);
+    assert.equal(hasOperationalRRAPermission(["super_admin"], "taxpayer.intelligence.search"), false);
+    assert.equal(getOperationalRRARolesWithAnyPermission(["taxpayer.intelligence.search"]).includes("super_admin"), false);
     assert.equal(hasOperationalRRAPermission(["tax_compliance_officer"], "taxpayer.profile.update"), true);
     assert.equal(hasOperationalRRAPermission(["super_admin", "compliance_officer"], "taxpayer.clearance.update"), true);
     assert.equal(hasOperationalRRAPermission(["audit_officer"], "taxpayer.clearance.update"), false);
-    assert.equal(hasOperationalRRAPermission(["super_admin"], "compliance.followup.manage"), true);
+    assert.equal(hasOperationalRRAPermission(["super_admin"], "compliance.followup.manage"), false);
     assert.equal(hasOperationalRRAPermission(["tax_compliance_officer"], "compliance.followup.manage"), true);
     assert.equal(hasOperationalRRAPermission(["audit_investigation_officer"], "compliance.followup.manage"), false);
 });

@@ -24,7 +24,7 @@ import {
 } from "@/db/schema";
 import { requireRRAOperationalPermission, type RRARole } from "@/lib/auth-guard";
 import { logAudit } from "@/lib/audit";
-import { hasRRAPermission } from "@/lib/rra-rbac";
+import { hasOperationalRRAPermission, type RRAPermission } from "@/lib/rra-rbac";
 import { consumeRateLimit, getRequestIdentity } from "@/lib/rate-limit";
 import { taxpayerRecordIdSchema } from "@/lib/validation/admin-taxpayer.schema";
 
@@ -64,8 +64,8 @@ type LookupData = {
   corrections?: Array<{ productName: string; movementType: string; quantityDelta: number; reason: string | null; createdAt: Date }>;
 };
 
-function roleHasPermission(roles: RRARole[], permission: Parameters<typeof hasRRAPermission>[1]) {
-  return roles.some((role) => hasRRAPermission(role, permission));
+function roleHasPermission(roles: RRARole[], permission: RRAPermission) {
+  return hasOperationalRRAPermission(roles, permission);
 }
 
 async function buildLookup(tin: string, staffRoles: RRARole[]): Promise<LookupData | null> {
