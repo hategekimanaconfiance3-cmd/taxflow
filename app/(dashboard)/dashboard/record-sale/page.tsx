@@ -1,6 +1,7 @@
 import { requireTraderSession } from '@/lib/auth-guard';
 import { RecordSaleForm } from '@/components/dashboard/record-sale/record-sale-form';
 import { getInventory } from '@/lib/actions/stock.action';
+import { getBusinessCustomers } from '@/lib/actions/customer.action';
 import { getSystemConfig } from '@/lib/actions/system-config.action';
 
 export default async function RecordSalePage() {
@@ -11,7 +12,8 @@ export default async function RecordSalePage() {
     redirect('/dashboard/sell');
   }
 
-  const [inventory, config] = await Promise.all([getInventory(), getSystemConfig()]);
+  const [inventory, config, customerRows] = await Promise.all([getInventory(), getSystemConfig(), getBusinessCustomers(false)]);
+  const customers = customerRows.map(({ id, name, tinNumber }) => ({ id, name, tinNumber }));
 
   return (
     <div className="space-y-6">
@@ -22,7 +24,7 @@ export default async function RecordSalePage() {
         </p>
       </div>
 
-      <RecordSaleForm inventory={inventory} vatRate={config.vatRate} />
+      <RecordSaleForm inventory={inventory} customers={customers} vatRate={config.vatRate} />
     </div>
   );
 }

@@ -2,7 +2,7 @@
 
 import { eq, and, or, asc, desc, lt, sql } from 'drizzle-orm';
 import db from '@/db/drizzle';
-import { transaction, stock, stockMovement, stockReservation, vatRecord, product, user, auditLog, notification } from '@/db/schema';
+import { transaction, stock, stockMovement, stockReservation, vatRecord, product, user, auditLog, notification, customer } from '@/db/schema';
 import {
   requireTraderSession,
   requireApprovedClearance,
@@ -746,7 +746,8 @@ export async function createRetailSale(data: {
   productId: string;
   quantity: number;
   unitPrice: number;
-  customerName: string;
+  customerName?: string;
+  customerId?: string;
 }) {
   const { suspended, clearanceStatus, ...session } = await requireApprovedClearance();
 
@@ -761,8 +762,14 @@ export async function createRetailSale(data: {
     throw new Error('Quantity must be positive and finite, and unit price must be a positive whole-RWF amount');
   }
 
-  if (!data.customerName.trim()) {
+  if (data.customerId !== undefined && !/^[0-9a-f-]{36}$/i.test(data.customerId)) {
+    throw new Error('Choose a valid saved customer.');
+  }
+  if (!data.customerId && (typeof data.customerName !== 'string' || !data.customerName.trim())) {
     throw new Error('Customer name is required for retail sales');
+  }
+  if (data.customerName && data.customerName.trim().length > 160) {
+    throw new Error('Customer name must be 160 characters or fewer.');
   }
 
   const config = await getSystemConfig();
@@ -804,6 +811,20 @@ export async function createRetailSale(data: {
 
   // Atomic: deduct stock + create transaction + create VAT record
   const result = await db.transaction(async (tx) => {
+    const selectedCustomer = data.customerId
+      ? (await tx.select({ id: customer.id, name: customer.name }).from(customer)
+        .where(and(
+          eq(customer.id, data.customerId),
+          eq(customer.businessId, session.user.id),
+          eq(customer.isActive, true),
+        )).for('share').limit(1))[0]
+      : undefined;
+    if (data.customerId && !selectedCustomer) {
+      throw new Error('Saved customer is unavailable. Refresh the page or choose another customer.');
+    }
+    const buyerName = selectedCustomer?.name ?? data.customerName?.trim();
+    if (!buyerName) throw new Error('Customer name is required for retail sales.');
+
     // Deduct stock immediately (no confirmation needed)
     const [retailerStock] = await tx
       .select()
@@ -827,7 +848,8 @@ export async function createRetailSale(data: {
       .values({
         sellerId: session.user.id,
         buyerId: null,
-        buyerName: data.customerName.trim(),
+        buyerName,
+        customerId: selectedCustomer?.id ?? null,
         transactionType: 'RETAIL_SALE',
         buyerType: 'individual_consumer',
         productId: data.productId,
@@ -880,6 +902,7 @@ export async function createRetailSale(data: {
         quantity: data.quantity,
         totalAmount,
         vatAmount,
+          customerId: selectedCustomer?.id ?? null,
       }),
     });
 

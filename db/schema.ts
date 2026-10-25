@@ -175,6 +175,30 @@ export const product = pgTable(
   (table) => [index('product_created_by_idx').on(table.createdByUserId)],
 );
 
+// A business-owned customer directory. This stores customer details entered by
+// that business; a record is not proof of TIN validity or RRA registration.
+export const customer = pgTable(
+  'customer',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    businessId: text('business_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    customerType: text('customer_type').notNull().default('individual'),
+    tinNumber: text('tin_number'),
+    phone: text('phone'),
+    email: text('email'),
+    isActive: boolean('is_active').notNull().default(true),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().$onUpdate(() => new Date()).notNull(),
+  },
+  (table) => [
+    index('customer_business_active_name_idx').on(table.businessId, table.isActive, table.name),
+    uniqueIndex('customer_business_tin_uniq').on(table.businessId, table.tinNumber),
+    check('customer_type_check', sql`${table.customerType} IN ('individual', 'business', 'institution')`),
+    check('customer_tin_format_check', sql`${table.tinNumber} IS NULL OR ${table.tinNumber} ~ '^[0-9]{9}$'`),
+  ],
+);
+
 // ---------------------------------------------------------------------------
 // Stock — one row per (business, product) pair
 // ---------------------------------------------------------------------------
@@ -245,6 +269,7 @@ export const transaction = pgTable(
       .references(() => user.id),
     buyerId: text('buyer_id').references(() => user.id), // null for retail → consumer
     buyerName: text('buyer_name'), // final consumer name (retailer sales only)
+    customerId: text('customer_id').references(() => customer.id, { onDelete: 'set null' }),
     transactionType: text('transaction_type').notNull().default('STANDARD_B2B_SALE'), // STANDARD_B2B_SALE | DIRECT_BULK_SALE | RETAIL_SALE
     buyerType: text('buyer_type').notNull().default('registered_business'), // individual_consumer | registered_business | institution | government | large_bulk_buyer
     invoiceReference: text('invoice_reference'),

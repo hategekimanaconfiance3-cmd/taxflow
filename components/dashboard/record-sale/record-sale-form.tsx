@@ -30,6 +30,7 @@ interface InventoryItem {
 
 interface RecordSaleFormProps {
     inventory: InventoryItem[];
+    customers: Array<{ id: string; name: string; tinNumber: string | null }>;
     vatRate: number;
 }
 
@@ -42,10 +43,11 @@ interface SaleItem {
 }
 
 
-export function RecordSaleForm({ inventory, vatRate }: RecordSaleFormProps) {
+export function RecordSaleForm({ inventory, customers, vatRate }: RecordSaleFormProps) {
     const router = useRouter();
     const [isPending, startTransition] = useTransition();
     const [customerName, setCustomerName] = useState("");
+    const [customerId, setCustomerId] = useState("");
     const [saleItems, setSaleItems] = useState<SaleItem[]>(
         inventory.map((inv) => ({
             productId: inv.productId,
@@ -145,6 +147,7 @@ export function RecordSaleForm({ inventory, vatRate }: RecordSaleFormProps) {
                         quantity: item.quantityToSell,
                         unitPrice: item.unitPrice,
                         customerName: customerName.trim(),
+                        ...(customerId ? { customerId } : {}),
                     });
                 }
 
@@ -155,6 +158,7 @@ export function RecordSaleForm({ inventory, vatRate }: RecordSaleFormProps) {
 
                 // Optimistic update: deduct sold quantities from available stock
                 setCustomerName("");
+                setCustomerId("");
                 setSaleItems((prev) =>
                     prev.map((item) => ({
                         ...item,
@@ -201,11 +205,34 @@ export function RecordSaleForm({ inventory, vatRate }: RecordSaleFormProps) {
                     <Label htmlFor="customerName">
                         Buyer Name / ID
                     </Label>
+                    {customers.length > 0 && (
+                        <select
+                            aria-label="Choose saved customer"
+                            className="h-10 w-full max-w-md rounded-md border border-input bg-background px-3 text-sm"
+                            value={customerId}
+                            onChange={(event) => {
+                                const selected = customers.find((customer) => customer.id === event.target.value);
+                                setCustomerId(selected?.id ?? "");
+                                if (selected) setCustomerName(selected.name);
+                                else setCustomerName("");
+                            }}
+                        >
+                            <option value="">One-time customer</option>
+                            {customers.map((customer) => (
+                                <option key={customer.id} value={customer.id}>
+                                    {customer.name}{customer.tinNumber ? ` · TIN ${customer.tinNumber}` : ""}
+                                </option>
+                            ))}
+                        </select>
+                    )}
                     <Input
                         id="customerName"
                         placeholder="Enter customer name or ID"
                         value={customerName}
-                        onChange={(e) => setCustomerName(e.target.value)}
+                        onChange={(e) => {
+                            setCustomerName(e.target.value);
+                            if (customerId) setCustomerId("");
+                        }}
                         className="max-w-md"
                     />
                 </div>

@@ -18,6 +18,7 @@ import {
     Ship,
     Shield,
     Brain,
+    UsersRound,
 } from "lucide-react";
 
 export type TraderRole = "manufacturer" | "wholesaler" | "retailer";
@@ -52,6 +53,12 @@ export const SIDEBAR_GROUPS: SidebarGroup[] = [
                 label: "Inventory",
                 href: "/dashboard/inventory",
                 icon: Package,
+                roles: "all",
+            },
+            {
+                label: "Customers",
+                href: "/dashboard/customers",
+                icon: UsersRound,
                 roles: "all",
             },
             {
