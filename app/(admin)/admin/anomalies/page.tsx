@@ -9,10 +9,14 @@ export default async function AdminAnomaliesPage() {
   await requireRRASession("compliance_officer", "audit_officer", "audit_investigation_officer", "data_ai_analyst");
 
   let anomalies: Awaited<ReturnType<typeof detectAnomalies>> = [];
+  let loadFailed = false;
   try {
     anomalies = await detectAnomalies();
-  } catch {
-    // Insufficient permissions — show empty state
+  } catch (error) {
+    loadFailed = true;
+    console.error("Failed to load anomaly detection results", {
+      errorName: error instanceof Error ? error.name : typeof error,
+    });
   }
 
   const critical = anomalies.filter((a) => a.severity === 'critical');
@@ -47,7 +51,17 @@ export default async function AdminAnomaliesPage() {
         </Badge>
       </div>
 
-      {anomalies.length === 0 ? (
+      {loadFailed ? (
+        <Card role="alert" className="border-destructive/40">
+          <CardContent className="py-8 flex flex-col items-center gap-2 text-center">
+            <AlertCircle className="h-8 w-8 text-destructive" />
+            <p className="font-semibold">Anomaly results could not be loaded</p>
+            <p className="text-sm text-muted-foreground">
+              Please try again. If this continues, contact your system administrator with the time of the error.
+            </p>
+          </CardContent>
+        </Card>
+      ) : anomalies.length === 0 ? (
         <Card>
           <CardContent className="py-12 flex flex-col items-center gap-3 text-center">
             <ShieldAlert className="h-10 w-10 text-emerald-400" />

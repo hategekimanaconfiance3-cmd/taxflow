@@ -357,6 +357,9 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 allowedRoles: [
                     "compliance_officer",
                     "audit_officer",
+                    "tax_compliance_officer",
+                    "audit_investigation_officer",
+                    "data_ai_analyst",
                 ],
             },
             {
