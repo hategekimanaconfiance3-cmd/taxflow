@@ -278,6 +278,7 @@ export function AdminShell({ userName, staffId, clearanceLevel, clearanceRoles, 
   const groups = getAdminSidebarGroups(clearanceRoles.length ? clearanceRoles : [clearanceLevel]);
 
   const [isSigningOut, setIsSigningOut] = useState(false);
+  const [signOutError, setSignOutError] = useState<string | null>(null);
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileNavigationOpen, setIsMobileNavigationOpen] = useState(false);
@@ -318,11 +319,20 @@ export function AdminShell({ userName, staffId, clearanceLevel, clearanceRoles, 
   const handleSignOut = useCallback(async () => {
     if (isSigningOut) return;
     setIsSigningOut(true);
+    setSignOutError(null);
+    setIsAccountMenuOpen(false);
+    setIsMobileNavigationOpen(false);
     try {
-      await authClient.signOut();
-      window.location.replace('/admin-login');
+      await authClient.signOut({
+        fetchOptions: {
+          onSuccess: () => {
+            window.location.assign('/admin-login');
+          },
+        },
+      });
     } catch {
       setIsSigningOut(false);
+      setSignOutError('Sign out failed. Check your connection and try again.');
     }
   }, [isSigningOut]);
 
@@ -638,6 +648,7 @@ export function AdminShell({ userName, staffId, clearanceLevel, clearanceRoles, 
 
       {/* User section */}
       <div className="p-3">
+        <div className="hidden lg:block">
         <Popover open={isAccountMenuOpen} onOpenChange={setIsAccountMenuOpen}>
           <PopoverTrigger asChild>
             <button className="flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
@@ -694,6 +705,32 @@ export function AdminShell({ userName, staffId, clearanceLevel, clearanceRoles, 
             </div>
           </PopoverContent>
         </Popover>
+        </div>
+        <div className="space-y-1 lg:hidden">
+          <div className="px-2 pb-2">
+            <p className="truncate text-sm font-medium">{userName}</p>
+            <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">{staffId}</p>
+            <Badge variant="outline" className={cn('mt-1.5 text-[10px] px-1.5 py-0', ROLE_COLORS[clearanceLevel as RRARole] || '')}>
+              {roleSummary}
+            </Badge>
+          </div>
+          <Link href="/admin/profile" className="flex min-h-10 items-center gap-2.5 rounded-md px-3 text-sm text-muted-foreground hover:bg-accent hover:text-foreground">
+            <User className="h-4 w-4" /> Profile
+          </Link>
+          <Link href="/admin/support" className="flex min-h-10 items-center gap-2.5 rounded-md px-3 text-sm text-muted-foreground hover:bg-accent hover:text-foreground">
+            <HelpCircle className="h-4 w-4" /> Help & Support
+          </Link>
+          <button
+            type="button"
+            onClick={handleSignOut}
+            disabled={isSigningOut}
+            className="flex min-h-10 w-full items-center gap-2.5 rounded-md px-3 text-left text-sm text-destructive hover:bg-destructive/10 disabled:opacity-50"
+          >
+            <LogOut className="h-4 w-4" />
+            {translate(isSigningOut ? 'Signing out…' : 'Log Out', lang)}
+          </button>
+          {signOutError && <p role="alert" className="px-2 pt-1 text-xs text-destructive">{signOutError}</p>}
+        </div>
       </div>
     </>
   );
