@@ -9,8 +9,8 @@ import { hashPassword } from "better-auth/crypto";
 import { randomUUID } from "node:crypto";
 import {
     resetStaffPasswordSchema,
+    staffAssignmentRoleSchema,
     staffAccountSchema,
-    staffRoleSchema,
     staffRolesSchema,
 } from "@/lib/validation/staff.schema";
 
@@ -332,7 +332,7 @@ export async function createStaffMember(data: {
     clearanceLevel: string;
 }): Promise<{ success: true; id: string }> {
     const { staff, ...session } = await requireRRASession("super_admin");
-    const parsedRole = staffRoleSchema.safeParse(data.clearanceLevel);
+    const parsedRole = staffAssignmentRoleSchema.safeParse(data.clearanceLevel);
     const staffId = data.staffId.trim().toUpperCase();
     const department = data.department.trim();
     if (!parsedRole.success || !/^[A-Z0-9]+(?:-[A-Z0-9]+)*$/.test(staffId) || !department) {

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { CircleCheck, CircleX, Loader2, Power, Shield, Settings2 } from "lucide-react";
 import { updateStaffRoles, toggleStaffStatus } from "@/lib/actions/admin-staff.action";
-import { STAFF_ROLE_OPTIONS } from "@/lib/validation/staff.schema";
+import { ASSIGNABLE_STAFF_ROLE_OPTIONS, STAFF_ROLE_OPTIONS } from "@/lib/validation/staff.schema";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -24,6 +24,9 @@ export type StaffManagementMember = {
 };
 
 type Notice = { message: string; kind: "success" | "error" };
+
+const assignableRoleValues: ReadonlySet<string> = new Set(ASSIGNABLE_STAFF_ROLE_OPTIONS.map((role) => role.value));
+const getAssignableRoles = (roles: string[]) => roles.filter((role) => assignableRoleValues.has(role));
 
 export function StaffManagement({ staffMembers }: { staffMembers: StaffManagementMember[] }) {
     const router = useRouter();
@@ -144,7 +147,7 @@ function StaffRolesDialog({
     onChanged: () => void;
 }) {
     const [open, setOpen] = useState(false);
-    const [roles, setRoles] = useState(member.roles);
+    const [roles, setRoles] = useState(() => getAssignableRoles(member.roles));
     const [isPending, startTransition] = useTransition();
 
     function toggleRole(value: string, checked: boolean) {
@@ -169,15 +172,18 @@ function StaffRolesDialog({
     }
 
     return (
-        <Dialog open={open} onOpenChange={(next) => { setOpen(next); if (next) setRoles(member.roles); }}>
+        <Dialog open={open} onOpenChange={(next) => { setOpen(next); if (next) setRoles(getAssignableRoles(member.roles)); }}>
             <DialogTrigger asChild><Button type="button" variant="outline" size="sm" className="gap-1.5" disabled={disabled}><Settings2 className="size-4" />Manage roles</Button></DialogTrigger>
             <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
                 <DialogHeader>
                     <DialogTitle>Role assignments · {member.staffId}</DialogTitle>
                     <DialogDescription>Select the predefined permission bundles this worker needs. Super Admin must be assigned alone.</DialogDescription>
                 </DialogHeader>
+                {member.roles.some((role) => !assignableRoleValues.has(role)) ? (
+                    <p className="text-sm text-amber-700">This staff member has a legacy role. Choose current roles below and save to replace the legacy assignment; historical role access remains supported until then.</p>
+                ) : null}
                 <div className="space-y-2">
-                    {STAFF_ROLE_OPTIONS.map((role) => (
+                    {ASSIGNABLE_STAFF_ROLE_OPTIONS.map((role) => (
                         <label key={role.value} className="flex cursor-pointer items-start gap-3 rounded-md border p-3 hover:bg-muted/50">
                             <input type="checkbox" className="mt-1 size-4 accent-primary" checked={roles.includes(role.value)} disabled={isPending}
                                 onChange={(event) => toggleRole(role.value, event.target.checked)} />

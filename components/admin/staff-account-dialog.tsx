@@ -7,9 +7,10 @@ import { Eye, EyeOff, Loader2, UserPlus, WandSparkles } from "lucide-react";
 import { createStaffAccount } from "@/lib/actions/admin-staff.action";
 import {
     staffAccountSchema,
-    STAFF_ROLE_OPTIONS,
+    ASSIGNABLE_STAFF_ROLE_OPTIONS,
     type StaffAccountFields,
     type StaffAccountInput,
+    type StaffAccountOutput,
 } from "@/lib/validation/staff.schema";
 import { Button } from "@/components/ui/button";
 import {
@@ -61,14 +62,14 @@ function generatePassword(): string {
 export function StaffAccountDialog({ onNotice, onCreated }: Props) {
     const [open, setOpen] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
-    const form = useForm<StaffAccountInput>({
+    const form = useForm<StaffAccountInput, unknown, StaffAccountOutput>({
         resolver: zodResolver(staffAccountSchema),
         defaultValues: {
             fullName: "",
             email: "",
             staffId: "",
             department: "",
-            roles: ["compliance_officer"],
+            roles: ["tax_compliance_officer"],
             password: "",
             confirmPassword: "",
         },
@@ -89,7 +90,7 @@ export function StaffAccountDialog({ onNotice, onCreated }: Props) {
         setShowPassword(true);
     }
 
-    async function onSubmit(values: StaffAccountInput): Promise<void> {
+    async function onSubmit(values: StaffAccountOutput): Promise<void> {
         const result = await createStaffAccount(values);
         if (!result.success) {
             for (const field of Object.keys(result.fieldErrors ?? {}) as StaffAccountFields[]) {
@@ -156,7 +157,7 @@ export function StaffAccountDialog({ onNotice, onCreated }: Props) {
                                 <FormItem className="sm:col-span-2">
                                     <FormLabel>Staff role assignments</FormLabel>
                                     <div className="space-y-2">
-                                        {STAFF_ROLE_OPTIONS.map((role) => (
+                                        {ASSIGNABLE_STAFF_ROLE_OPTIONS.map((role) => (
                                             <label key={role.value} className="flex cursor-pointer items-start gap-3 rounded-md border p-3 hover:bg-muted/50">
                                                 <input type="checkbox" className="mt-1 size-4 accent-primary" checked={field.value.includes(role.value)}
                                                     onChange={(event) => {

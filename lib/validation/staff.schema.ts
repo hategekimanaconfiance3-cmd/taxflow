@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { RRA_ROLE_OPTIONS, RRA_ROLE_PERMISSIONS, RRA_ROLE_VALUES, type RRARole } from '@/lib/rra-rbac';
+import { RRA_ROLE_OPTIONS, RRA_ROLE_PERMISSIONS, RRA_ROLE_VALUES, type RRARole, type RRAProposedRole } from '@/lib/rra-rbac';
 
 const LEGACY_ROLE_LABELS: Partial<Record<RRARole, string>> = {
   compliance_officer: 'Legacy · Compliance Officer',
@@ -18,10 +18,18 @@ export const STAFF_ROLE_OPTIONS = RRA_ROLE_VALUES.map((value) => {
   };
 }) as readonly { value: RRARole; label: string; permissions: string }[];
 
+/** Current roles available for new assignments. Legacy roles remain readable for existing staff. */
+export const ASSIGNABLE_STAFF_ROLE_OPTIONS = RRA_ROLE_OPTIONS.map((role) => ({
+  value: role.value,
+  label: role.label,
+  permissions: (RRA_ROLE_PERMISSIONS[role.value] ?? []).join(', '),
+})) as readonly { value: RRAProposedRole; label: string; permissions: string }[];
+
 const STAFF_ROLES = STAFF_ROLE_OPTIONS.map((option) => option.value) as [RRARole, ...RRARole[]];
+const ASSIGNABLE_STAFF_ROLES = ASSIGNABLE_STAFF_ROLE_OPTIONS.map((option) => option.value) as [RRAProposedRole, ...RRAProposedRole[]];
 export const staffRoleSchema = z.enum(STAFF_ROLES);
-export const staffAssignmentRoleSchema = staffRoleSchema;
-export const staffRolesSchema = z.array(staffRoleSchema).min(1, 'Choose at least one role.').max(STAFF_ROLE_OPTIONS.length)
+export const staffAssignmentRoleSchema = z.enum(ASSIGNABLE_STAFF_ROLES);
+export const staffRolesSchema = z.array(staffAssignmentRoleSchema).min(1, 'Choose at least one role.').max(ASSIGNABLE_STAFF_ROLE_OPTIONS.length)
   .refine((roles) => new Set(roles).size === roles.length, 'Each role can only be assigned once.')
   .refine((roles) => !roles.includes('super_admin') || roles.length === 1, 'Super Admin must be the only assigned role.');
 
@@ -66,6 +74,7 @@ export const resetStaffPasswordSchema = z
   });
 
 export type StaffAccountInput = z.input<typeof staffAccountSchema>;
+export type StaffAccountOutput = z.output<typeof staffAccountSchema>;
 export type ResetStaffPasswordInput = z.input<typeof resetStaffPasswordSchema>;
 export type StaffAccountFields = keyof StaffAccountInput;
 export type ResetPasswordFields = keyof ResetStaffPasswordInput;

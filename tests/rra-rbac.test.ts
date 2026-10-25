@@ -16,7 +16,7 @@ import {
     type RRARole,
     type RRAPermission,
 } from "../lib/rra-rbac";
-import { staffAssignmentRoleSchema } from "../lib/validation/staff.schema";
+import { staffAccountSchema, staffAssignmentRoleSchema, staffRoleSchema, staffRolesSchema } from "../lib/validation/staff.schema";
 
 // ---------------------------------------------------------------------------
 // Role catalogue
@@ -78,16 +78,18 @@ test("isRRARole returns false for trader roles and unknown strings", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Least-privilege: super_admin has ALL permissions (post-hardening)
+// Super Admin is highly privileged but does not receive taxpayer intelligence search.
 // ---------------------------------------------------------------------------
 
-test("super_admin has every defined permission after hardening", () => {
+test("super_admin has every defined permission except taxpayer intelligence search", () => {
     for (const perm of RRA_PERMISSIONS) {
+        if (perm === "taxpayer.intelligence.search") continue;
         assert.ok(
             hasRRAPermission("super_admin", perm as RRAPermission),
             `super_admin should have permission: ${perm}`,
         );
     }
+    assert.equal(hasRRAPermission("super_admin", "taxpayer.intelligence.search"), false);
 });
 
 // ---------------------------------------------------------------------------
@@ -287,6 +289,19 @@ test("legacy role names are rejected for new staff account creation", () => {
             false,
             `Expected legacy role "${role}" to be rejected by staffAssignmentRoleSchema`,
         );
+        assert.equal(staffRolesSchema.safeParse([role]).success, false,
+            `Expected legacy role "${role}" to be rejected from new role assignments`);
+        assert.equal(staffRoleSchema.safeParse(role).success, true,
+            `Expected historical role "${role}" to remain readable`);
+        assert.equal(staffAccountSchema.safeParse({
+            fullName: "Test Staff",
+            email: "staff@example.test",
+            staffId: "RRA-TEST-01",
+            department: "Compliance",
+            roles: [role],
+            password: "StrongPass1!",
+            confirmPassword: "StrongPass1!",
+        }).success, false, `Expected new staff accounts to reject legacy role "${role}"`);
     }
 });
 
