@@ -27,7 +27,7 @@ const PRIORITY_COLORS: Record<string, string> = {
 };
 
 export default async function AdminSupportPage() {
-  await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
+  await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer", "reporting_officer");
 
   const tickets = await getAllTickets();
 
