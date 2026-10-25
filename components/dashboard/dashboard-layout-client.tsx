@@ -161,7 +161,7 @@ function AIPanel({ onClose, role }: { onClose: () => void; role: TraderRole }) {
 
       {/* Messages */}
       <div className="border-b bg-muted/20 px-4 py-2 text-[10px] text-muted-foreground">AI responses are informational and read-only. Verify important information before acting.</div>
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+      <div className="min-h-0 flex-1 overflow-y-auto p-4 space-y-3">
         {messages.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-5 pb-8">
             <div className="flex h-14 w-14 items-center justify-center rounded-2xl border bg-gradient-to-br from-blue-500/10 to-violet-500/10">
@@ -346,22 +346,21 @@ export function DashboardLayoutClient({
       <DashboardSidebar role={role} businessName={businessName} userName={userName} />
 
       <div
-        className="flex min-h-screen flex-col transition-[padding] duration-300"
+        className="flex min-h-screen min-w-0 flex-col transition-[padding] duration-300 lg:pl-[var(--sidebar-width)] xl:pr-[var(--ai-panel-width)]"
         style={{
-          paddingLeft: `${sidebarW}px`,
-          paddingRight: isAiOpen ? `${AI_PANEL_W}px` : '0px',
-        }}
+          '--sidebar-width': `${sidebarW}px`,
+          '--ai-panel-width': isAiOpen ? `${AI_PANEL_W}px` : '0px',
+        } as React.CSSProperties}
       >
-        <DashboardTopbar role={role} userName={userName} businessName={businessName} userId={userId} />
-        <main className="flex-1">
-          <div className="p-6">{children}</div>
+        <DashboardTopbar role={role} businessName={businessName} userId={userId} />
+        <main className="min-w-0 flex-1">
+          <div className="min-w-0 p-3 sm:p-4 lg:p-6">{children}</div>
         </main>
       </div>
 
       {isAiOpen && (
         <div
-          className="fixed top-0 right-0 bottom-0 z-40 flex flex-col border-l bg-background shadow-2xl animate-in slide-in-from-right-4 fade-in duration-200"
-          style={{ width: AI_PANEL_W }}
+          className="fixed inset-0 z-40 flex w-full max-w-full flex-col border-l bg-background shadow-2xl animate-in slide-in-from-right-4 fade-in duration-200 sm:inset-y-0 sm:left-auto sm:right-0 sm:w-[420px] lg:w-[420px]"
         >
           <AIPanel onClose={closeAI} role={role} />
         </div>

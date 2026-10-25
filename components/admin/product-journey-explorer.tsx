@@ -60,7 +60,7 @@ function JourneyBranch({
         if (record.buyerId) nextPath.add(record.buyerId);
         const nextRendered = new Set(rendered);
         nextRendered.add(record.id);
-        return <div key={record.id} className="ml-4 border-l border-muted-foreground/25 pl-4">
+        return <div key={record.id} className="ml-2 border-l border-muted-foreground/25 pl-2 sm:ml-4 sm:pl-4">
             <div className="flex items-start gap-2"><Button type="button" size="icon" variant="ghost" aria-label={`${isExpanded ? "Collapse" : "Expand"} branch from ${record.buyerName}`} aria-expanded={isExpanded} onClick={() => setIsExpanded((value) => !value)}>{isExpanded ? <ChevronDown /> : <ChevronRight />}</Button><button type="button" onClick={() => onSelect(record)} aria-pressed={selectedId === record.id}
                 className={cn("w-full rounded-lg border bg-card p-3 text-left transition-colors hover:bg-accent/40", selectedId === record.id && "border-primary ring-1 ring-primary")}>
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -150,7 +150,7 @@ export function ProductJourneyExplorer() {
                     <CardContent>
                         <div className="mb-4 flex flex-wrap gap-2 text-xs"><Badge variant="outline">Recorded / completed</Badge><Badge variant="secondary">Pending receipt</Badge><Badge variant="destructive">Disputed / rejected</Badge><span className="self-center text-muted-foreground">No edge means no linked transaction was found.</span></div>
                         {data.sourceRecords.length > 0 && <section className="mb-5 rounded-lg border p-3"><h3 className="mb-2 text-sm font-semibold">Origin and adjustment records (not transaction-linked)</h3><p className="mb-2 text-xs text-muted-foreground">Production batches, imports, and stock adjustments are shown separately because the current schema has no batch allocation links to transactions.</p><div className="flex flex-wrap gap-2">{data.sourceRecords.map((source) => <button key={`${source.kind}:${source.id}`} onClick={() => setSelected(source)} className="rounded-md border bg-muted/30 px-3 py-2 text-left text-xs hover:bg-accent"><span className="block font-medium">{source.kind === "production_batch" ? "Production batch" : source.kind === "import_declaration" ? "Import" : "Stock adjustment"}: {source.reference}</span><span className="text-muted-foreground">{source.businessName} · {formatQuantity(source.quantity, data.records.find((record) => record.productId === source.productId)?.unit ?? "units")}</span></button>)}</div></section>}
-                        {view === "tree" ? <div className="max-h-[70vh] overflow-auto rounded-md border p-3"><div className={cn("min-w-[32rem] origin-top-left transition-transform", zoom === 90 && "scale-[0.9]", zoom === 80 && "scale-[0.8]", zoom === 70 && "scale-[0.7]", zoom === 110 && "scale-[1.1]", zoom === 120 && "scale-[1.2]")}>
+                        {view === "tree" ? <div className="max-h-[70vh] overflow-auto rounded-md border p-2 sm:p-3"><div className={cn("min-w-0 origin-top-left transition-transform", zoom === 90 && "scale-[0.9]", zoom === 80 && "scale-[0.8]", zoom === 70 && "scale-[0.7]", zoom === 110 && "scale-[1.1]", zoom === 120 && "scale-[1.2]")}>
                             {roots.length ? roots.map((rootId) => {
                                 const root = data.records.find((record) => record.sellerId === rootId)!;
                                 const isExpanded = expanded.has(rootId);

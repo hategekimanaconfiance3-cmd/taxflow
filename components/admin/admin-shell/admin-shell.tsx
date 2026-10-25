@@ -16,7 +16,6 @@ import {
   Search, Brain, Send, Sparkles, RotateCcw, X, Check, Loader2,
 } from 'lucide-react';
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { searchTraders } from '@/lib/actions/admin-search.action';
 import { CommandPalette, type CommandItem } from '@/components/ui/command-palette';
 import { authClient } from '@/lib/auth-client';
 import { useChat } from '@ai-sdk/react';
@@ -164,7 +163,7 @@ function AIPanel({ onClose }: { onClose: () => void }) {
 
       {/* Messages */}
       <div className="border-b bg-muted/20 px-4 py-2 text-[10px] text-muted-foreground">AI findings are advisory. An authorized RRA employee must review evidence and make any official decision.</div>
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+      <div className="min-h-0 flex-1 overflow-y-auto p-4 space-y-3">
         {messages.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-5 pb-8">
             <div className="flex h-14 w-14 items-center justify-center rounded-2xl border bg-gradient-to-br from-blue-500/10 to-violet-500/10">
@@ -281,10 +280,23 @@ export function AdminShell({ userName, staffId, clearanceLevel, clearanceRoles, 
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isMobileNavigationOpen, setIsMobileNavigationOpen] = useState(false);
   const [isAiOpen, setIsAiOpen] = useState(false);
   const [lang, setLang] = useLanguagePreference();
   const roleSummary = (clearanceRoles.length ? clearanceRoles : [clearanceLevel])
     .map((role) => translate(ROLE_LABELS[role as RRARole] ?? role, lang)).join(", ");
+
+  const openAI = useCallback(() => {
+    setIsAiOpen(true);
+    setIsSidebarCollapsed(true);
+  }, []);
+
+  const closeAI = useCallback(() => {
+    setIsAiOpen(false);
+    setIsSidebarCollapsed(false);
+  }, []);
+
+  const toggleAI = useCallback(() => (isAiOpen ? closeAI() : openAI()), [isAiOpen, closeAI, openAI]);
 
   // Ctrl+I toggles AI panel
   useEffect(() => {
@@ -296,19 +308,7 @@ export function AdminShell({ userName, staffId, clearanceLevel, clearanceRoles, 
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  });
-
-  const openAI = () => {
-    setIsAiOpen(true);
-    setIsSidebarCollapsed(true);
-  };
-
-  const closeAI = () => {
-    setIsAiOpen(false);
-    setIsSidebarCollapsed(false);
-  };
-
-  const toggleAI = () => (isAiOpen ? closeAI() : openAI());
+  }, [toggleAI]);
 
   const expandSidebar = () => {
     if (isAiOpen) setIsAiOpen(false);
@@ -561,6 +561,7 @@ export function AdminShell({ userName, staffId, clearanceLevel, clearanceRoles, 
                       <TooltipTrigger asChild>
                         <Link
                           href={item.href}
+                          onClick={() => setIsMobileNavigationOpen(false)}
                           className={cn(
                             'group relative flex items-center gap-2.5 rounded-md px-3 py-[7px] text-[13px] font-medium transition-all duration-150',
                             parentActive
@@ -590,6 +591,7 @@ export function AdminShell({ userName, staffId, clearanceLevel, clearanceRoles, 
                             <Link
                               key={child.href}
                               href={child.href}
+                              onClick={() => setIsMobileNavigationOpen(false)}
                               className={cn(
                                 'group relative flex items-center gap-2 rounded-md px-3 py-[6px] text-[12px] font-medium transition-all duration-150',
                                 childActive
@@ -731,23 +733,23 @@ export function AdminShell({ userName, staffId, clearanceLevel, clearanceRoles, 
 
         {/* ── Content wrapper (shifts with sidebar / AI panel) ── */}
         <div
-          className="flex min-h-screen flex-col transition-[padding] duration-300"
+          className="flex min-h-screen min-w-0 flex-col transition-[padding] duration-300 lg:pl-[var(--sidebar-width)] xl:pr-[var(--ai-panel-width)]"
           style={{
-            paddingLeft: `${sidebarW}px`,
-            paddingRight: isAiOpen ? `${AI_PANEL_W}px` : '0px',
-          }}
+            '--sidebar-width': `${sidebarW}px`,
+            '--ai-panel-width': isAiOpen ? `${AI_PANEL_W}px` : '0px',
+          } as React.CSSProperties}
         >
           {/* ── Topbar ──────────────────────────────────────── */}
-          <header className="sticky top-0 z-20 flex h-14 items-center gap-2 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 px-4">
+          <header className="sticky top-0 z-20 flex h-14 items-center gap-1 border-b bg-background/95 px-2 backdrop-blur supports-[backdrop-filter]:bg-background/60 sm:gap-2 sm:px-4">
             {/* Mobile menu */}
-            <Sheet>
+            <Sheet open={isMobileNavigationOpen} onOpenChange={setIsMobileNavigationOpen}>
               <SheetTrigger asChild>
                 <Button variant="ghost" size="icon" className="lg:hidden -ml-1">
                   <Menu className="h-5 w-5" />
                   <span className="sr-only">Toggle menu</span>
                 </Button>
               </SheetTrigger>
-              <SheetContent side="left" className="w-[260px] p-0">
+              <SheetContent side="left" className="w-[min(86vw,18rem)] max-w-[18rem] p-0">
                 <SheetTitle className="sr-only">Admin Navigation</SheetTitle>
                 {mobileSidebar}
               </SheetContent>
@@ -770,25 +772,24 @@ export function AdminShell({ userName, staffId, clearanceLevel, clearanceRoles, 
                 variant="outline"
                 size="sm"
                 onClick={openAI}
-                className="h-8 gap-1.5 text-xs font-medium"
+                className="h-9 gap-1 px-2 text-xs font-medium sm:h-8 sm:gap-1.5 sm:px-3"
               >
                 <Brain className="h-3.5 w-3.5" />
-                Ask AI
+                <span className="sm:hidden">AI</span><span className="hidden sm:inline">Ask AI</span>
               </Button>}
             </div>
           </header>
 
           {/* ── Main content ────────────────────────────────── */}
-          <main className="flex-1">
-            <div className="p-6">{children}</div>
+          <main className="min-w-0 flex-1">
+            <div className="min-w-0 p-3 sm:p-4 lg:p-6">{children}</div>
           </main>
         </div>
 
         {/* ── AI Side Panel ────────────────────────────────── */}
         {isAiOpen && (
           <div
-            className="fixed top-0 right-0 bottom-0 z-40 flex flex-col border-l bg-background shadow-2xl animate-in slide-in-from-right-4 fade-in duration-200"
-            style={{ width: AI_PANEL_W }}
+            className="fixed inset-0 z-40 flex w-full max-w-full flex-col border-l bg-background shadow-2xl animate-in slide-in-from-right-4 fade-in duration-200 sm:inset-y-0 sm:left-auto sm:right-0 sm:w-[420px] lg:w-[420px]"
           >
             <AIPanel onClose={closeAI} />
           </div>

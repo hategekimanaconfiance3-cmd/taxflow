@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useState, useCallback, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { authClient } from "@/lib/auth-client";
@@ -37,7 +37,6 @@ import {
 
 interface DashboardTopbarProps {
     role: TraderRole;
-    userName: string;
     businessName: string;
     userId: string;
 }
@@ -92,14 +91,13 @@ function NotificationBell({ userId }: { userId: string }) {
 // ---------------------------------------------------------------------------
 export function DashboardTopbar({
     role,
-    userName,
     businessName,
     userId,
 }: DashboardTopbarProps) {
     const pathname = usePathname();
-    const router = useRouter();
     const groups = getSidebarGroups(role);
     const [isSigningOut, setIsSigningOut] = useState(false);
+    const [isMobileNavigationOpen, setIsMobileNavigationOpen] = useState(false);
 
     const { isAiOpen, openAI, lang, setLang } = useDashboardLayoutCtx();
 
@@ -129,9 +127,9 @@ export function DashboardTopbar({
 
     return (
         <TooltipProvider delayDuration={200}>
-            <header className="sticky top-0 z-20 flex h-14 items-center gap-4 border-b border-border/60 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 px-4">
+            <header className="sticky top-0 z-20 flex h-14 items-center gap-2 border-b border-border/60 bg-background/95 px-2 backdrop-blur supports-[backdrop-filter]:bg-background/60 sm:gap-4 sm:px-4">
                 {/* Mobile menu */}
-                <Sheet>
+                <Sheet open={isMobileNavigationOpen} onOpenChange={setIsMobileNavigationOpen}>
                     <SheetTrigger asChild>
                         <Button
                             variant="ghost"
@@ -142,7 +140,7 @@ export function DashboardTopbar({
                             <span className="sr-only">Toggle menu</span>
                         </Button>
                     </SheetTrigger>
-                    <SheetContent side="left" className="w-[260px] p-0">
+                    <SheetContent side="left" className="w-[min(86vw,18rem)] max-w-[18rem] p-0">
                         <SheetTitle className="sr-only">Navigation</SheetTitle>
 
                         {/* Mobile logo */}
@@ -193,6 +191,7 @@ export function DashboardTopbar({
                                                 <Link
                                                     key={item.href}
                                                     href={item.href}
+                                                    onClick={() => setIsMobileNavigationOpen(false)}
                                                     className={cn(
                                                         "relative flex items-center gap-2.5 rounded-md px-3 py-[7px] text-[13px] font-medium transition-colors",
                                                         active
@@ -240,7 +239,7 @@ export function DashboardTopbar({
                     {/* Connection status dot */}
                     <span
                         className={cn(
-                            "h-2 w-2 rounded-full",
+                            "hidden h-2 w-2 rounded-full sm:block",
                             connected ? "bg-emerald-500" : "bg-muted-foreground/40",
                         )}
                         title={connected ? "Connected" : "Disconnected"}
@@ -260,10 +259,10 @@ export function DashboardTopbar({
                             variant="outline"
                             size="sm"
                             onClick={openAI}
-                            className="h-8 gap-1.5 text-xs font-medium"
+                            className="h-9 gap-1 px-2 text-xs font-medium sm:h-8 sm:gap-1.5 sm:px-3"
                         >
                             <Brain className="h-3.5 w-3.5" />
-                            Ask AI
+                            <span className="sm:hidden">AI</span><span className="hidden sm:inline">Ask AI</span>
                         </Button>
                     )}
 

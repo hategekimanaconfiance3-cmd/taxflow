@@ -182,7 +182,7 @@ export function DataTable<TData, TValue>({
               >
                 <SelectTrigger
                   id={`filter-${filter.columnId}`}
-                  className="h-9 w-[140px] text-xs"
+                  className="h-10 w-full text-xs sm:h-9 sm:w-[140px]"
                 >
                   <SelectValue placeholder={filter.title} />
                 </SelectTrigger>
@@ -228,7 +228,7 @@ export function DataTable<TData, TValue>({
       </div>
 
       {/* ---- Table ---- */}
-      <div className="rounded-md border">
+      <div className="min-w-0 rounded-md border">
         <Table>
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
@@ -272,7 +272,7 @@ export function DataTable<TData, TValue>({
             {table.getFilteredRowModel().rows.length} row(s) total
           </p>
 
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-4">
             {/* Page Size */}
             <div className="flex items-center gap-2">
               <span className="text-xs text-muted-foreground whitespace-nowrap">Rows per page</span>
