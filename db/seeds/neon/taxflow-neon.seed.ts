@@ -12,7 +12,7 @@ const extractedDataRaw = fs.readFileSync(extractedDataPath, 'utf8');
 const extractedData = JSON.parse(extractedDataRaw);
 
 // Helper function to convert string timestamps to Date objects
-function convertTimestamps(obj: any): any {
+function convertTimestamps(obj: unknown): unknown {
   if (obj === null || obj === undefined) return obj;
 
   if (typeof obj === 'string' && obj.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z$/)) {
@@ -20,15 +20,13 @@ function convertTimestamps(obj: any): any {
   }
 
   if (Array.isArray(obj)) {
-    return obj.map(convertTimestamps);
+    return obj.map((value: unknown) => convertTimestamps(value));
   }
 
   if (typeof obj === 'object') {
-    const result: any = {};
-    for (const key in obj) {
-      if (obj.hasOwnProperty(key)) {
-        result[key] = convertTimestamps(obj[key]);
-      }
+    const result: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(obj)) {
+      result[key] = convertTimestamps(value);
     }
     return result;
   }
@@ -37,9 +35,9 @@ function convertTimestamps(obj: any): any {
 }
 
 // Convert all timestamp strings to Date objects
-const users = convertTimestamps(extractedData.users);
-const accounts = convertTimestamps(extractedData.accounts);
-const rraStaffMembers = convertTimestamps(extractedData.rraStaff);
+const users = convertTimestamps(extractedData.users) as (typeof user.$inferInsert)[];
+const accounts = convertTimestamps(extractedData.accounts) as (typeof account.$inferInsert)[];
+const rraStaffMembers = convertTimestamps(extractedData.rraStaff) as (typeof rraStaff.$inferInsert)[];
 
 async function seedTaxFlowNeonDB() {
   console.log('Starting to seed TaxFlow Neon DB...');

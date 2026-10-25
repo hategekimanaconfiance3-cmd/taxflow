@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState } from "react";
 import { io, Socket } from "socket.io-client";
 
 let globalSocket: Socket | null = null;
@@ -49,12 +49,16 @@ export function useSocket(
 ) {
     const [connected, setConnected] = useState(false);
     const eventsRef = useRef(events);
-    eventsRef.current = events;
+
+    useEffect(() => {
+        eventsRef.current = events;
+    }, [events]);
 
     useEffect(() => {
         if (!userId) return;
 
         const socket = getSocket(userId);
+        let active = true;
 
         function onConnect() {
             setConnected(true);
@@ -66,8 +70,10 @@ export function useSocket(
         socket.on("connect", onConnect);
         socket.on("disconnect", onDisconnect);
 
-        // Set initial state
-        setConnected(socket.connected);
+        // Read the external socket state after the effect completes to avoid a cascading render.
+        queueMicrotask(() => {
+            if (active) setConnected(socket.connected);
+        });
 
         // Subscribe to events
         const eventNames = Object.keys(eventsRef.current || {});
@@ -78,6 +84,7 @@ export function useSocket(
         }
 
         return () => {
+            active = false;
             socket.off("connect", onConnect);
             socket.off("disconnect", onDisconnect);
             for (const event of eventNames) {

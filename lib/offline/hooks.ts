@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from "react";
 import { getQueueCount, processQueue } from "./queue";
 import type { QueuedAction } from "./db";
 
@@ -10,26 +10,25 @@ export type { QueuedAction } from "./db";
 /**
  * Hook to track online/offline status.
  */
-export function useOnlineStatus() {
-    const [isOnline, setIsOnline] = useState(true);
+function subscribeToOnlineStatus(onChange: () => void): () => void {
+    window.addEventListener("online", onChange);
+    window.addEventListener("offline", onChange);
+    return () => {
+        window.removeEventListener("online", onChange);
+        window.removeEventListener("offline", onChange);
+    };
+}
 
-    useEffect(() => {
-        // Set initial state
-        setIsOnline(navigator.onLine);
+function getOnlineStatus(): boolean {
+    return navigator.onLine;
+}
 
-        const goOnline = () => setIsOnline(true);
-        const goOffline = () => setIsOnline(false);
+function getServerOnlineStatus(): boolean {
+    return true;
+}
 
-        window.addEventListener("online", goOnline);
-        window.addEventListener("offline", goOffline);
-
-        return () => {
-            window.removeEventListener("online", goOnline);
-            window.removeEventListener("offline", goOffline);
-        };
-    }, []);
-
-    return isOnline;
+export function useOnlineStatus(): boolean {
+    return useSyncExternalStore(subscribeToOnlineStatus, getOnlineStatus, getServerOnlineStatus);
 }
 
 type SyncStatus = "idle" | "syncing" | "synced" | "error";
@@ -51,6 +50,7 @@ export function useSyncQueue(
         processed: number;
         failed: number;
     } | null>(null);
+    const autoSyncStartedRef = useRef(false);
 
     // Refresh queue count
     const refreshCount = useCallback(async () => {
@@ -79,17 +79,26 @@ export function useSyncQueue(
         }
     }, [executor, isOnline, refreshCount]);
 
-    // Refresh count on mount and when online status changes
+    // IndexedDB is the source of truth; update React state when its async read resolves.
     useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- This reads external IndexedDB state asynchronously.
         refreshCount();
     }, [refreshCount, isOnline]);
 
-    // Auto-sync when coming back online
+    // Auto-sync queued actions on reconnect or when the initial queue read completes.
     useEffect(() => {
-        if (isOnline && queueCount > 0 && executor) {
-            syncNow();
+        if (queueCount === 0) autoSyncStartedRef.current = false;
+        if (!isOnline || queueCount === 0 || !executor || autoSyncStartedRef.current) return;
+        autoSyncStartedRef.current = true;
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- Replaying queued external work is this effect's purpose.
+        syncNow();
+    }, [isOnline, queueCount, executor, syncNow]);
+
+    useEffect(() => {
+        if (!isOnline) {
+            autoSyncStartedRef.current = false;
         }
-    }, [isOnline]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [isOnline]);
 
     return {
         isOnline,

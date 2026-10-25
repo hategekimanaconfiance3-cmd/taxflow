@@ -2619,7 +2619,18 @@ async function seedTaxFlowFull(): Promise<void> {
     // ── Step 11: Support Tickets ─────────────────────────────────────────
 
     console.log('  🎫 Creating support tickets...');
-    const TICKETS = [
+    type SeedSupportTicket = {
+      traderId: string;
+      category: string;
+      subject: string;
+      description: string;
+      status: string;
+      priority: string;
+      assignedTo: string | null;
+      daysAgo: number;
+      resolution?: string;
+    };
+    const TICKETS: SeedSupportTicket[] = [
       {
         traderId: T.musanzeWholesale,
         category: 'account_issue',
@@ -2705,7 +2716,7 @@ async function seedTaxFlowFull(): Promise<void> {
         status: t.status,
         priority: t.priority,
         assignedToId: t.assignedTo ?? null,
-        resolution: (t as any).resolution ?? null,
+        resolution: t.resolution ?? null,
         createdAt,
         updatedAt: resolvedAt ?? createdAt,
         resolvedAt,

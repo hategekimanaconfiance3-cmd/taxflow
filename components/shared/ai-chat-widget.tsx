@@ -211,9 +211,8 @@ export function AIChatWidget({ role }: AIChatWidgetProps) {
                             const hasText = msg.parts.some(
                                 (p) => p.type === "text" && p.text.trim().length > 0,
                             );
-                            // eslint-disable-next-line @typescript-eslint/no-explicit-any
                             const hasToolInvocation = msg.parts.some(
-                                (p: any) => typeof p.type === "string" && p.type.startsWith("tool-"),
+                                (part) => part.type.startsWith("tool-"),
                             );
                             const hasOnlyReasoning = !hasText && !hasToolInvocation && msg.parts.some(
                                 (p) => p.type === "reasoning",

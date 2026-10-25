@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef } from "react";
+import { useMemo, useRef, type FormEventHandler } from "react";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -93,6 +93,10 @@ export function TaxPaymentForm({ outstanding }: TaxPaymentFormProps) {
         }
     };
 
+    const handleFormSubmit: FormEventHandler<HTMLFormElement> = (event) => {
+        void form.handleSubmit(onSubmit)(event);
+    };
+
     const rootError = form.formState.errors.root;
 
     return (
@@ -140,7 +144,7 @@ export function TaxPaymentForm({ outstanding }: TaxPaymentFormProps) {
 
                 <Form {...form}>
                     <form
-                        onSubmit={form.handleSubmit(onSubmit)}
+                        onSubmit={handleFormSubmit}
                         className="space-y-4"
                     >
                         {/* Amount */}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, useEffect, useCallback } from "react";
+import { useState, useTransition, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { createRetailSale } from "@/lib/actions/transaction.action";
 import { formatRWF } from "@/components/dashboard/stat-card/stat-card";
@@ -41,20 +41,21 @@ interface SaleItem {
     unitPrice: number;
 }
 
+type SaleItemEdit = Pick<SaleItem, "quantityToSell" | "unitPrice">;
+
 
 export function RecordSaleForm({ inventory, vatRate }: RecordSaleFormProps) {
     const router = useRouter();
     const [isPending, startTransition] = useTransition();
     const [customerName, setCustomerName] = useState("");
-    const [saleItems, setSaleItems] = useState<SaleItem[]>(
-        inventory.map((inv) => ({
+    const [saleItemEdits, setSaleItemEdits] = useState<Record<string, SaleItemEdit>>({});
+    const saleItems: SaleItem[] = inventory.map((inv) => ({
             productId: inv.productId,
             productName: inv.productName,
             available: inv.quantity,
-            quantityToSell: 0,
-            unitPrice: inv.latestUnitPrice ?? 0,
-        })),
-    );
+            quantityToSell: saleItemEdits[inv.productId]?.quantityToSell ?? 0,
+            unitPrice: saleItemEdits[inv.productId]?.unitPrice ?? (inv.latestUnitPrice ?? 0),
+        }));
     const [message, setMessage] = useState<{
         text: string;
         type: "success" | "error";
@@ -81,38 +82,24 @@ export function RecordSaleForm({ inventory, vatRate }: RecordSaleFormProps) {
         [],
     );
 
-    // Sync with server data when inventory prop changes (from router.refresh())
-    useEffect(() => {
-        setSaleItems((prev) =>
-            inventory.map((inv) => {
-                const existing = prev.find((p) => p.productId === inv.productId);
-                return {
-                    productId: inv.productId,
-                    productName: inv.productName,
-                    available: inv.quantity,
-                    quantityToSell: existing?.quantityToSell ?? 0,
-                    unitPrice: existing?.unitPrice ?? (inv.latestUnitPrice ?? 0),
-                };
-            }),
-        );
-    }, [inventory]);
-
     function updateItem(
         idx: number,
         field: "quantityToSell" | "unitPrice",
         value: string,
     ) {
-        setSaleItems((prev) =>
-            prev.map((item, i) => {
-                if (i !== idx) return item;
-                const num = field === "quantityToSell" ? (parseFloat(value) || 0) : (parseInt(value) || 0);
-                if (field === "quantityToSell") {
-                    return { ...item, quantityToSell: Math.min(num, item.available) };
-                }
-                // Cap unit price to prevent absurd overflow
-                return { ...item, unitPrice: Math.min(num, 999_999_999) };
-            }),
-        );
+        const item = saleItems[idx];
+        if (!item) return;
+        const numericValue = field === "quantityToSell" ? (parseFloat(value) || 0) : (parseInt(value) || 0);
+        setSaleItemEdits((previous) => {
+            const current = previous[item.productId] ?? {
+                quantityToSell: item.quantityToSell,
+                unitPrice: item.unitPrice,
+            };
+            const updated: SaleItemEdit = field === "quantityToSell"
+                ? { ...current, quantityToSell: Math.min(numericValue, item.available) }
+                : { ...current, unitPrice: Math.min(numericValue, 999_999_999) };
+            return { ...previous, [item.productId]: updated };
+        });
     }
 
     const activeItems = saleItems.filter((item) => item.quantityToSell > 0);
@@ -155,13 +142,7 @@ export function RecordSaleForm({ inventory, vatRate }: RecordSaleFormProps) {
 
                 // Optimistic update: deduct sold quantities from available stock
                 setCustomerName("");
-                setSaleItems((prev) =>
-                    prev.map((item) => ({
-                        ...item,
-                        available: item.available - item.quantityToSell,
-                        quantityToSell: 0,
-                    })),
-                );
+                setSaleItemEdits({});
                 router.refresh();
             } catch (err) {
                 setMessage({

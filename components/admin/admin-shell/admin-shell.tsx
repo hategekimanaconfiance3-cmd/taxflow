@@ -286,6 +286,18 @@ export function AdminShell({ userName, staffId, clearanceLevel, clearanceRoles, 
   const roleSummary = (clearanceRoles.length ? clearanceRoles : [clearanceLevel])
     .map((role) => translate(ROLE_LABELS[role as RRARole] ?? role, lang)).join(", ");
 
+  const openAI = useCallback(() => {
+    setIsAiOpen(true);
+    setIsSidebarCollapsed(true);
+  }, []);
+
+  const closeAI = useCallback(() => {
+    setIsAiOpen(false);
+    setIsSidebarCollapsed(false);
+  }, []);
+
+  const toggleAI = useCallback(() => (isAiOpen ? closeAI() : openAI()), [isAiOpen, closeAI, openAI]);
+
   // Ctrl+I toggles AI panel
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -296,19 +308,7 @@ export function AdminShell({ userName, staffId, clearanceLevel, clearanceRoles, 
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  });
-
-  const openAI = () => {
-    setIsAiOpen(true);
-    setIsSidebarCollapsed(true);
-  };
-
-  const closeAI = () => {
-    setIsAiOpen(false);
-    setIsSidebarCollapsed(false);
-  };
-
-  const toggleAI = () => (isAiOpen ? closeAI() : openAI());
+  }, [toggleAI]);
 
   const expandSidebar = () => {
     if (isAiOpen) setIsAiOpen(false);
