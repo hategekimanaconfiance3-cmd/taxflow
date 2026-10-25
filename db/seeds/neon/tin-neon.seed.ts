@@ -12,28 +12,18 @@ const extractedDataRaw = fs.readFileSync(extractedDataPath, 'utf8');
 const extractedData = JSON.parse(extractedDataRaw);
 
 // Helper function to convert string timestamps to Date objects
-function convertTimestamps(obj: any): any {
-  if (obj === null || obj === undefined) return obj;
-
-  if (typeof obj === 'string' && obj.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z$/)) {
-    return new Date(obj);
-  }
-
-  if (Array.isArray(obj)) {
-    return obj.map(convertTimestamps);
-  }
-
-  if (typeof obj === 'object') {
-    const result: any = {};
-    for (const key in obj) {
-      if (obj.hasOwnProperty(key)) {
-        result[key] = convertTimestamps(obj[key]);
-      }
+function convertTimestamps<T>(obj: T): T {
+  const convert = (value: unknown): unknown => {
+    if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z$/.test(value)) {
+      return new Date(value);
     }
-    return result;
-  }
-
-  return obj;
+    if (Array.isArray(value)) return value.map(convert);
+    if (typeof value === 'object' && value !== null) {
+      return Object.fromEntries(Object.entries(value).map(([key, nested]) => [key, convert(nested)]));
+    }
+    return value;
+  };
+  return convert(obj) as T;
 }
 
 // Convert all timestamp strings to Date objects

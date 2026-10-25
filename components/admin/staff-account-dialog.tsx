@@ -10,6 +10,7 @@ import {
     STAFF_ASSIGNMENT_ROLE_OPTIONS,
     type StaffAccountFields,
     type StaffAccountInput,
+    type StaffAccountOutput,
 } from "@/lib/validation/staff.schema";
 import { Button } from "@/components/ui/button";
 import {
@@ -61,14 +62,14 @@ function generatePassword(): string {
 export function StaffAccountDialog({ onNotice, onCreated }: Props) {
     const [open, setOpen] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
-    const form = useForm<StaffAccountInput>({
+    const form = useForm<StaffAccountInput, unknown, StaffAccountOutput>({
         resolver: zodResolver(staffAccountSchema),
         defaultValues: {
             fullName: "",
             email: "",
             staffId: "",
             department: "",
-            roles: ["compliance_officer"],
+            roles: ["tax_compliance_officer"],
             password: "",
             confirmPassword: "",
         },
@@ -89,7 +90,7 @@ export function StaffAccountDialog({ onNotice, onCreated }: Props) {
         setShowPassword(true);
     }
 
-    async function onSubmit(values: StaffAccountInput): Promise<void> {
+    async function onSubmit(values: StaffAccountOutput): Promise<void> {
         const result = await createStaffAccount(values);
         if (!result.success) {
             for (const field of Object.keys(result.fieldErrors ?? {}) as StaffAccountFields[]) {

@@ -152,7 +152,7 @@ export const getTransactions = tool({
 
         if (status) conditions.push(eq(transaction.status, status));
 
-        let query = db
+        const query = db
             .select({
                 id: transaction.id,
                 productName: product.name,

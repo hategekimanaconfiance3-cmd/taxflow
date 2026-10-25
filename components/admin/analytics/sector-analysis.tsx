@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import type { SectorAnalysisData } from "@/app/api/admin/sector-analysis/route";
 import { formatCompact } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { BarChart2, TrendingUp, TrendingDown, Inbox } from "lucide-react";
+import { BarChart2, Inbox } from "lucide-react";
 import { ChartCardSkeleton } from "@/components/admin/loading-skeletons";
 import Link from "next/link";
 import {
@@ -30,9 +30,9 @@ interface TooltipArgs {
 }
 
 const SECTOR_COLORS: Record<string, string> = {
-  Manufacturing: "#6366f1",
-  Wholesale: "#0ea5e9",
-  Retail: "#22c55e",
+  Manufacturer: "#6366f1",
+  Wholesaler: "#0ea5e9",
+  Retailer: "#22c55e",
 };
 
 function SectorTooltip({ active, payload, label }: TooltipArgs) {
@@ -76,7 +76,13 @@ export function SectorAnalysis({ from, to }: { from?: string; to?: string } = {}
 
   if (!data) return null;
 
-  const hasData = data.sectors.some((s) => s.vatContribution > 0);
+  const hasData = data.sectors.some((s) => s.vatGenerated > 0);
+  const totalVat = data.sectors.reduce((total, sector) => total + sector.vatGenerated, 0);
+  const chartData = data.sectors.map((sector) => ({
+    ...sector,
+    label: sector.sector,
+    vatPct: totalVat > 0 ? Math.round((sector.vatGenerated / totalVat) * 100) : 0,
+  }));
 
   return (
     <Card>
@@ -88,7 +94,7 @@ export function SectorAnalysis({ from, to }: { from?: string; to?: string } = {}
               Sector Analysis
             </CardTitle>
             <p className="text-xs text-muted-foreground mt-0.5">
-              {data.period} · VAT contribution by sector
+              Recorded VAT and confirmed payments by trader sector
             </p>
           </div>
           {data.topSector && (
@@ -105,7 +111,7 @@ export function SectorAnalysis({ from, to }: { from?: string; to?: string } = {}
             <div className="h-52">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart
-                  data={data.sectors}
+                  data={chartData}
                   margin={{ top: 24, right: 16, bottom: 0, left: 16 }}
                   barSize={64}
                   barCategoryGap="30%"
@@ -125,19 +131,18 @@ export function SectorAnalysis({ from, to }: { from?: string; to?: string } = {}
                     width={68}
                   />
                   <Tooltip content={<SectorTooltip />} cursor={{ fill: "hsl(var(--muted))", opacity: 0.5 }} />
-                  <Bar dataKey="vatContribution" radius={[6, 6, 0, 0]} name="VAT">
+                  <Bar dataKey="vatGenerated" radius={[6, 6, 0, 0]} name="Output VAT">
                     <LabelList
                       dataKey="vatPct"
                       position="top"
-                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                      formatter={((v: number) => v > 0 ? `${v}%` : "") as any}
+                      formatter={(value: unknown) => typeof value === "number" && value > 0 ? `${value}%` : ""}
                       style={{ fontSize: 11, fontWeight: 600, fill: "hsl(var(--foreground))" }}
                     />
                     {data.sectors.map((s) => (
                       <Cell
-                        key={s.role}
-                        fill={SECTOR_COLORS[s.label] ?? "#6366f1"}
-                        opacity={s.vatContribution > 0 ? 1 : 0.3}
+                      key={s.sector}
+                      fill={SECTOR_COLORS[s.sector] ?? "#6366f1"}
+                      opacity={s.vatGenerated > 0 ? 1 : 0.3}
                       />
                     ))}
                   </Bar>
@@ -149,38 +154,27 @@ export function SectorAnalysis({ from, to }: { from?: string; to?: string } = {}
             <div className="space-y-2">
               {data.sectors.map((s) => (
                 <Link
-                  key={s.role}
-                  href={`/admin/traders?role=${s.role}`}
+                  key={s.sector}
+                  href={`/admin/traders?role=${s.sector.toLowerCase()}`}
                   className="flex items-center justify-between rounded-lg border px-3 py-2 hover:bg-muted/40 transition-colors cursor-pointer"
                 >
                   <div className="flex items-center gap-2.5">
                     <span
                       className="h-2.5 w-2.5 rounded-full shrink-0"
-                      style={{ backgroundColor: SECTOR_COLORS[s.label] ?? "#888" }}
+                      style={{ backgroundColor: SECTOR_COLORS[s.sector] ?? "#888" }}
                     />
                     <div>
-                      <p className="text-xs font-medium">{s.label}</p>
+                      <p className="text-xs font-medium">{s.sector}</p>
                       <p className="text-[10px] text-muted-foreground">
-                        {s.traderCount} traders · {s.txnCount} txns
+                        {s.traderCount} traders · {formatCompact(s.taxPaid)} RWF confirmed payments
                       </p>
                     </div>
                   </div>
                   <div className="text-right">
-                    {s.vatContribution > 0 ? (
+                    {s.vatGenerated > 0 ? (
                       <>
-                        <p className="text-xs font-semibold font-mono">{s.vatPct}% of total</p>
-                        {s.growthPct !== null ? (
-                          <div className={`flex items-center justify-end gap-0.5 text-[10px] font-medium ${
-                            s.growthPct >= 0 ? "text-emerald-600" : "text-red-600"
-                          }`}>
-                            {s.growthPct >= 0
-                              ? <TrendingUp className="h-2.5 w-2.5" />
-                              : <TrendingDown className="h-2.5 w-2.5" />}
-                            {s.growthPct >= 0 ? "+" : ""}{s.growthPct}% vs prior 30d
-                          </div>
-                        ) : (
-                          <p className="text-[10px] text-muted-foreground/50">No prior period data</p>
-                        )}
+                        <p className="text-xs font-semibold font-mono">{formatCompact(s.vatGenerated)} RWF output VAT</p>
+                        <p className="text-[10px] text-muted-foreground/50">{s.compliancePct}% payments-to-output-VAT ratio</p>
                       </>
                     ) : (
                       <p className="text-[10px] italic text-muted-foreground/50">No activity recorded</p>

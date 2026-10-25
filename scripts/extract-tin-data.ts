@@ -1,6 +1,8 @@
 import 'dotenv/config';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
+import fs from 'node:fs';
+import path from 'node:path';
 import { citizen, tinRecord } from '../db/tin-schema';
 import * as schema from '../db/tin-schema';
 
@@ -32,8 +34,6 @@ async function extractTinData() {
     };
 
     // Save to file
-    const fs = require('fs');
-    const path = require('path');
     const outputPath = path.join(__dirname, '..', 'data', 'tin-extracted-data.json');
 
     // Ensure the data directory exists

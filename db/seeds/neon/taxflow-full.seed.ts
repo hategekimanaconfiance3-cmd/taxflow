@@ -2705,7 +2705,7 @@ async function seedTaxFlowFull(): Promise<void> {
         status: t.status,
         priority: t.priority,
         assignedToId: t.assignedTo ?? null,
-        resolution: (t as any).resolution ?? null,
+        resolution: 'resolution' in t ? t.resolution : null,
         createdAt,
         updatedAt: resolvedAt ?? createdAt,
         resolvedAt,

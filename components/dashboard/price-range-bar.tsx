@@ -253,22 +253,30 @@ function CompactBar({ status, floor, ceiling, currentPrice }: {
 
 // Export hook for use in forms
 export function usePriceSuggestion(productId: string | null) {
-    const [suggestion, setSuggestion] = useState<PriceSuggestion | null>(null);
-    const [loading, setLoading] = useState(false);
+    const [requestResult, setRequestResult] = useState<{
+        productId: string;
+        suggestion: PriceSuggestion | null;
+    } | null>(null);
 
     useEffect(() => {
         if (!productId) {
-            setSuggestion(null);
             return;
         }
 
-        setLoading(true);
+        let active = true;
         fetch(`/api/ai/price-suggestion?productId=${productId}`)
             .then(res => res.ok ? res.json() : null)
-            .then(data => setSuggestion(data))
-            .catch(() => setSuggestion(null))
-            .finally(() => setLoading(false));
+            .then((data: PriceSuggestion | null) => {
+                if (active) setRequestResult({ productId, suggestion: data });
+            })
+            .catch(() => {
+                if (active) setRequestResult({ productId, suggestion: null });
+            });
+        return () => { active = false; };
     }, [productId]);
 
-    return { suggestion, loading };
+    return {
+        suggestion: requestResult?.productId === productId ? requestResult.suggestion : null,
+        loading: productId !== null && requestResult?.productId !== productId,
+    };
 }

@@ -1,87 +1,158 @@
 import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
 import db from "@/db/drizzle";
-import { user, vatRecord, taxPayment } from "@/db/schema";
-import { sql, eq } from "drizzle-orm";
+import tinDb from "@/db/tin-drizzle";
+import { user, vatRecord, taxPayment, transaction } from "@/db/schema";
+import { tinRecord } from "@/db/tin-schema";
+import { eq, inArray, sql } from "drizzle-orm";
 
 export interface ProvincePoint {
     province: string;
-    vatCollected: number;
-    taxPaid: number;
+    vatReported: number;
+    confirmedTaxPayments: number;
     traderCount: number;
-    compliancePct: number;
+    transactionCount: number;
+    averageTransactionValue: number;
 }
 
 export interface ProvinceTaxData {
     provinces: ProvincePoint[];
-    topProvince: string | null;
-    totalVat: number;
+    leadingProvince: string | null;
+    totalVatReported: number;
+    totalConfirmedTaxPayments: number;
+    tradersWithoutProvince: number;
 }
 
-const PROVINCE_MAP: Record<string, string[]> = {
-    Kigali: ["KGL", "Kigali"],
-    Northern: ["NP", "Northern", "Musanze", "Rubavu"],
-    Southern: ["SP", "Southern", "Huye", "Muhanga"],
-    Eastern: ["EP", "Eastern", "Rwamagana", "Nyagatare"],
-    Western: ["WP", "Western", "Rusizi", "Karongi"],
-};
+const PROVINCES = [
+    { name: "Kigali City", keywords: ["kigali", "kgl"] },
+    { name: "Northern Province", keywords: ["northern", "north", "np"] },
+    { name: "Southern Province", keywords: ["southern", "south", "sp"] },
+    { name: "Eastern Province", keywords: ["eastern", "east", "ep"] },
+    { name: "Western Province", keywords: ["western", "west", "wp"] },
+] as const;
 
-export async function GET() {
+function normalizeProvince(value: string | null | undefined): string | null {
+    const normalized = value?.trim().toLowerCase();
+    if (!normalized) return null;
+    return PROVINCES.find(({ name, keywords }) =>
+        name.toLowerCase() === normalized || keywords.some((keyword) => normalized.includes(keyword)),
+    )?.name ?? null;
+}
+
+export async function GET(): Promise<Response> {
     const session = await auth.api.getSession({ headers: await headers() });
     if (!session?.user) return new Response("Unauthorized", { status: 401 });
 
     try {
         const traders = await db
-            .select({ id: user.id, province: user.province })
+            .select({ id: user.id, tinNumber: user.tinNumber })
             .from(user)
             .where(sql`${user.role} IN ('manufacturer','wholesaler','retailer')`);
 
-        const vatRows = await db
-            .select({ businessId: vatRecord.businessId, total: sql<number>`COALESCE(SUM(${vatRecord.amount}),0)::float8`.as("total") })
-            .from(vatRecord)
-            .where(sql`${vatRecord.vatType} = 'output' AND ${vatRecord.isFrozen} = false`)
-            .groupBy(vatRecord.businessId);
+        const tinNumbers = traders.flatMap((trader) => trader.tinNumber ? [trader.tinNumber] : []);
+        const [registryRows, vatRows, paymentRows, transactionRows] = await Promise.all([
+            tinNumbers.length > 0
+                ? tinDb.select({ tinNumber: tinRecord.tinNumber, province: tinRecord.province })
+                    .from(tinRecord)
+                    .where(inArray(tinRecord.tinNumber, tinNumbers))
+                : Promise.resolve([]),
+            db.select({
+                businessId: vatRecord.businessId,
+                vatType: vatRecord.vatType,
+                total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`.as("total"),
+            })
+                .from(vatRecord)
+                .where(eq(vatRecord.isFrozen, false))
+                .groupBy(vatRecord.businessId, vatRecord.vatType),
+            db.select({
+                businessId: taxPayment.businessId,
+                total: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)::float8`.as("total"),
+            })
+                .from(taxPayment)
+                .where(eq(taxPayment.status, "confirmed"))
+                .groupBy(taxPayment.businessId),
+            db.select({
+                businessId: transaction.sellerId,
+                count: sql<number>`COUNT(*)`.as("count"),
+                total: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)::float8`.as("total"),
+            })
+                .from(transaction)
+                .groupBy(transaction.sellerId),
+        ]);
 
-        const payRows = await db
-            .select({ businessId: taxPayment.businessId, total: sql<number>`COALESCE(SUM(${taxPayment.amount}),0)::float8`.as("total") })
-            .from(taxPayment)
-            .where(eq(taxPayment.status, "confirmed"))
-            .groupBy(taxPayment.businessId);
-
-        const vatMap = new Map(vatRows.map((r) => [r.businessId, r.total]));
-        const payMap = new Map(payRows.map((r) => [r.businessId, r.total]));
-
-        const buckets = new Map<string, { vat: number; paid: number; count: number }>();
-        for (const [name] of Object.entries(PROVINCE_MAP)) {
-            buckets.set(name, { vat: 0, paid: 0, count: 0 });
+        const provinceByTin = new Map(registryRows.map((row) => [row.tinNumber, normalizeProvince(row.province)]));
+        const provinceByBusiness = new Map(traders.map((trader) => [trader.id, provinceByTin.get(trader.tinNumber ?? "") ?? null]));
+        const vatByBusiness = new Map<string, { output: number; input: number }>();
+        for (const row of vatRows) {
+            const current = vatByBusiness.get(row.businessId) ?? { output: 0, input: 0 };
+            if (row.vatType === "output") current.output += row.total;
+            if (row.vatType === "input") current.input += row.total;
+            vatByBusiness.set(row.businessId, current);
         }
 
-        for (const t of traders) {
-            const prov = t.province ?? "";
-            const match =
-                Object.entries(PROVINCE_MAP).find(([, keywords]) =>
-                    keywords.some((k) => prov.toLowerCase().includes(k.toLowerCase()))
-                )?.[0] ?? "Kigali";
-            const b = buckets.get(match)!;
-            b.count++;
-            b.vat += vatMap.get(t.id) ?? 0;
-            b.paid += payMap.get(t.id) ?? 0;
+        const provinces = new Map<string, ProvincePoint>(PROVINCES.map(({ name }) => [name, {
+            province: name,
+            vatReported: 0,
+            confirmedTaxPayments: 0,
+            traderCount: 0,
+            transactionCount: 0,
+            averageTransactionValue: 0,
+        }]));
+        let tradersWithoutProvince = 0;
+        for (const trader of traders) {
+            const province = provinceByBusiness.get(trader.id);
+            if (!province) {
+                tradersWithoutProvince++;
+                continue;
+            }
+            const point = provinces.get(province);
+            if (!point) continue;
+            const vat = vatByBusiness.get(trader.id) ?? { output: 0, input: 0 };
+            point.vatReported += Math.max(0, vat.output - vat.input);
+            point.traderCount++;
         }
 
-        const provinces: ProvincePoint[] = [...buckets.entries()].map(([province, b]) => ({
-            province,
-            vatCollected: b.vat,
-            taxPaid: b.paid,
-            traderCount: b.count,
-            compliancePct: b.vat === 0 ? 100 : Math.min(100, Math.round((b.paid / b.vat) * 1000) / 10),
-        }));
+        const paymentByBusiness = new Map(paymentRows.map((row) => [row.businessId, row.total]));
+        for (const point of provinces.values()) {
+            for (const [businessId, province] of provinceByBusiness) {
+                if (province === point.province) point.confirmedTaxPayments += paymentByBusiness.get(businessId) ?? 0;
+            }
+        }
 
-        const totalVat = provinces.reduce((s, p) => s + p.vatCollected, 0);
-        const topProvince = provinces.sort((a, b) => b.vatCollected - a.vatCollected)[0]?.province ?? null;
+        const transactionByBusiness = new Map(transactionRows.map((row) => [row.businessId, row]));
+        for (const point of provinces.values()) {
+            let totalTransactionValue = 0;
+            for (const [businessId, province] of provinceByBusiness) {
+                if (province !== point.province) continue;
+                const activity = transactionByBusiness.get(businessId);
+                point.transactionCount += activity?.count ?? 0;
+                totalTransactionValue += activity?.total ?? 0;
+            }
+            point.averageTransactionValue = point.transactionCount > 0
+                ? totalTransactionValue / point.transactionCount
+                : 0;
+        }
 
-        return Response.json({ provinces, topProvince, totalVat } satisfies ProvinceTaxData);
-    } catch (err) {
-        console.error("[province-tax]", err);
-        return Response.json({ provinces: [], topProvince: null, totalVat: 0 } satisfies ProvinceTaxData);
+        const result = [...provinces.values()];
+        const totalVatReported = result.reduce((total, point) => total + point.vatReported, 0);
+        const totalConfirmedTaxPayments = result.reduce((total, point) => total + point.confirmedTaxPayments, 0);
+        const leadingProvince = [...result].sort((a, b) => b.vatReported - a.vatReported)[0]?.province ?? null;
+
+        return Response.json({
+            provinces: result,
+            leadingProvince,
+            totalVatReported,
+            totalConfirmedTaxPayments,
+            tradersWithoutProvince,
+        } satisfies ProvinceTaxData);
+    } catch (error) {
+        console.error("[province-tax] Failed to build province tax summary", error);
+        return Response.json({
+            provinces: [],
+            leadingProvince: null,
+            totalVatReported: 0,
+            totalConfirmedTaxPayments: 0,
+            tradersWithoutProvince: 0,
+        } satisfies ProvinceTaxData, { status: 500 });
     }
 }

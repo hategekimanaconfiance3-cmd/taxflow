@@ -214,7 +214,22 @@ export function SignUpForm() {
     const finalEmail = _values.email || `${resolvedTin}@taxflow.local`;
 
     // Step A: Create the account first (so the user exists for phone verification)
-    const signUpResult = await (authClient.signUp.email as any)(
+    const signUpEmail = authClient.signUp.email as unknown as (
+      input: {
+        email: string;
+        password: string;
+        name: string;
+        username: string;
+        nationalId: string | null;
+        tinNumber: string;
+        businessName: string;
+        phoneNumber: string;
+        role: string | null;
+        businessType: string;
+      },
+      options: { onError: (ctx: { error: { message: string } }) => void },
+    ) => Promise<{ data?: unknown }>;
+    const signUpResult = await signUpEmail(
       {
         email: finalEmail,
         password: _values.password,

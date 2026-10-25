@@ -52,7 +52,7 @@ function PeakHoursBar({ buckets, peakHour }: { buckets: HourlyBucket[]; peakHour
             <div
               key={bucket.hour}
               className="flex-1 flex flex-col justify-end group relative"
-              title={`${bucket.label}: ${bucket.count} txns`}
+              title={`${String(bucket.hour).padStart(2, "0")}:00: ${bucket.count} transactions`}
             >
               <div
                 className={cn(
@@ -122,27 +122,22 @@ function TopTradersTable({ traders }: { traders: TopTraderActivity[] }) {
     );
   }
 
-  const maxCount = Math.max(...traders.map((t) => t.txnCount), 1);
+  const maxCount = Math.max(...traders.map((t) => t.txCount), 1);
 
   return (
     <div className="space-y-1.5">
       {traders.map((trader, i) => {
-        const barWidth = (trader.txnCount / maxCount) * 100;
+        const barWidth = (trader.txCount / maxCount) * 100;
         return (
           <div key={i} className="space-y-0.5">
             <div className="flex items-center justify-between gap-2">
               <div className="min-w-0">
                 <p className="text-xs font-medium truncate">{trader.businessName}</p>
-                {trader.tinNumber && (
-                  <p className="text-[9px] font-mono text-muted-foreground/60">
-                    TIN: {trader.tinNumber}
-                  </p>
-                )}
               </div>
               <div className="text-right shrink-0">
-                <p className="text-xs font-semibold tabular-nums">{trader.txnCount} txns</p>
+                <p className="text-xs font-semibold tabular-nums">{trader.txCount} transactions</p>
                 <p className="text-[9px] text-muted-foreground/70 font-mono">
-                  avg {formatCompact(trader.avgValue)}
+                  {formatCompact(trader.totalAmount)} total
                 </p>
               </div>
             </div>
@@ -184,7 +179,9 @@ export function TransactionBehavior() {
 
   if (!data) return null;
 
-  const hasActivity = data.totalThisWeek > 0;
+  const hasActivity = data.totalTransactions > 0;
+  const peakBucket = data.hourlyBuckets.reduce((peak, bucket) => bucket.count > (peak?.count ?? 0) ? bucket : peak, data.hourlyBuckets[0]);
+  const avgDailyVolume = Math.round(data.totalTransactions / 30);
 
   return (
     <Card>
@@ -193,7 +190,7 @@ export function TransactionBehavior() {
           <Activity className="h-4 w-4 text-muted-foreground" />
           Transaction Behavior
           <Badge variant="secondary" className="text-[9px] h-4 px-1.5 font-normal ml-auto">
-            Last 7 days
+            Last 30 days
           </Badge>
         </CardTitle>
       </CardHeader>
@@ -203,16 +200,16 @@ export function TransactionBehavior() {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           <KpiCard
             icon={Zap}
-            label="Today"
-            value={formatCount(data.totalToday)}
-            sub="transactions"
-            highlight={data.totalToday > data.avgDailyVolume && data.avgDailyVolume > 0}
+            label="Transactions"
+            value={formatCount(data.totalTransactions)}
+            sub="last 30 days"
+            highlight={false}
           />
           <KpiCard
             icon={TrendingUp}
             label="Daily Avg"
-            value={data.avgDailyVolume > 0 ? formatCount(data.avgDailyVolume) : "—"}
-            sub="7-day average"
+            value={avgDailyVolume > 0 ? formatCount(avgDailyVolume) : "—"}
+            sub="daily average"
           />
           <KpiCard
             icon={Activity}
@@ -222,9 +219,9 @@ export function TransactionBehavior() {
           />
           <KpiCard
             icon={Users}
-            label="Per Trader"
-            value={data.avgTransactionsPerTrader > 0 ? String(data.avgTransactionsPerTrader) : "—"}
-            sub="txns this week"
+            label="Top traders shown"
+            value={String(data.topTraders.length)}
+            sub="by transaction count"
           />
         </div>
 
@@ -248,12 +245,12 @@ export function TransactionBehavior() {
                 <span className="text-[10px] text-muted-foreground/70 font-mono">
                   Peak:{" "}
                   <span className="text-violet-600 font-semibold">
-                    {String(data.peakHour).padStart(2, "0")}:00
+                    {String(peakBucket?.hour ?? 0).padStart(2, "0")}:00
                   </span>
-                  {" "}· {data.peakHours[data.peakHour]?.count ?? 0} txns
+                  {" "}· {peakBucket?.count ?? 0} transactions
                 </span>
               </div>
-              <PeakHoursBar buckets={data.peakHours} peakHour={data.peakHour} />
+              <PeakHoursBar buckets={data.hourlyBuckets} peakHour={peakBucket?.hour ?? 0} />
             </div>
 
             {/* ── Top Traders ── */}
@@ -262,21 +259,11 @@ export function TransactionBehavior() {
                 <Users className="h-3.5 w-3.5 text-muted-foreground" />
                 <span className="text-xs font-medium">Most Active Traders</span>
               </div>
-              <TopTradersTable traders={data.topActiveTraders} />
+              <TopTradersTable traders={data.topTraders} />
             </div>
           </>
         )}
 
-        {/* ── Insights ── */}
-        {data.insights.length > 0 && (
-          <div className="space-y-1 pt-1 border-t">
-            {data.insights.map((insight, i) => (
-              <p key={i} className="text-[11px] text-muted-foreground leading-snug">
-                {insight}
-              </p>
-            ))}
-          </div>
-        )}
       </CardContent>
     </Card>
   );

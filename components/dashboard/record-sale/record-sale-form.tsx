@@ -83,9 +83,11 @@ export function RecordSaleForm({ inventory, vatRate }: RecordSaleFormProps) {
 
     // Sync with server data when inventory prop changes (from router.refresh())
     useEffect(() => {
-        setSaleItems((prev) =>
-            inventory.map((inv) => {
-                const existing = prev.find((p) => p.productId === inv.productId);
+        let active = true;
+        queueMicrotask(() => {
+            if (!active) return;
+            setSaleItems((prev) => inventory.map((inv) => {
+                const existing = prev.find((item) => item.productId === inv.productId);
                 return {
                     productId: inv.productId,
                     productName: inv.productName,
@@ -93,8 +95,9 @@ export function RecordSaleForm({ inventory, vatRate }: RecordSaleFormProps) {
                     quantityToSell: existing?.quantityToSell ?? 0,
                     unitPrice: existing?.unitPrice ?? (inv.latestUnitPrice ?? 0),
                 };
-            }),
-        );
+            }));
+        });
+        return () => { active = false; };
     }, [inventory]);
 
     function updateItem(

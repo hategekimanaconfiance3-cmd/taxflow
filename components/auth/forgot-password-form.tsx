@@ -45,7 +45,11 @@ export function ForgotPasswordForm() {
     const isSubmitting = form.formState.isSubmitting;
 
     const onSubmit = async (values: ForgotPasswordValues) => {
-        const { error } = await (authClient.forgetPassword as any)({
+        const requestPasswordReset = authClient.forgetPassword as unknown as (input: {
+            email: string;
+            redirectTo: string;
+        }) => Promise<{ error?: { message?: string } | null }>;
+        const { error } = await requestPasswordReset({
             email: values.email,
             redirectTo: "/reset-password",
         });

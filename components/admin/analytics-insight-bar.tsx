@@ -49,18 +49,19 @@ const LEVEL_CONFIG = {
 } as const;
 
 function InsightPill({ insight }: { insight: AnalyticsInsight }) {
-  const cfg = LEVEL_CONFIG[insight.level];
+  const cfg = LEVEL_CONFIG[insight.severity];
   const Icon = cfg.icon;
 
   const inner = (
     <div className={cn("flex items-center gap-2 rounded-md border px-3 py-2 transition-colors", cfg.bg, insight.href && "hover:opacity-80 cursor-pointer")}>
       <Icon className={cn("h-3.5 w-3.5 shrink-0", cfg.iconColor)} />
-      <p className={cn("text-xs font-medium leading-snug", cfg.text)}>{insight.message}</p>
-      {insight.metric && (
-        <Badge variant="secondary" className={cn("text-[9px] font-mono shrink-0 ml-auto", cfg.badge)}>
-          {insight.metric}
-        </Badge>
-      )}
+      <div className="min-w-0">
+        <p className={cn("text-xs font-medium leading-snug", cfg.text)}>{insight.title}</p>
+        <p className="text-[10px] leading-snug text-muted-foreground mt-0.5">{insight.description}</p>
+      </div>
+      <Badge variant="secondary" className={cn("text-[9px] font-mono shrink-0 ml-auto", cfg.badge)}>
+        {cfg.label}
+      </Badge>
     </div>
   );
 
@@ -90,8 +91,8 @@ export function AnalyticsInsightBar() {
 
   if (!data || data.insights.length === 0) return null;
 
-  const hasCritical = data.insights.some((i) => i.level === "critical");
-  const hasWarning = data.insights.some((i) => i.level === "warning");
+  const hasCritical = data.insights.some((i) => i.severity === "critical");
+  const hasWarning = data.insights.some((i) => i.severity === "warning");
 
   return (
     <div className="space-y-2">
@@ -110,12 +111,12 @@ export function AnalyticsInsightBar() {
           )}
           {!hasCritical && hasWarning && (
             <Badge variant="secondary" className="bg-amber-100 text-amber-700 text-[9px] h-4 px-1.5">
-              {data.insights.filter((i) => i.level === "warning").length} warnings
+              {data.warningCount} warnings
             </Badge>
           )}
         </div>
         <span className="text-[10px] text-muted-foreground/50 font-mono">
-          {data.period} · auto-refreshes
+          {data.criticalCount + data.warningCount} active alerts
         </span>
       </div>
 

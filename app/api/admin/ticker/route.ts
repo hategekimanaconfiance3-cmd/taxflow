@@ -40,12 +40,12 @@ export async function GET() {
             db.select({
                 id: importDeclaration.id,
                 businessName: user.businessName,
-                amount: importDeclaration.totalValue,
+                amount: importDeclaration.estimatedValue,
                 status: importDeclaration.status,
                 createdAt: importDeclaration.createdAt,
             })
             .from(importDeclaration)
-            .innerJoin(user, sql`${user.id} = ${importDeclaration.importerId}`)
+            .innerJoin(user, sql`${user.id} = ${importDeclaration.businessId}`)
             .orderBy(desc(importDeclaration.createdAt))
             .limit(5),
 

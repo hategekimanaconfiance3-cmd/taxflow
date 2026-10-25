@@ -1,6 +1,8 @@
 import 'dotenv/config';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
+import fs from 'node:fs';
+import path from 'node:path';
 import { user, account, rraStaff } from '../db/schema';
 import * as schema from '../db/schema';
 
@@ -38,8 +40,6 @@ async function extractData() {
     };
 
     // Save to file
-    const fs = require('fs');
-    const path = require('path');
     const outputPath = path.join(__dirname, '..', 'data', 'extracted-data.json');
 
     // Ensure the data directory exists

@@ -72,6 +72,7 @@ export const resetStaffPasswordSchema = z
   });
 
 export type StaffAccountInput = z.input<typeof staffAccountSchema>;
+export type StaffAccountOutput = z.output<typeof staffAccountSchema>;
 export type ResetStaffPasswordInput = z.input<typeof resetStaffPasswordSchema>;
 export type StaffAccountFields = keyof StaffAccountInput;
 export type ResetPasswordFields = keyof ResetStaffPasswordInput;

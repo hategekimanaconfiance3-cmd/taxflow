@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import { io, Socket } from "socket.io-client";
 
 let globalSocket: Socket | null = null;
@@ -47,27 +47,31 @@ export function useSocket(
     userId: string | undefined,
     events?: Record<string, (data: unknown) => void>,
 ) {
-    const [connected, setConnected] = useState(false);
     const eventsRef = useRef(events);
-    eventsRef.current = events;
+
+    useEffect(() => {
+        eventsRef.current = events;
+    }, [events]);
+
+    const connected = useSyncExternalStore(
+        (onChange) => {
+            if (!userId) return () => undefined;
+            const socket = getSocket(userId);
+            socket.on("connect", onChange);
+            socket.on("disconnect", onChange);
+            return () => {
+                socket.off("connect", onChange);
+                socket.off("disconnect", onChange);
+            };
+        },
+        () => Boolean(userId && globalSocketUserId === userId && globalSocket?.connected),
+        () => false,
+    );
 
     useEffect(() => {
         if (!userId) return;
 
         const socket = getSocket(userId);
-
-        function onConnect() {
-            setConnected(true);
-        }
-        function onDisconnect() {
-            setConnected(false);
-        }
-
-        socket.on("connect", onConnect);
-        socket.on("disconnect", onDisconnect);
-
-        // Set initial state
-        setConnected(socket.connected);
 
         // Subscribe to events
         const eventNames = Object.keys(eventsRef.current || {});
@@ -78,8 +82,6 @@ export function useSocket(
         }
 
         return () => {
-            socket.off("connect", onConnect);
-            socket.off("disconnect", onDisconnect);
             for (const event of eventNames) {
                 socket.off(event);
             }

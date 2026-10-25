@@ -25,6 +25,10 @@ interface AIChatWidgetProps {
     role: string;
 }
 
+function isToolPart(part: { type: string }): boolean {
+    return part.type.startsWith("tool-");
+}
+
 const SUGGESTIONS: Record<string, string[]> = {
     rra_staff: [
         "Show system-wide statistics",
@@ -211,10 +215,7 @@ export function AIChatWidget({ role }: AIChatWidgetProps) {
                             const hasText = msg.parts.some(
                                 (p) => p.type === "text" && p.text.trim().length > 0,
                             );
-                            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                            const hasToolInvocation = msg.parts.some(
-                                (p: any) => typeof p.type === "string" && p.type.startsWith("tool-"),
-                            );
+                            const hasToolInvocation = msg.parts.some(isToolPart);
                             const hasOnlyReasoning = !hasText && !hasToolInvocation && msg.parts.some(
                                 (p) => p.type === "reasoning",
                             );
@@ -256,12 +257,13 @@ export function AIChatWidget({ role }: AIChatWidgetProps) {
 
                             // Assistant: only tool invocations, no text yet (still loading) → show tool status
                             if (!hasText && hasToolInvocation && isStreamingThis) {
-                                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                                const toolParts = msg.parts.filter((p: any) => p.type?.startsWith?.("tool-"));
-                                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                                const latestTool = toolParts[toolParts.length - 1] as any;
-                                const toolDisplayName = latestTool?.toolName
-                                    ? formatToolName(latestTool.toolName)
+                                const toolParts = msg.parts.filter(isToolPart);
+                                const latestTool = toolParts[toolParts.length - 1];
+                                const toolName = latestTool && "toolName" in latestTool && typeof latestTool.toolName === "string"
+                                    ? latestTool.toolName
+                                    : undefined;
+                                const toolDisplayName = toolName
+                                    ? formatToolName(toolName)
                                     : "";
                                 return (
                                     <div key={msg.id} className="flex gap-2.5">

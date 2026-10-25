@@ -94,6 +94,10 @@ export function TaxPaymentForm({ outstanding }: TaxPaymentFormProps) {
     };
 
     const rootError = form.formState.errors.root;
+    const handleFormSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+        event.preventDefault();
+        void form.handleSubmit(onSubmit)(event);
+    };
 
     return (
         <Card>
@@ -140,7 +144,7 @@ export function TaxPaymentForm({ outstanding }: TaxPaymentFormProps) {
 
                 <Form {...form}>
                     <form
-                        onSubmit={form.handleSubmit(onSubmit)}
+                        onSubmit={handleFormSubmit}
                         className="space-y-4"
                     >
                         {/* Amount */}

@@ -65,7 +65,7 @@ function VatTooltip({ active, payload, label }: TooltipArgs) {
       <p className="font-semibold text-foreground">{label}</p>
       <div className="flex items-center gap-1.5">
         <span className="h-2 w-2 rounded-full bg-emerald-500" />
-        <span className="text-muted-foreground">VAT Collected:</span>
+        <span className="text-muted-foreground">Confirmed tax payments:</span>
         <span className="font-medium text-emerald-600">{formatCompact(payload[0]?.value ?? 0)} RWF</span>
       </div>
     </div>
@@ -93,7 +93,9 @@ export function VatPerformance({ from, to }: { from?: string; to?: string } = {}
   if (!data) return null;
 
   const hasData = data.monthly.length > 0;
-  const avg = data.avgMonthlyVat;
+  const avgMonthlyPayment = hasData ? data.totalPaid / data.monthly.length : 0;
+  const currentPeriod = data.monthly[data.monthly.length - 1];
+  const peakPeriod = data.monthly.reduce((peak, point) => point.payments > (peak?.payments ?? 0) ? point : peak, data.monthly[0]);
 
   return (
     <Card>
@@ -102,13 +104,13 @@ export function VatPerformance({ from, to }: { from?: string; to?: string } = {}
           <div>
             <CardTitle className="text-base font-semibold flex items-center gap-2">
               <BarChart3 className="h-4 w-4 text-muted-foreground" />
-              Revenue & Tax Performance
+              Tax Payment Performance
             </CardTitle>
-            <p className="text-xs text-muted-foreground mt-0.5">VAT collected over time · 12-month rolling</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Confirmed tax payments recorded by month</p>
           </div>
-          {data.peakMonth && (
+          {peakPeriod && peakPeriod.payments > 0 && (
             <span className="text-[10px] text-muted-foreground border rounded px-2 py-0.5">
-              Peak: {data.peakMonth}
+              Highest: {peakPeriod.month}
             </span>
           )}
         </div>
@@ -117,23 +119,19 @@ export function VatPerformance({ from, to }: { from?: string; to?: string } = {}
         {/* Metric strip */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <MetricCard
-            label="Total VAT Collected"
-            value={formatCompact(data.totalVatCollected)}
-            sub="Last 12 months"
-            change={data.pctChange}
-            positive={(data.pctChange ?? 0) >= 0}
+            label="Confirmed tax payments"
+            value={formatCompact(data.totalPaid)}
+            sub="Current chart period"
           />
           <MetricCard
-            label="This Month"
-            value={data.currentMonthVat > 0 ? formatCompact(data.currentMonthVat) : "—"}
-            sub={data.currentMonthVat > 0 ? "Current period" : "No VAT recorded yet (current period)"}
-            change={data.currentMonthVat > 0 ? data.currentMonthChange : null}
-            positive={(data.currentMonthChange ?? 0) >= 0}
+            label="Latest month"
+            value={currentPeriod && currentPeriod.payments > 0 ? formatCompact(currentPeriod.payments) : "—"}
+            sub={currentPeriod?.month ?? "No monthly payment records"}
           />
           <MetricCard
-            label="Monthly Average"
-            value={formatCompact(data.avgMonthlyVat)}
-            sub="12-month average"
+            label="Monthly average"
+            value={formatCompact(avgMonthlyPayment)}
+            sub={`Across ${data.monthly.length} recorded months`}
           />
         </div>
 
@@ -171,9 +169,9 @@ export function VatPerformance({ from, to }: { from?: string; to?: string } = {}
                   tickLine={false}
                   width={72}
                 />
-                {avg > 0 && (
+                {avgMonthlyPayment > 0 && (
                   <ReferenceLine
-                    y={avg}
+                    y={avgMonthlyPayment}
                     stroke="hsl(var(--muted-foreground))"
                     strokeDasharray="4 3"
                     strokeWidth={1}
@@ -188,13 +186,13 @@ export function VatPerformance({ from, to }: { from?: string; to?: string } = {}
                 <Tooltip content={<VatTooltip />} cursor={{ stroke: "hsl(var(--border))", strokeWidth: 1 }} />
                 <Area
                   type="monotone"
-                  dataKey="vatCollected"
+                  dataKey="payments"
                   stroke="#10b981"
                   strokeWidth={2.5}
                   fill="url(#vatGradient)"
                   dot={{ r: 3.5, fill: "#10b981", strokeWidth: 0 }}
                   activeDot={{ r: 5, fill: "#10b981", stroke: "#fff", strokeWidth: 2 }}
-                  name="VAT Collected"
+                  name="Confirmed tax payments"
                 />
               </AreaChart>
             </ResponsiveContainer>
@@ -202,7 +200,7 @@ export function VatPerformance({ from, to }: { from?: string; to?: string } = {}
         ) : (
           <div className="flex flex-col items-center justify-center py-10 gap-2 rounded-lg bg-muted/20 border">
             <Inbox className="h-7 w-7 text-muted-foreground/40" />
-            <p className="text-sm text-muted-foreground">No VAT data for the past 12 months</p>
+            <p className="text-sm text-muted-foreground">No monthly records are available for the past six months</p>
           </div>
         )}
       </CardContent>
