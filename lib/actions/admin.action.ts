@@ -9,7 +9,7 @@ import {
 } from "@/lib/auth-guard";
 import { logAudit } from "@/lib/audit";
 import { getSystemConfig } from "@/lib/actions/system-config.action";
-import { updateClearanceStatusSchema } from "@/lib/validation/admin-taxpayer.schema";
+import { getAllowedClearanceTransitions, updateClearanceStatusSchema } from "@/lib/validation/admin-taxpayer.schema";
 
 // ---------------------------------------------------------------------------
 // Trader management
@@ -88,13 +88,18 @@ export async function updateClearanceStatus(
                 .limit(1);
 
             if (!target) return { success: false, error: "Taxpayer record not found." };
-            if (target.clearanceStatus === parsed.data.status) {
-                return { success: false, error: "The taxpayer already has this clearance status." };
+            if (!getAllowedClearanceTransitions(target.clearanceStatus).includes(parsed.data.status)) {
+                return { success: false, error: "This clearance status change is not allowed from the taxpayer's current status." };
             }
 
-            await tx.update(user)
+            const [updated] = await tx.update(user)
                 .set({ clearanceStatus: parsed.data.status, updatedAt: new Date() })
-                .where(eq(user.id, parsed.data.traderId));
+                .where(and(
+                    eq(user.id, parsed.data.traderId),
+                    eq(user.clearanceStatus, target.clearanceStatus),
+                ))
+                .returning({ id: user.id });
+            if (!updated) return { success: false, error: "The taxpayer status changed while you were reviewing it. Refresh the record and try again." };
 
             await logAudit({
                 userId: actor.id,

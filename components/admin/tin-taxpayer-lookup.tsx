@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState, useTransition, type FormEvent } from "react";
-import { Search, Loader2, UserRoundSearch, Sparkles, Send } from "lucide-react";
+import { Search, Loader2, UserRoundSearch, Sparkles, Send, ArrowUpRight } from "lucide-react";
+import Link from "next/link";
 import { askTaxpayerIntelligence, getTaxpayerSearchHistory, searchTaxpayerIntelligence } from "@/lib/actions/admin-tin-lookup.action";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,7 +18,7 @@ function Panel({ title, children }: { title: string; children: React.ReactNode }
   return <Card><CardHeader className="pb-3"><CardTitle className="text-base">{title}</CardTitle></CardHeader><CardContent>{children}</CardContent></Card>;
 }
 
-export function TraderLookupDetails({ result }: { result: LookupResult }) {
+export function TraderLookupDetails({ result, showOpenRecordLink = false }: { result: LookupResult; showOpenRecordLink?: boolean }) {
   const { profile } = result;
   return (
     <div className="space-y-4">
@@ -25,6 +26,7 @@ export function TraderLookupDetails({ result }: { result: LookupResult }) {
         <CardHeader className="pb-3">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div><CardTitle className="text-lg">{profile.businessName ?? profile.name}</CardTitle><p className="mt-1 text-sm text-muted-foreground">{profile.name}</p></div>
+            {showOpenRecordLink && <Button variant="outline" size="sm" asChild className="gap-2"><Link href={`/admin/traders/${encodeURIComponent(profile.id)}`}>Open taxpayer record<ArrowUpRight className="h-4 w-4" /></Link></Button>}
             <div className="flex flex-wrap gap-2"><Badge className="bg-emerald-600 hover:bg-emerald-600">Taxpayer found</Badge><Badge variant="outline" className="capitalize">{profile.role}</Badge><Badge variant="secondary" className="capitalize">{profile.clearanceStatus ?? "unknown"}</Badge></div>
           </div>
         </CardHeader>
@@ -128,7 +130,7 @@ export function TinTaxpayerLookup() {
       <CardContent className="divide-y">{history.map((item, index) => <div key={`${item.createdAt}-${index}`} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm"><span>{item.taxpayerName} <span className="text-muted-foreground">· {item.outcome}</span></span><span className="text-xs text-muted-foreground">{new Date(item.createdAt).toLocaleString()}</span></div>)}</CardContent>
     </Card>}
     {result && <>
-      <TraderLookupDetails result={result} />
+      <TraderLookupDetails result={result} showOpenRecordLink />
       <Card>
         <CardHeader className="pb-3"><CardTitle className="flex items-center gap-2 text-base"><Sparkles className="h-4 w-4 text-primary" />AI Finding — Requires Human Review</CardTitle><p className="text-sm text-muted-foreground">Advisory analysis generated only from records in your authorized view. Potential risks are not confirmed violations or official decisions.</p></CardHeader>
         <CardContent className="space-y-4">

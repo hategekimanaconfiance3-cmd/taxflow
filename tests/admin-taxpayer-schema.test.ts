@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { editTaxpayerSchema, updateClearanceStatusSchema } from "../lib/validation/admin-taxpayer.schema";
+import { editTaxpayerSchema, getAllowedClearanceTransitions, taxpayerRecordIdSchema, updateClearanceStatusSchema } from "../lib/validation/admin-taxpayer.schema";
 
 const validEdit = {
   traderId: "taxpayer-1",
@@ -25,4 +25,20 @@ test("clearance changes require a valid status, target ID, and human reason", ()
   assert.equal(updateClearanceStatusSchema.safeParse({ traderId: "taxpayer-1", status: "suspended", reason: "Evidence requires a formal compliance review." }).success, true);
   assert.equal(updateClearanceStatusSchema.safeParse({ traderId: "taxpayer-1", status: "fraud", reason: "Evidence requires a formal compliance review." }).success, false);
   assert.equal(updateClearanceStatusSchema.safeParse({ traderId: "taxpayer-1", status: "approved", reason: "ok" }).success, false);
+});
+
+test("clearance transitions allow review, suspension, approval, and reinstatement but reject invalid transitions", () => {
+  assert.deepEqual(getAllowedClearanceTransitions("pending"), ["approved", "under_review", "suspended"]);
+  assert.deepEqual(getAllowedClearanceTransitions("approved"), ["under_review", "suspended"]);
+  assert.deepEqual(getAllowedClearanceTransitions("under_review"), ["approved", "suspended"]);
+  assert.deepEqual(getAllowedClearanceTransitions("suspended"), ["approved", "under_review"]);
+  assert.deepEqual(getAllowedClearanceTransitions("unknown"), []);
+  assert.equal((getAllowedClearanceTransitions("approved") as readonly string[]).includes("pending"), false);
+});
+
+test("taxpayer record route IDs accept the database text ID format and reject blank or oversized values", () => {
+  assert.equal(taxpayerRecordIdSchema.safeParse("user_abc-123").success, true);
+  assert.equal(taxpayerRecordIdSchema.safeParse("550e8400-e29b-41d4-a716-446655440000").success, true);
+  assert.equal(taxpayerRecordIdSchema.safeParse(" ").success, false);
+  assert.equal(taxpayerRecordIdSchema.safeParse("x".repeat(129)).success, false);
 });

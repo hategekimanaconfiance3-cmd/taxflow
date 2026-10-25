@@ -25,6 +25,7 @@ import { requireRRAPermission, type RRARole } from "@/lib/auth-guard";
 import { logAudit } from "@/lib/audit";
 import { hasRRAPermission } from "@/lib/rra-rbac";
 import { consumeRateLimit, getRequestIdentity } from "@/lib/rate-limit";
+import { taxpayerRecordIdSchema } from "@/lib/validation/admin-taxpayer.schema";
 
 const tinSchema = z.string().trim().min(5).max(32).regex(/^[A-Za-z0-9-]+$/);
 
@@ -359,9 +360,10 @@ export async function askTaxpayerIntelligence(input: { tin: string; question: st
 /** ID-based rendering for links from the dashboard search, using the same role scope. */
 export async function getTraderLookupById(traderId: string) {
   const { staff } = await requireRRAPermission("taxpayer.intelligence.search");
-  if (!z.string().uuid().safeParse(traderId).success) return null;
+  const parsedId = taxpayerRecordIdSchema.safeParse(traderId);
+  if (!parsedId.success) return null;
   const [match] = await db.select({ tinNumber: user.tinNumber }).from(user)
-    .where(and(eq(user.id, traderId), sql`${user.role} IN ('manufacturer', 'wholesaler', 'retailer')`)).limit(1);
+    .where(and(eq(user.id, parsedId.data), sql`${user.role} IN ('manufacturer', 'wholesaler', 'retailer')`)).limit(1);
   if (!match?.tinNumber) return null;
   const staffRoles = staff.clearanceRoles as RRARole[];
   const result = await buildLookup(match.tinNumber, staffRoles, staff.id);

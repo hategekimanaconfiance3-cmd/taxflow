@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { updateClearanceStatus } from "@/lib/actions/admin.action";
-import { clearanceReasonSchema } from "@/lib/validation/admin-taxpayer.schema";
+import { clearanceReasonSchema, getAllowedClearanceTransitions, type ClearanceStatus } from "@/lib/validation/admin-taxpayer.schema";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -26,7 +26,6 @@ import {
 import { CheckCircle, AlertTriangle, ShieldBan, MoreHorizontal, Loader2 } from "lucide-react";
 import type { z } from "zod";
 
-type ClearanceStatus = "approved" | "under_review" | "suspended";
 type ClearanceReason = z.infer<typeof clearanceReasonSchema>;
 
 const STATUS_OPTIONS: {
@@ -86,14 +85,21 @@ export function AdminClearanceActions({ traderId, traderName, currentStatus }: A
     });
   });
 
-  const availableActions = STATUS_OPTIONS.filter((option) => option.value !== currentStatus);
+  const availableActions = getAllowedClearanceTransitions(currentStatus).flatMap((status) => {
+    const option = STATUS_OPTIONS.find((candidate) => candidate.value === status);
+    if (!option) return [];
+    if (status === "approved" && currentStatus === "suspended") {
+      return [{ ...option, label: "Reinstate" }];
+    }
+    return [option];
+  });
   const reasonError = form.formState.errors.reason?.message;
 
   return (
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="outline" size="sm" className="gap-2" disabled={isPending} aria-label="Taxpayer clearance actions">
+          <Button variant="outline" size="sm" className="gap-2" disabled={isPending || availableActions.length === 0} aria-label="Taxpayer clearance actions">
             {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <MoreHorizontal className="h-4 w-4" />}
             Clearance actions
           </Button>
