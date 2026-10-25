@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { getAdminSidebarGroups, ROLE_LABELS, ROLE_COLORS, type RRARole } from '@/lib/admin-sidebar-config';
+import { hasOperationalRRAPermission, isRRARole } from '@/lib/rra-rbac';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -276,7 +277,9 @@ interface AdminShellProps {
 // ---------------------------------------------------------------------------
 export function AdminShell({ userName, staffId, clearanceLevel, clearanceRoles, children }: AdminShellProps) {
   const pathname = usePathname();
-  const groups = getAdminSidebarGroups(clearanceRoles.length ? clearanceRoles : [clearanceLevel]);
+  const effectiveRoles = clearanceRoles.length ? clearanceRoles : [clearanceLevel];
+  const groups = getAdminSidebarGroups(effectiveRoles);
+  const canReadSupportTickets = hasOperationalRRAPermission(effectiveRoles.filter(isRRARole), "support.read");
 
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
@@ -674,9 +677,9 @@ export function AdminShell({ userName, staffId, clearanceLevel, clearanceRoles, 
               <Link href="/admin/profile" onClick={() => setIsAccountMenuOpen(false)} className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
                 <User className="h-3.5 w-3.5" /> Profile
               </Link>
-              <Link href="/admin/support" onClick={() => setIsAccountMenuOpen(false)} className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
+              {canReadSupportTickets && <Link href="/admin/support" onClick={() => setIsAccountMenuOpen(false)} className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
                 <HelpCircle className="h-3.5 w-3.5" /> Help & Support
-              </Link>
+              </Link>}
             </div>
             <Separator className="opacity-60" />
             <div className="py-1">

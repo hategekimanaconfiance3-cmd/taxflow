@@ -33,6 +33,7 @@ import {
     Layers,
 } from "lucide-react";
 import type { RRARole } from "@/lib/auth-guard";
+import { getOperationalRRARolesWithAnyPermission } from "@/lib/rra-rbac";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -390,7 +391,7 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 label: "Support Tickets",
                 href: "/admin/support",
                 icon: Ticket,
-                allowedRoles: ALL,
+                allowedRoles: getOperationalRRARolesWithAnyPermission(["support.read"]),
             },
         ],
     },

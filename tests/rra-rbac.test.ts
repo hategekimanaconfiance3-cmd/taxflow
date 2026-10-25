@@ -18,6 +18,7 @@ import {
     type RRAPermission,
 } from "../lib/rra-rbac";
 import { staffAssignmentRoleSchema } from "../lib/validation/staff.schema";
+import { getAdminSidebarGroups } from "../lib/admin-sidebar-config";
 
 // ---------------------------------------------------------------------------
 // Role catalogue
@@ -117,6 +118,15 @@ test("reporting officers can read support tickets but cannot manage them", () =>
     assert.ok(hasOperationalRRAPermission(["reporting_officer"], "support.read"));
     assert.equal(hasOperationalRRAPermission(["reporting_officer"], "support.manage"), false);
     assert.equal(hasOperationalRRAPermission(["super_admin"], "support.read"), false);
+});
+
+test("Support Tickets navigation is visible exactly to roles with operational support.read", () => {
+    for (const role of RRA_ROLE_VALUES) {
+        const visible = getAdminSidebarGroups([role])
+            .flatMap((group) => group.items)
+            .some((item) => item.href === "/admin/support");
+        assert.equal(visible, hasOperationalRRAPermission([role], "support.read"), `Support Tickets navigation visibility for ${role}`);
+    }
 });
 
 test("audit_investigation_officer: case management, trail, traceability", () => {

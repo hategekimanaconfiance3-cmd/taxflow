@@ -31,7 +31,7 @@ export default async function AdminTraderDetailPage({
     (hasOperationalRRAPermission(roles, "stock.read") || hasOperationalRRAPermission(roles, "traceability.read")) && { label: "Stock monitoring", href: `/admin/stock?tin=${query}` },
     hasOperationalRRAPermission(roles, "traceability.read") && { label: "Product journey", href: `/admin/product-journey?query=${query}` },
     (hasOperationalRRAPermission(roles, "compliance.followup.manage") || hasOperationalRRAPermission(roles, "investigation.case.manage")) && { label: "Cases and taxpayer follow-up", href: `/admin/cases?tin=${query}` },
-    hasOperationalRRAPermission(roles, "support.manage") && { label: "Support requests", href: `/admin/support?tin=${query}` },
+    hasOperationalRRAPermission(roles, "support.read") && { label: "Support requests", href: `/admin/support?tin=${query}` },
     hasOperationalRRAPermission(roles, "investigation.case.manage") && { label: "Disputes", href: `/admin/disputes?tin=${query}` },
   ].filter((item): item is { label: string; href: string } => Boolean(item));
   const sections = [
