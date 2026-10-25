@@ -1,4 +1,4 @@
-﻿"use server";
+"use server";
 
 import { eq, sql, desc, and, or, gte, lte, ilike, inArray } from "drizzle-orm";
 import db from "@/db/drizzle";
@@ -97,16 +97,17 @@ export async function getAllTransactions(filters?: {
     dateFrom?: string;
     dateTo?: string;
     search?: string;
+    tin?: string;
 }) {
-    await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
+    await requireRRAOperationalPermission("transaction.read");
 
     const seller = db
-        .select({ id: user.id, businessName: user.businessName })
+        .select({ id: user.id, businessName: user.businessName, tinNumber: user.tinNumber })
         .from(user)
         .as("seller");
 
     const buyer = db
-        .select({ id: user.id, businessName: user.businessName })
+        .select({ id: user.id, businessName: user.businessName, tinNumber: user.tinNumber })
         .from(user)
         .as("buyer");
 
@@ -136,6 +137,14 @@ export async function getAllTransactions(filters?: {
                 ilike(product.name, s),
             )!,
         );
+    }
+
+    if (filters?.tin) {
+        const tin = filters.tin.trim();
+        if (tin.length < 5 || tin.length > 32 || !/^[A-Za-z0-9-]+$/.test(tin)) {
+            throw new Error("Enter a valid TIN to filter transactions.");
+        }
+        conditions.push(or(eq(seller.tinNumber, tin), eq(buyer.tinNumber, tin))!);
     }
 
     let query = db
@@ -468,7 +477,7 @@ export async function flagTransaction(
     transactionId: string,
     reason: string,
 ) {
-    const { staff, ...session } = await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
+    const { staff, ...session } = await requireRRAOperationalPermission("transaction.read");
 
     if (!reason?.trim()) {
         throw new Error("A reason is required to flag a transaction.");
@@ -512,7 +521,7 @@ export async function cancelTransaction(
     transactionId: string,
     reason: string,
 ) {
-    const { staff, ...session } = await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
+    const { staff, ...session } = await requireRRAOperationalPermission("transaction.read");
 
     if (!reason?.trim()) {
         throw new Error("A reason is required to cancel a transaction.");

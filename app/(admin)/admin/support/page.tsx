@@ -1,4 +1,4 @@
-import { requireRRASession } from '@/lib/auth-guard';
+import { requireRRAOperationalPermission } from '@/lib/auth-guard';
 import { getAllTickets } from '@/lib/actions/admin-support-ticket.action';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -26,10 +26,11 @@ const PRIORITY_COLORS: Record<string, string> = {
   urgent: 'bg-red-100 text-red-700',
 };
 
-export default async function AdminSupportPage() {
-  await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
-
-  const tickets = await getAllTickets();
+export default async function AdminSupportPage({ searchParams }: { searchParams: Promise<{ tin?: string }> }) {
+  await requireRRAOperationalPermission("support.manage");
+  const params = await searchParams;
+  const tin = params.tin?.trim();
+  const tickets = await getAllTickets(undefined, tin);
 
   const open = tickets.filter((t) => t.status === 'open').length;
   const inProgress = tickets.filter((t) => t.status === 'in_progress').length;
@@ -39,7 +40,7 @@ export default async function AdminSupportPage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Support Tickets</h1>
         <p className="text-muted-foreground text-sm mt-1">
-          Review and resolve trader-submitted support requests.
+          {tin ? `Support requests for TIN ${tin}.` : "Review and resolve trader-submitted support requests."}
         </p>
       </div>
 

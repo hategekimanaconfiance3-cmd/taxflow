@@ -12,6 +12,7 @@ import {
   dispute,
   importDeclaration,
   product,
+  productionBatch,
   rraCase,
   stock,
   stockMovement,
@@ -21,7 +22,7 @@ import {
   user,
   vatRecord,
 } from "@/db/schema";
-import { requireRRAPermission, type RRARole } from "@/lib/auth-guard";
+import { requireRRAOperationalPermission, type RRARole } from "@/lib/auth-guard";
 import { logAudit } from "@/lib/audit";
 import { hasRRAPermission } from "@/lib/rra-rbac";
 import { consumeRateLimit, getRequestIdentity } from "@/lib/rate-limit";
@@ -56,7 +57,9 @@ type LookupData = {
   transactions?: Array<{ productName: string; quantity: number; totalAmount: number; vatAmount: number; status: string; createdAt: Date }>;
   imports?: Array<{ declarationRef: string | null; productName: string; expectedQuantity: number; actualQuantity: number | null; status: string; customsRef: string | null; createdAt: Date }>;
   disputes?: Array<{ referenceNumber: string; status: string; reason: string; createdAt: Date }>;
-  cases?: Array<{ title: string; status: string; priority: string; createdAt: Date; updatedAt: Date }>;
+  cases?: Array<{ id: string; title: string; status: string; priority: string; createdAt: Date; updatedAt: Date }>;
+  production?: Array<{ batchReference: string; productName: string; unit: string; declaredQuantity: number; status: string | null; periodStart: Date; periodEnd: Date; createdAt: Date }>;
+  auditHistory?: Array<{ action: string; actorName: string | null; metadata: string | null; beforeState: Record<string, unknown> | null; afterState: Record<string, unknown> | null; createdAt: Date }>;
   stock?: Array<{ productName: string; unit: string; quantity: number; price: number | null; source: string | null }>;
   corrections?: Array<{ productName: string; movementType: string; quantityDelta: number; reason: string | null; createdAt: Date }>;
 };
@@ -67,7 +70,7 @@ function roleHasPermission(roles: RRARole[], permission: Parameters<typeof hasRR
   return roles.some((role) => role !== "super_admin" && hasRRAPermission(role, permission));
 }
 
-async function buildLookup(tin: string, staffRoles: RRARole[], staffRecordId: string): Promise<LookupData | null> {
+async function buildLookup(tin: string, staffRoles: RRARole[]): Promise<LookupData | null> {
   const [trader] = await db.select({
     id: user.id,
     name: user.name,
@@ -169,15 +172,49 @@ async function buildLookup(tin: string, staffRoles: RRARole[], staffRecordId: st
     result.disputes = await db.select({ referenceNumber: dispute.referenceNumber, status: dispute.status, reason: dispute.reason, createdAt: dispute.createdAt })
       .from(dispute).where(eq(dispute.filedById, trader.id)).orderBy(desc(dispute.createdAt)).limit(20);
     result.cases = await db.select({
+      id: rraCase.id,
       title: rraCase.title,
       status: rraCase.status,
       priority: rraCase.priority,
       createdAt: rraCase.createdAt,
       updatedAt: rraCase.updatedAt,
-    }).from(rraCase).where(and(
-      eq(rraCase.traderId, trader.id),
-      eq(rraCase.assignedStaffId, staffRecordId),
-    )).orderBy(desc(rraCase.updatedAt)).limit(20);
+    }).from(rraCase).where(eq(rraCase.traderId, trader.id)).orderBy(desc(rraCase.updatedAt)).limit(50);
+  } else if (roleHasPermission(staffRoles, "compliance.followup.manage")) {
+    result.cases = await db.select({
+      id: rraCase.id,
+      title: rraCase.title,
+      status: rraCase.status,
+      priority: rraCase.priority,
+      createdAt: rraCase.createdAt,
+      updatedAt: rraCase.updatedAt,
+    }).from(rraCase).where(eq(rraCase.traderId, trader.id)).orderBy(desc(rraCase.updatedAt)).limit(50);
+  }
+
+  if (canSeeStock) {
+    result.production = await db.select({
+      batchReference: productionBatch.batchReference,
+      productName: product.name,
+      unit: product.unit,
+      declaredQuantity: productionBatch.declaredQuantity,
+      status: productionBatch.status,
+      periodStart: productionBatch.periodStart,
+      periodEnd: productionBatch.periodEnd,
+      createdAt: productionBatch.createdAt,
+    }).from(productionBatch).innerJoin(product, eq(productionBatch.productId, product.id))
+      .where(eq(productionBatch.manufacturerId, trader.id)).orderBy(desc(productionBatch.createdAt)).limit(50);
+  }
+
+  if (roleHasPermission(staffRoles, "audit.trail.read")) {
+    result.auditHistory = await db.select({
+      action: auditLog.action,
+      actorName: user.name,
+      metadata: auditLog.metadata,
+      beforeState: auditLog.beforeState,
+      afterState: auditLog.afterState,
+      createdAt: auditLog.createdAt,
+    }).from(auditLog).leftJoin(user, eq(auditLog.userId, user.id))
+      .where(and(eq(auditLog.targetType, "user"), eq(auditLog.targetId, trader.id)))
+      .orderBy(desc(auditLog.createdAt)).limit(100);
   }
 
   if (roleHasPermission(staffRoles, "stock.correction.review")) {
@@ -227,7 +264,7 @@ async function recordTinAccess(args: {
 
 /** Return only this employee's own recent searches; searched TINs are never stored in the history. */
 export async function getTaxpayerSearchHistory() {
-  const { user: actor } = await requireRRAPermission("taxpayer.intelligence.search");
+  const { user: actor } = await requireRRAOperationalPermission("taxpayer.intelligence.search");
   const rows = await db.select({
     targetId: auditLog.targetId,
     createdAt: auditLog.createdAt,
@@ -252,13 +289,13 @@ export async function getTaxpayerSearchHistory() {
   });
 }
 
-async function getAuthorizedTinResult(input: string, staff: Awaited<ReturnType<typeof requireRRAPermission>>["staff"], correlationId: string) {
+async function getAuthorizedTinResult(input: string, staff: Awaited<ReturnType<typeof requireRRAOperationalPermission>>["staff"], correlationId: string) {
   const parsedTin = tinSchema.safeParse(input);
   if (!parsedTin.success) throw new Error("Enter a valid TIN using 5 to 32 letters, numbers, or hyphens.");
 
   const tin = parsedTin.data;
   const staffRoles = staff.clearanceRoles as RRARole[];
-  const result = await buildLookup(tin, staffRoles, staff.id);
+  const result = await buildLookup(tin, staffRoles);
   await recordTinAccess({ userId: staff.userId, staffRoles, result, outcome: result ? "found" : "not_found", correlationId });
   return result;
 }
@@ -305,7 +342,7 @@ async function generateTaxpayerAnswer(result: LookupData, question: string, role
 
 /** Search, permission-filter, audit, and summarize an RRA taxpayer record. */
 export async function searchTaxpayerIntelligence(input: string) {
-  const { user: actor, staff } = await requireRRAPermission("taxpayer.intelligence.search");
+  const { user: actor, staff } = await requireRRAOperationalPermission("taxpayer.intelligence.search");
   const requestHeaders = await headers();
   const limit = await consumeRateLimit("tin-intelligence", `${actor.id}:${getRequestIdentity(requestHeaders)}`, 20, 60);
   if (!limit.allowed) throw new Error("TIN search limit reached. Please wait a moment before trying again.");
@@ -325,9 +362,21 @@ export async function searchTaxpayerIntelligence(input: string) {
   return { result, analysis, aiUnavailable, correlationId };
 }
 
+/** Resolve a TIN to the authorized staff record workspace without delaying navigation for optional AI analysis. */
+export async function searchTaxpayerRecord(input: string) {
+  const { user: actor, staff } = await requireRRAOperationalPermission("taxpayer.intelligence.search");
+  const requestHeaders = await headers();
+  const limit = await consumeRateLimit("tin-intelligence", `${actor.id}:${getRequestIdentity(requestHeaders)}`, 20, 60);
+  if (!limit.allowed) throw new Error("TIN search limit reached. Please wait a moment before trying again.");
+
+  const correlationId = randomUUID();
+  const result = await getAuthorizedTinResult(input, staff, correlationId);
+  return { recordId: result?.profile.id ?? null, correlationId };
+}
+
 /** Re-check permissions and reload currently authorized fields for every follow-up. */
 export async function askTaxpayerIntelligence(input: { tin: string; question: string }) {
-  const { user: actor, staff } = await requireRRAPermission("taxpayer.intelligence.search");
+  const { user: actor, staff } = await requireRRAOperationalPermission("taxpayer.intelligence.search");
   const parsedQuestion = z.string().trim().min(2).max(1200).safeParse(input.question);
   if (!parsedQuestion.success) throw new Error("Enter a question between 2 and 1,200 characters.");
   const question = parsedQuestion.data;
@@ -359,14 +408,14 @@ export async function askTaxpayerIntelligence(input: { tin: string; question: st
 
 /** ID-based rendering for links from the dashboard search, using the same role scope. */
 export async function getTraderLookupById(traderId: string) {
-  const { staff } = await requireRRAPermission("taxpayer.intelligence.search");
+  const { staff } = await requireRRAOperationalPermission("taxpayer.intelligence.search");
   const parsedId = taxpayerRecordIdSchema.safeParse(traderId);
   if (!parsedId.success) return null;
   const [match] = await db.select({ tinNumber: user.tinNumber }).from(user)
     .where(and(eq(user.id, parsedId.data), sql`${user.role} IN ('manufacturer', 'wholesaler', 'retailer')`)).limit(1);
   if (!match?.tinNumber) return null;
   const staffRoles = staff.clearanceRoles as RRARole[];
-  const result = await buildLookup(match.tinNumber, staffRoles, staff.id);
+  const result = await buildLookup(match.tinNumber, staffRoles);
   if (result) {
     await recordTinAccess({
       userId: staff.userId,

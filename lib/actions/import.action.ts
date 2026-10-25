@@ -1,4 +1,4 @@
-﻿"use server";
+"use server";
 
 import { eq, desc, and, sql } from "drizzle-orm";
 import db from "@/db/drizzle";
@@ -544,13 +544,16 @@ export async function getImportDeclaration(declarationId: string) {
 // RRA: Get all import declarations — filtered at DB level (C3 fix)
 // ---------------------------------------------------------------------------
 
-export async function getAllImportDeclarations(statusFilter?: string) {
+export async function getAllImportDeclarations(statusFilter?: string, tin?: string) {
     await requireRRASession("compliance_officer", "audit_officer", "customs_import_officer");
 
-    // Build where clause at DB level instead of JS post-filter
-    const whereClause = statusFilter
-        ? and(eq(importDeclaration.status, statusFilter))
-        : undefined;
+    if (tin && (tin.trim().length < 5 || tin.trim().length > 32 || !/^[A-Za-z0-9-]+$/.test(tin.trim()))) {
+        throw new Error("Enter a valid TIN to filter import declarations.");
+    }
+    const whereClause = and(
+        statusFilter ? eq(importDeclaration.status, statusFilter) : undefined,
+        tin ? eq(user.tinNumber, tin.trim()) : undefined,
+    );
 
     return db
         .select({

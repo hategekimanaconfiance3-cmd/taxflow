@@ -3,7 +3,7 @@
 import { eq, desc, sql, and } from 'drizzle-orm';
 import db from '@/db/drizzle';
 import { auditLog, vatRecord, taxPayment, user } from '@/db/schema';
-import { requireTraderSession, requireRRASession } from '@/lib/auth-guard';
+import { requireTraderSession, requireRRASession, requireRRAOperationalPermission } from '@/lib/auth-guard';
 import { createNotification } from '@/lib/notifications';
 import { getSystemConfig } from '@/lib/actions/system-config.action';
 import { taxPaymentSubmissionSchema } from '@/lib/validation/tax-payment.schema';
@@ -192,7 +192,7 @@ export async function verifyTaxPayment(input: {
   paymentId: string;
   evidenceReference: string;
 }) {
-  const session = await requireRRASession('compliance_officer', 'audit_officer', 'payments_reconciliation_officer');
+  const session = await requireRRAOperationalPermission("payments.reconcile");
   const paymentId = input.paymentId.trim();
   const evidenceReference = input.evidenceReference.trim();
 

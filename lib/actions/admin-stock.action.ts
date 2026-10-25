@@ -35,8 +35,11 @@ export async function getTraderStock(traderId: string) {
 // Get system-wide stock overview (all businesses, all products)
 // ---------------------------------------------------------------------------
 
-export async function getSystemStockOverview() {
+export async function getSystemStockOverview(tin?: string) {
     await requireRRASession("stock_officer", "audit_officer", "correction_officer", "product_traceability_officer", "audit_investigation_officer");
+    if (tin && (tin.trim().length < 5 || tin.trim().length > 32 || !/^[A-Za-z0-9-]+$/.test(tin.trim()))) {
+        throw new Error("Enter a valid TIN to filter stock records.");
+    }
 
     return db
         .select({
@@ -56,5 +59,6 @@ export async function getSystemStockOverview() {
         .from(stock)
         .innerJoin(product, eq(stock.productId, product.id))
         .innerJoin(user, eq(stock.businessId, user.id))
+        .where(tin ? eq(user.tinNumber, tin.trim()) : undefined)
         .orderBy(product.name, desc(stock.quantity));
 }

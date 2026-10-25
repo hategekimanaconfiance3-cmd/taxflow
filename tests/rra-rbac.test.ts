@@ -226,6 +226,7 @@ test("legacy compliance_officer has compliance and import review permissions", (
 
 test("taxpayer operational permissions require an assigned operational role", () => {
     assert.equal(hasOperationalRRAPermission(["super_admin"], "taxpayer.profile.update"), false);
+    assert.equal(hasOperationalRRAPermission(["super_admin"], "taxpayer.intelligence.search"), false);
     assert.equal(hasOperationalRRAPermission(["tax_compliance_officer"], "taxpayer.profile.update"), true);
     assert.equal(hasOperationalRRAPermission(["super_admin", "compliance_officer"], "taxpayer.clearance.update"), true);
     assert.equal(hasOperationalRRAPermission(["audit_officer"], "taxpayer.clearance.update"), false);

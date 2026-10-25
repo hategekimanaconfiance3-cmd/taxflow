@@ -12,10 +12,11 @@ const STATUS_BADGE: Record<string, { label: string; variant: 'default' | 'second
   rejected:  { label: 'Rejected',  variant: 'destructive' },
 };
 
-export default async function AdminImportsPage() {
+export default async function AdminImportsPage({ searchParams }: { searchParams: Promise<{ tin?: string }> }) {
   await requireRRASession("compliance_officer", "audit_officer", "customs_import_officer");
-
-  const declarations = await getAllImportDeclarations();
+  const params = await searchParams;
+  const tin = params.tin?.trim();
+  const declarations = await getAllImportDeclarations(undefined, tin);
   const submitted = declarations.filter((d) => d.status === 'submitted');
 
   return (
@@ -23,7 +24,7 @@ export default async function AdminImportsPage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Import Declarations</h1>
         <p className="text-muted-foreground text-sm mt-1">
-          Review, activate, and manage all trader import declarations.
+          {tin ? `Import declarations for TIN ${tin}.` : "Review, activate, and manage all trader import declarations."}
         </p>
       </div>
 

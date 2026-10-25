@@ -1,4 +1,4 @@
-import { requireRRASession } from '@/lib/auth-guard';
+import { requireRRAOperationalPermission } from '@/lib/auth-guard';
 import { getAllTransactions } from '@/lib/actions/admin.action';
 import { AdminTransactionActions } from '@/components/admin/admin-transaction-actions';
 import {
@@ -22,17 +22,17 @@ const STATUS_COLORS: Record<string, string> = {
   expired: 'bg-zinc-100 text-zinc-600',
 };
 
-export default async function AdminTransactionsPage() {
-  await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
-
-  const transactions = await getAllTransactions();
+export default async function AdminTransactionsPage({ searchParams }: { searchParams: Promise<{ search?: string }> }) {
+  await requireRRAOperationalPermission("transaction.read");
+  const params = await searchParams;
+  const transactions = await getAllTransactions({ tin: params.search });
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Transactions</h1>
         <p className="text-muted-foreground text-sm mt-1">
-          All system-wide transactions across all traders.
+          {params.search ? `Recorded transactions involving TIN ${params.search}.` : "All system-wide transactions across all traders."}
         </p>
       </div>
 

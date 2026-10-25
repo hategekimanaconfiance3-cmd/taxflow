@@ -38,13 +38,13 @@ const statusLabels: Record<RraCaseStatus, string> = {
   closed: "Closed",
 };
 
-export function RraCaseManagement({ initialCases, canRequestTaxpayerInformation }: { initialCases: CaseRow[]; canRequestTaxpayerInformation: boolean }) {
+export function RraCaseManagement({ initialCases, canRequestTaxpayerInformation, initialSearch = "", initialTraderTin = "", focusCaseId }: { initialCases: CaseRow[]; canRequestTaxpayerInformation: boolean; initialSearch?: string; initialTraderTin?: string; focusCaseId?: string }) {
   const router = useRouter();
   const [cases, setCases] = useState(initialCases);
-  const [selectedId, setSelectedId] = useState<string | null>(initialCases[0]?.id ?? null);
+  const [selectedId, setSelectedId] = useState<string | null>(initialCases.find((item) => item.id === focusCaseId)?.id ?? initialCases[0]?.id ?? null);
   const [details, setDetails] = useState<CaseDetails>(null);
   const [statusFilter, setStatusFilter] = useState("all");
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(initialSearch);
   const [showCreate, setShowCreate] = useState(false);
   const [requestType, setRequestType] = useState<"documents" | "corrections" | null>(null);
   const [requestDetails, setRequestDetails] = useState("");
@@ -187,7 +187,7 @@ export function RraCaseManagement({ initialCases, canRequestTaxpayerInformation 
         <CardHeader><CardTitle className="text-base">Open trader review case</CardTitle></CardHeader>
         <CardContent>
           <form action={createCase} className="grid gap-3 md:grid-cols-2">
-            <Input name="traderTin" placeholder="Trader TIN" required minLength={5} maxLength={32} />
+            <Input name="traderTin" placeholder="Trader TIN" defaultValue={initialTraderTin} required minLength={5} maxLength={32} />
             <Input name="title" placeholder="Case title" required minLength={3} maxLength={120} />
             <select name="priority" defaultValue="normal" className="h-10 rounded-md border bg-background px-3 text-sm">
               <option value="low">Low priority</option><option value="normal">Normal priority</option><option value="high">High priority</option><option value="urgent">Urgent priority</option>

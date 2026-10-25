@@ -78,8 +78,8 @@ function JourneyBranch({
     })}</div>;
 }
 
-export function ProductJourneyExplorer() {
-    const [query, setQuery] = useState("");
+export function ProductJourneyExplorer({ initialQuery = "" }: { initialQuery?: string }) {
+    const [query, setQuery] = useState(initialQuery);
     const [status, setStatus] = useState("all");
     const [from, setFrom] = useState("");
     const [to, setTo] = useState("");

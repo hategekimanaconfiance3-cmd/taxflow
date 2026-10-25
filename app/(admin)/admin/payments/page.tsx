@@ -1,28 +1,31 @@
-﻿import { requireRRASession } from "@/lib/auth-guard";
+import { requireAnyRRAOperationalPermission } from "@/lib/auth-guard";
 import { getAllPayments, getPaymentSummary } from "@/lib/actions/admin-payment.action";
 import { PaymentReviewQueue, type PendingPaymentReviewItem } from "@/components/admin/payment-review-queue";
+import { hasOperationalRRAPermission } from "@/lib/rra-rbac";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Banknote, ShieldCheck } from "lucide-react";
 
 const money = (value: number) => `${Math.round(value).toLocaleString("en-RW")} RWF`;
 
-export default async function AdminPaymentsPage() {
-  const { staff } = await requireRRASession("compliance_officer", "audit_officer", "reporting_officer", "payments_reconciliation_officer");
+export default async function AdminPaymentsPage({ searchParams }: { searchParams: Promise<{ tin?: string }> }) {
+  const { staff } = await requireAnyRRAOperationalPermission("payments.read", "payments.reconcile");
+  const params = await searchParams;
+  const tin = params.tin?.trim();
   const [payments, summary] = await Promise.all([
-    getAllPayments("all"),
-    getPaymentSummary(),
+    getAllPayments("all", tin),
+    getPaymentSummary(tin),
   ]);
 
   const pending = payments.filter((payment) => payment.status === "pending") as PendingPaymentReviewItem[];
-  const canVerify = ["compliance_officer", "audit_officer", "payments_reconciliation_officer"].includes(staff.clearanceLevel);
+  const canVerify = hasOperationalRRAPermission(staff.clearanceRoles, "payments.reconcile");
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Revenue Payments</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Review submissions, verify settlement evidence, and inspect the payment history.
+          {tin ? `Payment records for TIN ${tin}.` : "Review submissions, verify settlement evidence, and inspect the payment history."}
         </p>
       </div>
 

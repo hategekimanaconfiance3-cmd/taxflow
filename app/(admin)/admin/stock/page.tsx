@@ -13,12 +13,14 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Package } from 'lucide-react';
 
-export default async function AdminStockPage() {
+export default async function AdminStockPage({ searchParams }: { searchParams: Promise<{ tin?: string }> }) {
     await requireRRASession("stock_officer", "audit_officer", "correction_officer", "product_traceability_officer", "audit_investigation_officer");
+    const params = await searchParams;
+    const tin = params.tin?.trim();
 
   let inventory: Awaited<ReturnType<typeof getSystemStockOverview>> = [];
   try {
-    inventory = await getSystemStockOverview();
+    inventory = await getSystemStockOverview(tin);
   } catch {
     // Insufficient permissions (requires stock_officer / audit_officer / correction_officer)
   }
@@ -28,7 +30,7 @@ export default async function AdminStockPage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Stock Corrections</h1>
         <p className="text-muted-foreground text-sm mt-1">
-          View system-wide stock levels and apply corrections where discrepancies are found.
+          {tin ? `Stock records for TIN ${tin}.` : "View system-wide stock levels and apply corrections where discrepancies are found."}
         </p>
       </div>
 

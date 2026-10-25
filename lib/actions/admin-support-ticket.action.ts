@@ -1,9 +1,9 @@
 "use server";
 
-import { eq, desc, sql } from "drizzle-orm";
+import { eq, desc, sql, and } from "drizzle-orm";
 import db from "@/db/drizzle";
 import { supportTicket, user } from "@/db/schema";
-import { requireRRASession } from "@/lib/auth-guard";
+import { requireRRAOperationalPermission } from "@/lib/auth-guard";
 import { logAudit } from "@/lib/audit";
 import { createNotification } from "@/lib/notifications";
 
@@ -11,12 +11,16 @@ import { createNotification } from "@/lib/notifications";
 // Get all tickets (admin-facing, filterable by status)
 // ---------------------------------------------------------------------------
 
-export async function getAllTickets(status?: string) {
-    await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
+export async function getAllTickets(status?: string, tin?: string) {
+    await requireRRAOperationalPermission("support.manage");
 
-    const whereClause = status
-        ? eq(supportTicket.status, status)
-        : sql`1 = 1`;
+    if (tin && (tin.trim().length < 5 || tin.trim().length > 32 || !/^[A-Za-z0-9-]+$/.test(tin.trim()))) {
+        throw new Error("Enter a valid TIN to filter support tickets.");
+    }
+    const conditions = [];
+    if (status) conditions.push(eq(supportTicket.status, status));
+    if (tin) conditions.push(eq(user.tinNumber, tin.trim()));
+    const whereClause = conditions.length ? and(...conditions) : sql`1 = 1`;
 
     return db
         .select({
@@ -45,7 +49,7 @@ export async function assignTicket(
     ticketId: string,
     staffUserId: string,
 ): Promise<{ success: true }> {
-    const { staff, ...session } = await requireRRASession("compliance_officer", "tax_compliance_officer");
+    const { staff, ...session } = await requireRRAOperationalPermission("support.manage");
 
     const [ticket] = await db
         .select()
@@ -95,7 +99,7 @@ export async function resolveTicket(
     ticketId: string,
     resolution: string,
 ): Promise<{ success: true }> {
-    const { staff, ...session } = await requireRRASession("compliance_officer", "tax_compliance_officer");
+    const { staff, ...session } = await requireRRAOperationalPermission("support.manage");
 
     if (!resolution?.trim()) throw new Error("Resolution is required.");
 
@@ -145,7 +149,7 @@ export async function resolveTicket(
 // ---------------------------------------------------------------------------
 
 export async function getTicketStats() {
-    await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
+    await requireRRAOperationalPermission("support.manage");
 
     const [stats] = await db
         .select({

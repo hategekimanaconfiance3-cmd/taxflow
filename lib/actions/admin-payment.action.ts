@@ -1,22 +1,28 @@
 "use server";
 
-import { eq, desc, sql, and, ilike } from "drizzle-orm";
+import { eq, desc, sql, and } from "drizzle-orm";
 import db from "@/db/drizzle";
 import { auditLog, taxPayment, user } from "@/db/schema";
-import { requireRRASession } from "@/lib/auth-guard";
+import { requireAnyRRAOperationalPermission, requireRRAOperationalPermission } from "@/lib/auth-guard";
+import { z } from "zod";
 
 // ---------------------------------------------------------------------------
 // Get all payments with trader info
 // ---------------------------------------------------------------------------
 
-export async function getAllPayments(filter?: "all" | "pending" | "confirmed" | "rejected") {
-    await requireRRASession("compliance_officer", "audit_officer", "reporting_officer", "payments_reconciliation_officer");
+export async function getAllPayments(filter?: "all" | "pending" | "confirmed" | "rejected", tin?: string) {
+    await requireAnyRRAOperationalPermission("payments.read", "payments.reconcile");
 
     const conditions = [
         sql`${user.role} IN ('manufacturer', 'wholesaler', 'retailer')`,
     ];
     if (filter && filter !== "all") {
         conditions.push(eq(taxPayment.status, filter));
+    }
+    if (tin) {
+        const parsedTin = z.string().trim().min(5).max(32).regex(/^[A-Za-z0-9-]+$/).safeParse(tin);
+        if (!parsedTin.success) throw new Error("Enter a valid TIN to filter payment records.");
+        conditions.push(eq(user.tinNumber, parsedTin.data));
     }
 
     const payments = await db
@@ -45,8 +51,10 @@ export async function getAllPayments(filter?: "all" | "pending" | "confirmed" | 
 // Payment summary stats
 // ---------------------------------------------------------------------------
 
-export async function getPaymentSummary() {
-    await requireRRASession("compliance_officer", "audit_officer", "reporting_officer", "payments_reconciliation_officer");
+export async function getPaymentSummary(tin?: string) {
+    await requireAnyRRAOperationalPermission("payments.read", "payments.reconcile");
+    const parsedTin = tin ? z.string().trim().min(5).max(32).regex(/^[A-Za-z0-9-]+$/).safeParse(tin) : null;
+    if (parsedTin && !parsedTin.success) throw new Error("Enter a valid TIN to filter payment records.");
 
     const [totals] = await db
         .select({
@@ -57,7 +65,9 @@ export async function getPaymentSummary() {
             countConfirmed: sql<number>`COUNT(*) FILTER (WHERE ${taxPayment.status} = 'confirmed')`.as("count_confirmed"),
             countRejected: sql<number>`COUNT(*) FILTER (WHERE ${taxPayment.status} = 'rejected')`.as("count_rejected"),
         })
-        .from(taxPayment);
+        .from(taxPayment)
+        .innerJoin(user, eq(taxPayment.businessId, user.id))
+        .where(parsedTin?.success ? eq(user.tinNumber, parsedTin.data) : undefined);
 
     return {
         totalCollected: totals?.totalCollected ?? 0,
@@ -77,7 +87,7 @@ export async function updatePaymentStatus(
     paymentId: string,
     status: "rejected",
 ) {
-    const session = await requireRRASession("compliance_officer", "audit_officer", "payments_reconciliation_officer");
+    const session = await requireRRAOperationalPermission("payments.reconcile");
     await db.transaction(async (tx) => {
         const [payment] = await tx
             .select()

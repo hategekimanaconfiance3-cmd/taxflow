@@ -5,9 +5,11 @@ import { RraCaseManagement } from "@/components/admin/rra-case-management";
 
 export const metadata = { title: "RRA Cases · TaxFlow" };
 
-export default async function RraCasesPage() {
+export default async function RraCasesPage({ searchParams }: { searchParams: Promise<{ tin?: string; caseId?: string }> }) {
   const { staff } = await requireAnyRRAOperationalPermission("compliance.followup.manage", "investigation.case.manage");
-  const cases = await getRraCases();
+  const params = await searchParams;
+  const initialTin = params.tin?.trim() ?? "";
+  const cases = await getRraCases(initialTin ? { query: initialTin } : {});
   const canRequestTaxpayerInformation = hasOperationalRRAPermission(staff.clearanceRoles, "compliance.followup.manage");
-  return <RraCaseManagement initialCases={cases.map((item) => ({ ...item, status: item.status as RraCaseStatus }))} canRequestTaxpayerInformation={canRequestTaxpayerInformation} />;
+  return <RraCaseManagement initialCases={cases.map((item) => ({ ...item, status: item.status as RraCaseStatus }))} canRequestTaxpayerInformation={canRequestTaxpayerInformation} initialSearch={initialTin} initialTraderTin={initialTin} focusCaseId={params.caseId} />;
 }

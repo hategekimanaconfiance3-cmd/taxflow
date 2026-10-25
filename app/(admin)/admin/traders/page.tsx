@@ -1,8 +1,8 @@
-import { requireRRAPermission } from '@/lib/auth-guard';
+import { requireRRAOperationalPermission } from '@/lib/auth-guard';
 import { TinTaxpayerLookup } from '@/components/admin/tin-taxpayer-lookup';
 
 export default async function AdminTradersPage() {
-  await requireRRAPermission("taxpayer.intelligence.search");
+  await requireRRAOperationalPermission("taxpayer.intelligence.search");
 
   return (
     <div className="space-y-6">

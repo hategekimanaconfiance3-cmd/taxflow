@@ -1,8 +1,9 @@
 import { requireRRASession } from "@/lib/auth-guard";
 import { ProductJourneyExplorer } from "@/components/admin/product-journey-explorer";
 
-export default async function ProductJourneyPage() {
+export default async function ProductJourneyPage({ searchParams }: { searchParams: Promise<{ query?: string }> }) {
     await requireRRASession("audit_officer", "stock_officer", "audit_investigation_officer", "product_traceability_officer");
+    const params = await searchParams;
     return (
         <div className="flex flex-col gap-6">
             <div>
@@ -11,7 +12,7 @@ export default async function ProductJourneyPage() {
                     Follow recorded product transactions and inspect their supporting records.
                 </p>
             </div>
-            <ProductJourneyExplorer />
+            <ProductJourneyExplorer initialQuery={params.query ?? ""} />
         </div>
     );
 }

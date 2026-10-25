@@ -1,20 +1,22 @@
-import { requireRRASession } from '@/lib/auth-guard';
+import { requireRRAOperationalPermission } from '@/lib/auth-guard';
 import { getAllDisputes } from '@/lib/actions/dispute.action';
 import { AdminDisputeActions } from '@/components/admin/admin-dispute-actions';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Scale } from 'lucide-react';
 
-export default async function AdminDisputesPage() {
-  await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
-  const disputes = await getAllDisputes();
+export default async function AdminDisputesPage({ searchParams }: { searchParams: Promise<{ tin?: string }> }) {
+  await requireRRAOperationalPermission("investigation.case.manage");
+  const params = await searchParams;
+  const tin = params.tin?.trim();
+  const disputes = await getAllDisputes(tin);
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Disputes</h1>
         <p className="text-muted-foreground text-sm mt-1">
-          Review and resolve trader disputes filed in the system.
+          {tin ? `Disputes involving TIN ${tin}.` : "Review and resolve trader disputes filed in the system."}
         </p>
       </div>
 

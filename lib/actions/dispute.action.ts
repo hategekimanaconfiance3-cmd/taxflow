@@ -3,7 +3,7 @@
 import { eq, desc, and, or, sql, gte, inArray } from "drizzle-orm";
 import db from "@/db/drizzle";
 import { auditLog, dispute, notification, product, stock, stockMovement, transaction, user, vatRecord } from "@/db/schema";
-import { requireTraderSession, requireRRASession } from "@/lib/auth-guard";
+import { requireTraderSession, requireRRAOperationalPermission } from "@/lib/auth-guard";
 import { emitToUser } from "@/lib/realtime";
 import { getSystemConfig } from "@/lib/actions/system-config.action";
 
@@ -329,8 +329,8 @@ export async function getDisputes() {
 // 5. Get all disputes (admin view)
 // ---------------------------------------------------------------------------
 
-export async function getAllDisputes() {
-    await requireRRASession("compliance_officer", "audit_officer");
+export async function getAllDisputes(tin?: string) {
+    await requireRRAOperationalPermission("investigation.case.manage");
 
     // We need filer and counterparty names — use subqueries
     const filer = db
@@ -351,6 +351,9 @@ export async function getAllDisputes() {
         .from(user)
         .as("counterparty");
 
+    if (tin && (tin.trim().length < 5 || tin.trim().length > 32 || !/^[A-Za-z0-9-]+$/.test(tin.trim()))) {
+        throw new Error("Enter a valid TIN to filter disputes.");
+    }
     return db
         .select({
             id: dispute.id,
@@ -373,6 +376,7 @@ export async function getAllDisputes() {
         .from(dispute)
         .innerJoin(filer, eq(dispute.filedById, filer.id))
         .innerJoin(counterparty, eq(dispute.counterpartyId, counterparty.id))
+        .where(tin ? or(eq(filer.tin, tin.trim()), eq(counterparty.tin, tin.trim())) : undefined)
         .orderBy(desc(dispute.createdAt));
 }
 
@@ -402,7 +406,7 @@ export async function resolveDispute(
         adjustedUnitPrice?: number;
     },
 ) {
-    const { staff, ...session } = await requireRRASession("compliance_officer", "audit_officer");
+    const { staff, ...session } = await requireRRAOperationalPermission("investigation.case.manage");
 
     if (!data.resolution?.trim()) {
         throw new Error("Resolution notes are required");
