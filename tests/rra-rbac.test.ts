@@ -16,7 +16,7 @@ import {
     type RRARole,
     type RRAPermission,
 } from "../lib/rra-rbac";
-import { staffAssignmentRoleSchema } from "../lib/validation/staff.schema";
+import { staffAssignmentRoleSchema, staffRolesSchema } from "../lib/validation/staff.schema";
 
 // ---------------------------------------------------------------------------
 // Role catalogue
@@ -286,6 +286,11 @@ test("legacy role names are rejected for new staff account creation", () => {
             staffAssignmentRoleSchema.safeParse(role).success,
             false,
             `Expected legacy role "${role}" to be rejected by staffAssignmentRoleSchema`,
+        );
+        assert.equal(
+            staffRolesSchema.safeParse([role]).success,
+            false,
+            `Expected legacy role "${role}" to be rejected from new staff account assignments`,
         );
     }
 });

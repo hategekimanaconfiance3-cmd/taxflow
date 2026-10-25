@@ -15,7 +15,7 @@ test("the chat API exposes read-only RRA tools and rejects client approval respo
   const source = await readFile(new URL("../app/api/ai/query/route.ts", import.meta.url), "utf8");
   assert.doesNotMatch(source, /createRraActionTools/);
   assert.match(source, /const tools: ToolSet = isTrader \? createTraderTools\(userId\) : rraReadTools/);
-  assert.match(source, /lastMessage\?\.role !== "user"/);
+  assert.match(source, /lastMessage\.data\.role !== "user"/);
 });
 
 test("automated compliance checks cannot change taxpayer status", async () => {
