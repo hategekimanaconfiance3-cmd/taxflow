@@ -37,13 +37,14 @@ export function AdminSupportTicketList({ tickets, assignees, canManage }: { tick
   const [notice, setNotice] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
-  function perform(action: () => Promise<unknown>, successMessage: string) {
+  function perform(action: () => Promise<unknown>, successMessage: string, onSuccess?: () => void) {
     setError(null);
     setNotice(null);
     startTransition(async () => {
       try {
         await action();
         setNotice(successMessage);
+        onSuccess?.();
         if (selectedTicket) setSelectedTicket(await getAdminTicket(selectedTicket.id));
         router.refresh();
       } catch (caught) {
@@ -111,7 +112,7 @@ export function AdminSupportTicketList({ tickets, assignees, canManage }: { tick
             <section className="space-y-2"><label className="text-sm font-medium" htmlFor="ticket-assignee">Assign to authorized support staff</label>
               <div className="flex gap-2"><select id="ticket-assignee" defaultValue={selectedTicket.assignedToId ?? ""} className="h-9 min-w-0 flex-1 rounded-md border bg-background px-2 text-sm" disabled={pending}>
                 <option value="" disabled>Select staff member</option>{assignees.map((assignee) => <option key={assignee.userId} value={assignee.userId}>{assignee.name}</option>)}
-              </select><Button type="button" variant="outline" disabled={pending || assignees.length === 0} onClick={(event) => {
+              </select><Button type="button" variant="outline" disabled={pending || assignees.length === 0 || selectedTicket.status === "closed"} onClick={(event) => {
                 const select = event.currentTarget.parentElement?.querySelector("select");
                 if (select?.value) perform(() => assignTicket(selectedTicket.id, select.value), "Ticket assigned.");
               }}>Assign</Button></div>{assignees.length === 0 && <p className="text-xs text-muted-foreground">No active staff with the existing support permission are available.</p>}
@@ -119,13 +120,13 @@ export function AdminSupportTicketList({ tickets, assignees, canManage }: { tick
             <section className="space-y-2"><label className="text-sm font-medium" htmlFor="ticket-resolution">Resolution (required to resolve)</label><Textarea id="ticket-resolution" value={resolution} maxLength={2000} onChange={(event) => setResolution(event.target.value)} placeholder="Summarize the resolution for the trader" disabled={pending || selectedTicket.status === "closed"} />
               <div className="flex flex-wrap gap-2">
                 {selectedTicket.status === "open" && <Button type="button" variant="outline" disabled={pending} onClick={() => perform(() => updateTicketStatus(selectedTicket.id, "in_progress"), "Ticket is in progress.")}>Start review</Button>}
-                {selectedTicket.status === "in_progress" && <Button type="button" disabled={pending} onClick={() => perform(() => updateTicketStatus(selectedTicket.id, "resolved", resolution), "Ticket resolved.")}>Resolve</Button>}
+                {selectedTicket.status === "in_progress" && <Button type="button" disabled={pending || resolution.trim().length < 10} onClick={() => perform(() => updateTicketStatus(selectedTicket.id, "resolved", resolution), "Ticket resolved.")}>Resolve</Button>}
                 {selectedTicket.status === "resolved" && <Button type="button" variant="outline" disabled={pending} onClick={() => perform(() => updateTicketStatus(selectedTicket.id, "closed"), "Ticket closed.")}>Close</Button>}
                 {(selectedTicket.status === "closed" || selectedTicket.status === "resolved") && <Button type="button" variant="outline" disabled={pending} onClick={() => perform(() => updateTicketStatus(selectedTicket.id, "in_progress"), "Ticket reopened.")}>Reopen</Button>}
               </div>
             </section>
           </div>
-          <form className="space-y-2" onSubmit={(event) => { event.preventDefault(); perform(() => replyToTicket(selectedTicket.id, reply), "Reply sent to the trader."); setReply(""); }}>
+          <form className="space-y-2" onSubmit={(event) => { event.preventDefault(); perform(() => replyToTicket(selectedTicket.id, reply), "Reply sent to the trader.", () => setReply("")); }}>
             <label className="text-sm font-medium" htmlFor="ticket-reply">Reply to trader</label>
             <Textarea id="ticket-reply" value={reply} maxLength={10000} onChange={(event) => setReply(event.target.value)} placeholder="Write a response" disabled={pending || selectedTicket.status === "closed"} />
             <Button type="submit" size="sm" disabled={pending || !reply.trim() || selectedTicket.status === "closed"}><Send className="mr-2 h-4 w-4" />Send reply</Button>
