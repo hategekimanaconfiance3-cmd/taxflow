@@ -12,14 +12,25 @@ import {
     taxPayment,
     product,
 } from "@/db/schema";
-import { requireRRASession } from "@/lib/auth-guard";
+import { requireRRAPermission, requireRRASession } from "@/lib/auth-guard";
+import { hasOperationalRRAPermission } from "@/lib/rra-rbac";
+import { z } from "zod";
+
+function readRowsWhenAllowed<T>(allowed: boolean, read: () => Promise<T[]>): Promise<T[]> {
+    return allowed ? read() : Promise.resolve([]);
+}
 
 // ---------------------------------------------------------------------------
 // Dashboard overview — single aggregated call
 // ---------------------------------------------------------------------------
 
 export async function getDashboardOverview(from?: Date, to?: Date) {
-    await requireRRASession("super_admin", "compliance_officer", "audit_officer", "reporting_officer", "director_executive", "tax_compliance_officer", "audit_investigation_officer", "data_ai_analyst", "payments_reconciliation_officer", "product_traceability_officer", "customs_import_officer");
+    const { staff } = await requireRRAPermission("reports.aggregate.read");
+    const canReadTransactions = hasOperationalRRAPermission(staff.clearanceRoles, "transaction.read");
+    const canReadImports = hasOperationalRRAPermission(staff.clearanceRoles, "imports.read")
+        || hasOperationalRRAPermission(staff.clearanceRoles, "imports.review");
+    const canReadDisputes = hasOperationalRRAPermission(staff.clearanceRoles, "investigation.case.manage");
+    const canReadAudit = hasOperationalRRAPermission(staff.clearanceRoles, "audit.trail.read");
 
     // Build date filter conditions for each table
     const txnDateFilter = from && to ? and(gte(transaction.createdAt, from), lte(transaction.createdAt, to)) : from ? gte(transaction.createdAt, from) : to ? lte(transaction.createdAt, to) : undefined;
@@ -163,7 +174,7 @@ export async function getDashboardOverview(from?: Date, to?: Date) {
             .groupBy(dispute.status),
 
         // 11. Recent transactions (5)
-        db
+        readRowsWhenAllowed(canReadTransactions, () => db
             .select({
                 id: transaction.id,
                 sellerName: user.businessName,
@@ -177,10 +188,10 @@ export async function getDashboardOverview(from?: Date, to?: Date) {
             .innerJoin(user, eq(transaction.sellerId, user.id))
             .innerJoin(product, eq(transaction.productId, product.id))
             .orderBy(desc(transaction.createdAt))
-            .limit(5),
+            .limit(5)),
 
         // 12. Recent imports (5)
-        db
+        readRowsWhenAllowed(canReadImports, () => db
             .select({
                 id: importDeclaration.id,
                 businessName: user.businessName,
@@ -194,10 +205,10 @@ export async function getDashboardOverview(from?: Date, to?: Date) {
             .innerJoin(user, eq(importDeclaration.businessId, user.id))
             .innerJoin(product, eq(importDeclaration.productId, product.id))
             .orderBy(desc(importDeclaration.createdAt))
-            .limit(5),
+            .limit(5)),
 
         // 13. Recent disputes (5)
-        db
+        readRowsWhenAllowed(canReadDisputes, () => db
             .select({
                 id: dispute.id,
                 referenceNumber: dispute.referenceNumber,
@@ -210,10 +221,10 @@ export async function getDashboardOverview(from?: Date, to?: Date) {
             .from(dispute)
             .innerJoin(user, eq(dispute.filedById, user.id))
             .orderBy(desc(dispute.createdAt))
-            .limit(5),
+            .limit(5)),
 
         // 14. Recent audit logs (5)
-        db
+        readRowsWhenAllowed(canReadAudit, () => db
             .select({
                 id: auditLog.id,
                 action: auditLog.action,
@@ -224,8 +235,9 @@ export async function getDashboardOverview(from?: Date, to?: Date) {
             })
             .from(auditLog)
             .innerJoin(user, eq(auditLog.userId, user.id))
+            .where(auditDateFilter)
             .orderBy(desc(auditLog.createdAt))
-            .limit(5),
+            .limit(5)),
 
         // 15. New traders this week
         db
@@ -407,18 +419,25 @@ export async function getDashboardOverview(from?: Date, to?: Date) {
 // Global search — search across traders, transactions, imports
 // ---------------------------------------------------------------------------
 
-export async function adminGlobalSearch(query: string) {
-    await requireRRASession("super_admin", "compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
+const globalSearchSchema = z.string().trim().min(2).max(100);
 
-    if (!query?.trim() || query.trim().length < 2) {
+export async function adminGlobalSearch(input: unknown) {
+    const { staff } = await requireRRASession();
+    const parsedQuery = globalSearchSchema.safeParse(input);
+    if (!parsedQuery.success) {
         return { traders: [], transactions: [], imports: [], disputes: [] };
     }
 
-    const q = `%${query.trim()}%`;
+    const q = `%${parsedQuery.data.replace(/[\\%_]/g, "\\$&")}%`;
+    const canSearchTaxpayers = hasOperationalRRAPermission(staff.clearanceRoles, "taxpayer.intelligence.search");
+    const canReadTransactions = hasOperationalRRAPermission(staff.clearanceRoles, "transaction.read");
+    const canReadImports = hasOperationalRRAPermission(staff.clearanceRoles, "imports.read")
+        || hasOperationalRRAPermission(staff.clearanceRoles, "imports.review");
+    const canReadDisputes = hasOperationalRRAPermission(staff.clearanceRoles, "investigation.case.manage");
 
     const [traders, transactions_, imports, disputes_] = await Promise.all([
         // Search traders by name, TIN, email
-        db
+        readRowsWhenAllowed(canSearchTaxpayers, () => db
             .select({
                 id: user.id,
                 businessName: user.businessName,
@@ -438,10 +457,10 @@ export async function adminGlobalSearch(query: string) {
                     ),
                 ),
             )
-            .limit(5),
+            .limit(5)),
 
         // Search transactions by ID or product name
-        db
+        readRowsWhenAllowed(canReadTransactions, () => db
             .select({
                 id: transaction.id,
                 sellerName: user.businessName,
@@ -461,10 +480,10 @@ export async function adminGlobalSearch(query: string) {
                 ),
             )
             .orderBy(desc(transaction.createdAt))
-            .limit(5),
+            .limit(5)),
 
         // Search imports by customs ref, origin country, or business name
-        db
+        readRowsWhenAllowed(canReadImports, () => db
             .select({
                 id: importDeclaration.id,
                 businessName: user.businessName,
@@ -488,10 +507,10 @@ export async function adminGlobalSearch(query: string) {
                 ),
             )
             .orderBy(desc(importDeclaration.createdAt))
-            .limit(5),
+            .limit(5)),
 
         // Search disputes by reference number or reason
-        db
+        readRowsWhenAllowed(canReadDisputes, () => db
             .select({
                 id: dispute.id,
                 referenceNumber: dispute.referenceNumber,
@@ -510,7 +529,7 @@ export async function adminGlobalSearch(query: string) {
                 ),
             )
             .orderBy(desc(dispute.createdAt))
-            .limit(5),
+            .limit(5)),
     ]);
 
     return {

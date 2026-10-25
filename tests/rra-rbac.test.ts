@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
     hasRRAPermission,
+    hasOperationalRRAPermission,
     isRRARoleAllowed,
     isRRARole,
     RRA_ROLE_OPTIONS,
@@ -108,6 +109,8 @@ test("tax_compliance_officer: compliance read + follow-up + support", () => {
     assert.ok(hasRRAPermission("tax_compliance_officer", "compliance.followup.manage"));
     assert.ok(hasRRAPermission("tax_compliance_officer", "support.manage"));
     assert.ok(hasRRAPermission("tax_compliance_officer", "ai.assistant.use"));
+    assert.ok(hasRRAPermission("tax_compliance_officer", "taxpayer.profile.update"));
+    assert.ok(hasRRAPermission("tax_compliance_officer", "taxpayer.clearance.update"));
 });
 
 test("audit_investigation_officer: case management, trail, traceability", () => {
@@ -217,6 +220,15 @@ test("legacy compliance_officer has compliance and import review permissions", (
     assert.ok(hasRRAPermission("compliance_officer", "imports.review"));
     assert.ok(hasRRAPermission("compliance_officer", "compliance.followup.manage"));
     assert.ok(hasRRAPermission("compliance_officer", "ai.assistant.use"));
+    assert.ok(hasRRAPermission("compliance_officer", "taxpayer.profile.update"));
+    assert.ok(hasRRAPermission("compliance_officer", "taxpayer.clearance.update"));
+});
+
+test("taxpayer operational permissions require an assigned operational role", () => {
+    assert.equal(hasOperationalRRAPermission(["super_admin"], "taxpayer.profile.update"), false);
+    assert.equal(hasOperationalRRAPermission(["tax_compliance_officer"], "taxpayer.profile.update"), true);
+    assert.equal(hasOperationalRRAPermission(["super_admin", "compliance_officer"], "taxpayer.clearance.update"), true);
+    assert.equal(hasOperationalRRAPermission(["audit_officer"], "taxpayer.clearance.update"), false);
 });
 
 test("legacy audit_officer has audit trail and investigation permissions", () => {

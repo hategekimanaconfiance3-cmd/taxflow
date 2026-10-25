@@ -18,10 +18,21 @@ export const STAFF_ROLE_OPTIONS = RRA_ROLE_VALUES.map((value) => {
   };
 }) as readonly { value: RRARole; label: string; permissions: string }[];
 
+export const STAFF_ASSIGNABLE_ROLE_OPTIONS = RRA_ROLE_OPTIONS.map((role) => ({
+  value: role.value,
+  label: role.label,
+  permissions: RRA_ROLE_PERMISSIONS[role.value].join(', '),
+}));
+
 const STAFF_ROLES = STAFF_ROLE_OPTIONS.map((option) => option.value) as [RRARole, ...RRARole[]];
 export const staffRoleSchema = z.enum(STAFF_ROLES);
-export const staffAssignmentRoleSchema = staffRoleSchema;
+const ASSIGNABLE_ROLES = RRA_ROLE_OPTIONS.map((option) => option.value) as [RRARole, ...RRARole[]];
+export const staffAssignmentRoleSchema = z.enum(ASSIGNABLE_ROLES);
 export const staffRolesSchema = z.array(staffRoleSchema).min(1, 'Choose at least one role.').max(STAFF_ROLE_OPTIONS.length)
+  .refine((roles) => new Set(roles).size === roles.length, 'Each role can only be assigned once.')
+  .refine((roles) => !roles.includes('super_admin') || roles.length === 1, 'Super Admin must be the only assigned role.');
+const staffAssignmentRolesSchema = z.array(staffAssignmentRoleSchema).min(1, 'Choose at least one role.')
+  .max(STAFF_ASSIGNABLE_ROLE_OPTIONS.length)
   .refine((roles) => new Set(roles).size === roles.length, 'Each role can only be assigned once.')
   .refine((roles) => !roles.includes('super_admin') || roles.length === 1, 'Super Admin must be the only assigned role.');
 
@@ -45,7 +56,7 @@ export const staffAccountSchema = z
       .max(20, 'Staff ID must be at most 20 characters.')
       .regex(/^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/, 'Use letters, numbers, and single dashes only.'),
     department: z.string().trim().min(2, 'Enter a department.').max(100),
-    roles: staffRolesSchema,
+    roles: staffAssignmentRolesSchema,
     password: passwordSchema,
     confirmPassword: z.string().min(1, 'Confirm the password.'),
   })

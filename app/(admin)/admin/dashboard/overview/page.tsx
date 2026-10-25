@@ -9,12 +9,29 @@ import { formatRWF } from '@/components/dashboard/stat-card/stat-card';
 import { TrendingUp, Users, DollarSign } from 'lucide-react';
 import type { PriorityAlert } from '@/components/admin/overview/priority-alerts';
 import { TinTaxpayerLookup } from '@/components/admin/tin-taxpayer-lookup';
-import { hasRRAPermission } from '@/lib/rra-rbac';
+import { RoleWorkspace } from '@/components/admin/role-workspace';
+import { hasOperationalRRAPermission, hasRRAPermission } from '@/lib/rra-rbac';
 
 export default async function AdminOverviewPage() {
-  const { user, staff } = await requireRRASession("compliance_officer", "audit_officer", "reporting_officer", "director_executive", "tax_compliance_officer", "audit_investigation_officer", "data_ai_analyst", "super_admin", "payments_reconciliation_officer", "product_traceability_officer", "customs_import_officer");
+  const { user, staff } = await requireRRASession();
+  const roles = staff.clearanceRoles;
+  const canViewAggregateDashboard = roles.some((role) => hasRRAPermission(role, "reports.aggregate.read"));
+  const canSearchTaxpayers = hasOperationalRRAPermission(roles, "taxpayer.intelligence.search");
+  const canViewTransactionDetails = hasOperationalRRAPermission(roles, "transaction.read");
+  const canViewImportDetails = hasOperationalRRAPermission(roles, "imports.read") || hasOperationalRRAPermission(roles, "imports.review");
+  const canViewDisputeDetails = hasOperationalRRAPermission(roles, "investigation.case.manage");
+  const canViewPaymentDetails = hasOperationalRRAPermission(roles, "payments.read") || hasOperationalRRAPermission(roles, "payments.reconcile");
+
+  if (!canViewAggregateDashboard) {
+    return (
+      <div className="space-y-6">
+        {canSearchTaxpayers && <TinTaxpayerLookup />}
+        <RoleWorkspace roles={roles} />
+      </div>
+    );
+  }
+
   const stats = await getDashboardOverview();
-  const canSearchTaxpayers = staff.clearanceRoles.some((role) => hasRRAPermission(role, "taxpayer.intelligence.search"));
 
   // Build priority alerts from live stats
   const alerts: PriorityAlert[] = [];
@@ -24,7 +41,7 @@ export default async function AdminOverviewPage() {
       id: 'suspended',
       severity: 'critical',
       message: `${stats.traders.suspended} trader${stats.traders.suspended !== 1 ? 's' : ''} suspended`,
-      href: '/admin/traders',
+      href: canSearchTaxpayers ? '/admin/traders' : undefined,
     });
   }
   if (stats.disputes.underReview > 0) {
@@ -32,7 +49,7 @@ export default async function AdminOverviewPage() {
       id: 'disputes',
       severity: 'warning',
       message: `${stats.disputes.underReview} dispute${stats.disputes.underReview !== 1 ? 's' : ''} under review`,
-      href: '/admin/disputes',
+      href: canViewDisputeDetails ? '/admin/disputes' : undefined,
     });
   }
   if (stats.imports.submitted > 0) {
@@ -40,7 +57,7 @@ export default async function AdminOverviewPage() {
       id: 'imports',
       severity: 'info',
       message: `${stats.imports.submitted} import${stats.imports.submitted !== 1 ? 's' : ''} awaiting activation`,
-      href: '/admin/imports',
+      href: canViewImportDetails ? '/admin/imports' : undefined,
     });
   }
   if (stats.revenue.outstanding > 500000) {
@@ -48,7 +65,7 @@ export default async function AdminOverviewPage() {
       id: 'outstanding',
       severity: 'warning',
       message: `${formatRWF(stats.revenue.outstanding)} VAT outstanding`,
-      href: '/admin/payments',
+      href: canViewPaymentDetails ? '/admin/payments' : undefined,
     });
   }
 
@@ -69,13 +86,13 @@ export default async function AdminOverviewPage() {
       {alerts.length > 0 && <PriorityAlerts alerts={alerts} />}
 
       {/* Live EBM pulse + velocity gauge */}
-      <CommandCenterHero
+      {canViewTransactionDetails && <CommandCenterHero
         userId={user.id}
         todayCount={Number(stats.transactions.today.count) || 0}
         todayValue={Number(stats.transactions.today.value) || 0}
         weekCount={Number(stats.transactions.thisWeek.count) || 0}
         weekValue={Number(stats.transactions.thisWeek.value) || 0}
-      />
+      />}
 
       {/* KPI cards */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -127,7 +144,7 @@ export default async function AdminOverviewPage() {
       />
 
       {/* Live streaming ticker */}
-      <StreamingTicker userId={user.id} />
+      {(canViewTransactionDetails || canViewImportDetails || canViewPaymentDetails) && <StreamingTicker userId={user.id} />}
     </div>
   );
 }

@@ -1,14 +1,15 @@
 ﻿"use server";
 
-import { eq, sql, desc, and, or, gte, lte, ilike } from "drizzle-orm";
+import { eq, sql, desc, and, or, gte, lte, ilike, inArray } from "drizzle-orm";
 import db from "@/db/drizzle";
-import { dispute, user, transaction, vatRecord, auditLog, stock, stockMovement, stockReservation, product, taxPayment, notification } from "@/db/schema";
+import { dispute, user, transaction, vatRecord, auditLog, stock, stockMovement, stockReservation, product, notification } from "@/db/schema";
 import {
     requireRRASession,
-    type RRARole,
+    requireRRAOperationalPermission,
 } from "@/lib/auth-guard";
 import { logAudit } from "@/lib/audit";
 import { getSystemConfig } from "@/lib/actions/system-config.action";
+import { updateClearanceStatusSchema } from "@/lib/validation/admin-taxpayer.schema";
 
 // ---------------------------------------------------------------------------
 // Trader management
@@ -61,61 +62,60 @@ export async function getTrader(traderId: string) {
 // Clearance management
 // ---------------------------------------------------------------------------
 
-type ClearanceStatus = "approved" | "under_review" | "suspended";
+const TRADER_ROLES = ["manufacturer", "wholesaler", "retailer"] as const;
+type ClearanceUpdateResult = { success: true } | { success: false; error: string };
 
 /**
  * Update a trader's clearance status.
- * Requires 'admin' level clearance for the RRA staff member.
+ * Requires an explicit taxpayer-clearance permission from an operational RRA role.
  */
 export async function updateClearanceStatus(
-    targetUserId: string,
-    newStatus: ClearanceStatus,
-) {
-    const { staff, ...session } = await requireRRASession("compliance_officer");
-
-    const validStatuses: ClearanceStatus[] = [
-        "approved",
-        "under_review",
-        "suspended",
-    ];
-
-    if (!validStatuses.includes(newStatus)) {
-        throw new Error(`Invalid clearance status: ${newStatus}`);
+    input: unknown,
+): Promise<ClearanceUpdateResult> {
+    const { staff, user: actor } = await requireRRAOperationalPermission("taxpayer.clearance.update");
+    const parsed = updateClearanceStatusSchema.safeParse(input);
+    if (!parsed.success) {
+        return { success: false, error: parsed.error.issues[0]?.message ?? "Enter valid clearance details." };
     }
 
-    // Get current status for audit
-    const [target] = await db
-        .select({ clearanceStatus: user.clearanceStatus, role: user.role })
-        .from(user)
-        .where(eq(user.id, targetUserId))
-        .limit(1);
+    try {
+        return await db.transaction(async (tx) => {
+            const [target] = await tx
+                .select({ clearanceStatus: user.clearanceStatus })
+                .from(user)
+                .where(and(eq(user.id, parsed.data.traderId), inArray(user.role, [...TRADER_ROLES])))
+                .for("update")
+                .limit(1);
 
-    if (!target) {
-        throw new Error("User not found");
+            if (!target) return { success: false, error: "Taxpayer record not found." };
+            if (target.clearanceStatus === parsed.data.status) {
+                return { success: false, error: "The taxpayer already has this clearance status." };
+            }
+
+            await tx.update(user)
+                .set({ clearanceStatus: parsed.data.status, updatedAt: new Date() })
+                .where(eq(user.id, parsed.data.traderId));
+
+            await logAudit({
+                userId: actor.id,
+                action: "CLEARANCE_UPDATED",
+                targetType: "user",
+                targetId: parsed.data.traderId,
+                beforeState: { clearanceStatus: target.clearanceStatus },
+                afterState: { clearanceStatus: parsed.data.status },
+                metadata: { reason: parsed.data.reason, updatedByStaffRecordId: staff.id },
+            }, async (entry) => { await tx.insert(auditLog).values(entry); });
+
+            return { success: true };
+        });
+    } catch (error) {
+        console.error("Taxpayer clearance update failed", {
+            actorUserId: actor.id,
+            targetId: parsed.data.traderId,
+            errorName: error instanceof Error ? error.name : typeof error,
+        });
+        return { success: false, error: "Clearance status could not be updated. Please try again." };
     }
-
-    if (target.role === "rra_staff") {
-        throw new Error("Cannot change clearance of RRA staff");
-    }
-
-    await db
-        .update(user)
-        .set({ clearanceStatus: newStatus })
-        .where(eq(user.id, targetUserId));
-
-    await logAudit({
-        userId: session.user.id,
-        action: "CLEARANCE_UPDATED",
-        targetType: "user",
-        targetId: targetUserId,
-        metadata: {
-            previousStatus: target.clearanceStatus,
-            newStatus,
-            updatedBy: staff.staffId,
-        },
-    });
-
-    return { success: true };
 }
 
 // ---------------------------------------------------------------------------

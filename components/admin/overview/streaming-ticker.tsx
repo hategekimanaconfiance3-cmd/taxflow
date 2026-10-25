@@ -7,7 +7,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Radio, ChevronDown, ChevronRight, Building2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { TickerRow, TickerItem } from '@/app/api/admin/ticker/route';
+import type { TickerItem, TickerRow } from '@/lib/types/admin-ticker';
+import { tickerRowsSchema } from '@/lib/validation/admin-ticker.schema';
 
 function relativeTime(iso: string): string {
   const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
@@ -170,14 +171,26 @@ interface StreamingTickerProps {
 export function StreamingTicker({ userId, insight }: StreamingTickerProps) {
   const [rows, setRows] = useState<(TickerRow & { isNew?: boolean })[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const fetchRef = useRef(false);
 
   const fetchTicker = useCallback(async (markNewId?: string) => {
     try {
       const res = await fetch('/api/admin/ticker');
-      if (!res.ok) return;
-      const data: TickerRow[] = await res.json();
-      setRows(data.map((r) => ({ ...r, isNew: r.id === markNewId })));
+      if (!res.ok) {
+        setError('Transaction activity is temporarily unavailable.');
+        return;
+      }
+      const parsed = tickerRowsSchema.safeParse(await res.json());
+      if (!parsed.success) {
+        setError('Transaction activity returned an invalid response. Please try again.');
+        return;
+      }
+      setError(null);
+      setRows(parsed.data.map((r) => ({ ...r, isNew: r.id === markNewId })));
+    } catch (fetchError) {
+      console.error('Failed to load transaction activity feed', fetchError);
+      setError('Transaction activity is temporarily unavailable.');
     } finally {
       setLoading(false);
     }
@@ -203,7 +216,7 @@ export function StreamingTicker({ userId, insight }: StreamingTickerProps) {
   });
 
   // Use server-passed insight as default; override with live data once loaded
-  const liveInsight = loading ? (insight ?? null) : computeInsight(rows);
+  const liveInsight = error ? null : loading ? (insight ?? null) : computeInsight(rows);
 
   return (
     <Card>
@@ -228,6 +241,8 @@ export function StreamingTicker({ userId, insight }: StreamingTickerProps) {
               <div key={i} className="h-10 rounded-md bg-muted/50 animate-pulse" />
             ))}
           </div>
+        ) : error ? (
+          <p role="alert" className="py-6 text-center text-sm text-destructive">{error}</p>
         ) : rows.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-6 gap-1">
             <p className="text-xs font-medium text-muted-foreground">No significant activity in the last 60 minutes</p>

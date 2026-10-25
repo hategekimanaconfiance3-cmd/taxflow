@@ -4,7 +4,7 @@ import db from '@/db/drizzle';
 import { auditLog, rraStaff, rraStaffRole } from '@/db/schema';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { hasRRAPermission, isRRARole, isRRARoleAllowed, RRA_ROLE_VALUES, type RRAPermission, type RRARole } from '@/lib/rra-rbac';
+import { hasOperationalRRAPermission, hasRRAPermission, isRRARole, isRRARoleAllowed, RRA_ROLE_VALUES, type RRAPermission, type RRARole } from '@/lib/rra-rbac';
 
 // ---------------------------------------------------------------------------
 // RRA Roles (specialized, not hierarchical)
@@ -32,12 +32,13 @@ export const ALLOWED_BUYERS: Record<string, string[]> = {
 };
 
 // ---------------------------------------------------------------------------
-// Audit helper — fire-and-forget, never throws
+// Audit helper
 // ---------------------------------------------------------------------------
 
 /**
  * Log a permission denial to the audit_log table.
- * Uses a fire-and-forget pattern so a logging failure never blocks the redirect.
+ * Awaits the log write before redirecting. A logging outage is logged server-side
+ * without exposing database details to the employee.
  */
 async function logAccessDenial(userId: string, detail: {
   action: string;
@@ -52,9 +53,12 @@ async function logAccessDenial(userId: string, detail: {
       targetId: null,
       metadata: detail.metadata ? JSON.stringify(detail.metadata) : null,
     });
-  } catch {
-    // Never surface logging errors — the guard redirect is more important.
-    // Errors here indicate a transient DB issue; the session check already ran.
+  } catch (error) {
+    console.error('Failed to write RRA access-denial audit event', {
+      userId,
+      action: detail.action,
+      errorName: error instanceof Error ? error.name : typeof error,
+    });
   }
 }
 
@@ -113,7 +117,7 @@ export async function requireRRASession(...allowedRoles: RRARole[]) {
   const clearanceRoles = [...new Set(assignedRoles.filter(isRRARole))];
   if (clearanceRoles.length === 0) {
     // Unrecognized clearance level — log and redirect.
-    void logAccessDenial(session.user.id, {
+    await logAccessDenial(session.user.id, {
       action: 'ACCESS_DENIED_UNKNOWN_ROLE',
       targetType: 'rra_staff',
       metadata: { clearanceLevel: staff.clearanceLevel, assignedRoles },
@@ -127,7 +131,7 @@ export async function requireRRASession(...allowedRoles: RRARole[]) {
 
     if (!hasAccess) {
       // Log the denial — role is valid but insufficient for this resource.
-      void logAccessDenial(session.user.id, {
+      await logAccessDenial(session.user.id, {
         action: 'ACCESS_DENIED_INSUFFICIENT_ROLE',
         targetType: 'rra_guard',
         metadata: {
@@ -151,8 +155,25 @@ export async function requireRRASession(...allowedRoles: RRARole[]) {
 export async function requireRRAPermission(permission: RRAPermission) {
   const rraSession = await requireRRASession();
   if (!rraSession.staff.clearanceRoles.some((role) => hasRRAPermission(role, permission))) {
-    void logAccessDenial(rraSession.user.id, {
+    await logAccessDenial(rraSession.user.id, {
       action: 'ACCESS_DENIED_MISSING_PERMISSION',
+      targetType: 'rra_permission',
+      metadata: {
+        userRoles: rraSession.staff.clearanceRoles,
+        requiredPermission: permission,
+      },
+    });
+    redirect('/admin/dashboard');
+  }
+  return rraSession;
+}
+
+/** Require a permission granted by an operational role, excluding super_admin-only access. */
+export async function requireRRAOperationalPermission(permission: RRAPermission) {
+  const rraSession = await requireRRASession();
+  if (!hasOperationalRRAPermission(rraSession.staff.clearanceRoles, permission)) {
+    await logAccessDenial(rraSession.user.id, {
+      action: 'ACCESS_DENIED_MISSING_OPERATIONAL_PERMISSION',
       targetType: 'rra_permission',
       metadata: {
         userRoles: rraSession.staff.clearanceRoles,

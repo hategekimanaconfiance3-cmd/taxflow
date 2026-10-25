@@ -30,13 +30,14 @@ export const RRA_PERMISSIONS = [
     "imports.read", "imports.review", "payments.read", "payments.reconcile",
     "analytics.read", "ai.findings.read", "data_quality.read", "ai.assistant.use", "ai.feedback.review",
     "stock.correction.review", "support.manage",
+    "taxpayer.profile.update", "taxpayer.clearance.update",
 ] as const;
 export type RRAPermission = (typeof RRA_PERMISSIONS)[number];
 
 const PROPOSED_ROLE_PERMISSIONS: Record<RRAProposedRole, readonly RRAPermission[]> = {
-    super_admin: ["staff.manage", "system.configure", "security.audit.read", "reports.aggregate.read", "dashboard.executive.read", "taxpayer.compliance.read", "tax.records.read", "investigation.case.manage", "transaction.read", "audit.trail.read", "traceability.read", "stock.read", "imports.read", "imports.review", "payments.read", "payments.reconcile", "analytics.read", "ai.findings.read", "data_quality.read", "ai.assistant.use", "ai.feedback.review", "stock.correction.review", "compliance.followup.manage", "support.manage", "supply_chain.summary.read"],
+    super_admin: RRA_PERMISSIONS,
     director_executive: ["dashboard.executive.read", "reports.aggregate.read", "supply_chain.summary.read", "ai.assistant.use", "taxpayer.intelligence.search"],
-    tax_compliance_officer: ["taxpayer.intelligence.search", "taxpayer.compliance.read", "tax.records.read", "payments.read", "compliance.followup.manage", "support.manage", "ai.assistant.use"],
+    tax_compliance_officer: ["taxpayer.intelligence.search", "taxpayer.compliance.read", "tax.records.read", "payments.read", "compliance.followup.manage", "support.manage", "ai.assistant.use", "taxpayer.profile.update", "taxpayer.clearance.update"],
     audit_investigation_officer: ["taxpayer.intelligence.search", "investigation.case.manage", "transaction.read", "audit.trail.read", "traceability.read", "ai.assistant.use"],
     product_traceability_officer: ["taxpayer.intelligence.search", "traceability.read", "stock.read", "ai.assistant.use"],
     customs_import_officer: ["taxpayer.intelligence.search", "imports.read", "imports.review", "ai.assistant.use"],
@@ -45,7 +46,7 @@ const PROPOSED_ROLE_PERMISSIONS: Record<RRAProposedRole, readonly RRAPermission[
 };
 
 const LEGACY_ROLE_PERMISSIONS: Record<(typeof LEGACY_RRA_ROLES)[number], readonly RRAPermission[]> = {
-    compliance_officer: ["taxpayer.intelligence.search", "taxpayer.compliance.read", "tax.records.read", "payments.read", "compliance.followup.manage", "imports.review", "support.manage", "ai.assistant.use"],
+    compliance_officer: ["taxpayer.intelligence.search", "taxpayer.compliance.read", "tax.records.read", "payments.read", "compliance.followup.manage", "imports.review", "support.manage", "ai.assistant.use", "taxpayer.profile.update", "taxpayer.clearance.update"],
     audit_officer: ["taxpayer.intelligence.search", "investigation.case.manage", "transaction.read", "audit.trail.read", "traceability.read", "imports.read", "imports.review", "ai.assistant.use"],
     stock_officer: ["taxpayer.intelligence.search", "traceability.read", "stock.read", "ai.assistant.use"],
     correction_officer: ["taxpayer.intelligence.search", "stock.read", "stock.correction.review"],
@@ -55,7 +56,7 @@ const LEGACY_ROLE_PERMISSIONS: Record<(typeof LEGACY_RRA_ROLES)[number], readonl
 export const RRA_ROLE_PERMISSIONS: Record<RRARole | "super_admin", readonly RRAPermission[]> = {
     ...PROPOSED_ROLE_PERMISSIONS,
     ...LEGACY_ROLE_PERMISSIONS,
-    super_admin: PROPOSED_ROLE_PERMISSIONS.super_admin,
+    super_admin: RRA_PERMISSIONS,
 };
 
 /** Compatibility for old route checks; super_admin is deliberately not an all-role bypass. */
@@ -79,6 +80,14 @@ export function isRRARoleAllowed(role: RRARole | "super_admin", allowedRoles: re
 
 export function hasRRAPermission(role: RRARole | "super_admin", permission: RRAPermission): boolean {
     return RRA_ROLE_PERMISSIONS[role].includes(permission);
+}
+
+/**
+ * Operational taxpayer access must come from an assigned business role.
+ * A system administrator alone is not treated as a taxpayer operations role.
+ */
+export function hasOperationalRRAPermission(roles: readonly RRARole[], permission: RRAPermission): boolean {
+    return roles.some((role) => role !== "super_admin" && hasRRAPermission(role, permission));
 }
 
 export function getRRAProposedRoleLabel(role: string): string {
