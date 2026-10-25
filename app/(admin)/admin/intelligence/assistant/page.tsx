@@ -1,5 +1,6 @@
-﻿import { requireRRASession } from '@/lib/auth-guard';
+import { requireRRAPermission } from '@/lib/auth-guard';
 import { IntelligenceChat } from '@/components/admin/intelligence-chat';
+import { getRRAAIToolNames } from '@/lib/ai/rra-tool-access';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Brain, Shield, AlertCircle } from 'lucide-react';
@@ -10,7 +11,7 @@ export const metadata = {
 };
 
 export default async function AdminAssistantPage() {
-  const { staff } = await requireRRASession("compliance_officer", "audit_officer", "stock_officer", "reporting_officer", "tax_compliance_officer", "audit_investigation_officer", "product_traceability_officer", "customs_import_officer", "payments_reconciliation_officer", "data_ai_analyst", "director_executive");
+  const { staff } = await requireRRAPermission("ai.assistant.use");
 
   return (
     <div className="space-y-6">
@@ -28,7 +29,7 @@ export default async function AdminAssistantPage() {
         <div className="flex items-center gap-2">
           <Badge variant="outline" className="text-emerald-600 border-emerald-200 bg-emerald-50 text-xs">
             <Shield className="h-3 w-3 mr-1" />
-            Officer-approved actions · No decisions
+            Read-only · Human review required
           </Badge>
           <Badge variant="outline" className="text-xs capitalize">
             {staff.clearanceRoles.map((role) => role.replaceAll('_', ' ')).join(', ')}
@@ -42,7 +43,7 @@ export default async function AdminAssistantPage() {
         <p>
           This assistant retrieves <strong>verified data</strong> from the TaxFlow database.
           AI-generated risk scores and behavioral analysis are <strong>indicators only</strong> —
-          not official determinations. All queries are audit-logged. The assistant may propose an audited review or a single-trader notice for officer approval. Each action is shown here before it runs. The assistant cannot decide clearance, tax liability, payments, disputes, penalties, or enforcement, or modify official records.
+          not official determinations. Queries and accessed modules are audit-logged. The assistant can analyze and recommend next steps, but it is read-only and cannot execute actions or decide clearance, tax liability, payments, disputes, penalties, or enforcement. An authorized human employee makes every official decision.
         </p>
       </div>
 
@@ -55,7 +56,7 @@ export default async function AdminAssistantPage() {
           </CardTitle>
         </CardHeader>
         <CardContent className="flex-1 overflow-hidden p-0">
-          <IntelligenceChat />
+            <IntelligenceChat authorizedTools={getRRAAIToolNames(staff.clearanceRoles)} />
         </CardContent>
       </Card>
     </div>

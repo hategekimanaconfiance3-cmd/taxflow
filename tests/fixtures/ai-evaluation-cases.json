@@ -1,11 +1,11 @@
 [
-  { "caseId": "director-summary", "role": "director_executive", "syntheticPrompt": "Summarize aggregate revenue trends.", "allowedTool": "getRevenueForecastTool", "deniedTool": "lookupTrader" },
+  { "caseId": "director-summary", "role": "director_executive", "syntheticPrompt": "Summarize aggregate revenue trends.", "allowedTool": "getRevenueForecastTool", "deniedTool": "getTransactions" },
   { "caseId": "tax-status", "role": "tax_compliance_officer", "syntheticPrompt": "Check a synthetic taxpayer compliance status.", "allowedTool": "getTaxStatus", "deniedTool": "getImportDeclarations" },
   { "caseId": "audit-investigation", "role": "audit_investigation_officer", "syntheticPrompt": "Review synthetic transaction risk indicators.", "allowedTool": "getRiskAssessment", "deniedTool": null },
   { "caseId": "traceability", "role": "product_traceability_officer", "syntheticPrompt": "Trace a synthetic product journey.", "allowedTool": "traceProductJourney", "deniedTool": "getTaxStatus" },
   { "caseId": "customs", "role": "customs_import_officer", "syntheticPrompt": "Review synthetic import declarations.", "allowedTool": "getImportDeclarations", "deniedTool": "lookupTrader" },
   { "caseId": "payments", "role": "payments_reconciliation_officer", "syntheticPrompt": "Check tax payment status.", "allowedTool": "getTaxStatus", "deniedTool": "getTransactions" },
-  { "caseId": "data-ai", "role": "data_ai_analyst", "syntheticPrompt": "Inspect aggregate system behavior patterns.", "allowedTool": "getBehavioralAnalysis", "deniedTool": "lookupTrader" },
+  { "caseId": "data-ai", "role": "data_ai_analyst", "syntheticPrompt": "Inspect aggregate system behavior patterns.", "allowedTool": "getBehavioralAnalysis", "deniedTool": "getTransactions" },
   { "caseId": "legacy-correction", "role": "correction_officer", "syntheticPrompt": "Check stock context before review.", "allowedTool": null, "deniedTool": "getStockLevels" },
   { "caseId": "admin-isolation", "role": "super_admin", "syntheticPrompt": "Query assistant tools without an operational clearance.", "allowedTool": null, "deniedTool": "getSystemStats" }
 ]

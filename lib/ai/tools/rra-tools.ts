@@ -2,11 +2,11 @@
 
 import { tool } from "ai";
 import { z } from "zod";
-import { eq, sql, desc, and, or, gte, ilike, inArray } from "drizzle-orm";
+import { eq, sql, desc, and, or, gte, lte, ilike, inArray } from "drizzle-orm";
 import db from "@/db/drizzle";
 import {
-    user, transaction, stock, product, vatRecord,
-    taxPayment, auditLog, importDeclaration, dispute,
+    user, transaction, stock, stockMovement, product, vatRecord,
+    taxPayment, importDeclaration, dispute,
 } from "@/db/schema";
 import tinDb from "@/db/tin-drizzle";
 import { tinRecord } from "@/db/tin-schema";
@@ -14,15 +14,25 @@ import { computeRiskScore } from "@/lib/ai/risk-scoring";
 import { getRevenueForecast } from "@/lib/ai/revenue-forecast";
 import { analyzeMerchantBehavior } from "@/lib/ai/behavioral-analysis";
 import { searchProductJourney } from "@/lib/actions/product-journey.action";
+import { getTaxpayerIntelligenceForAI } from "@/lib/actions/admin-tin-lookup.action";
 
 // ---------------------------------------------------------------------------
 // AI Tools — Database query tools for the RRA Intelligence Agent.
 // Each tool gives the LLM read-only access to one domain of data.
 // ---------------------------------------------------------------------------
 
-/** Look up a trader by TIN, name, or email. */
+/** Search a TIN and return only the modules permitted for the signed-in RRA employee. */
+export const getTaxpayerIntelligence = tool({
+    description: "Get an authorized, role-filtered taxpayer summary by TIN. Use for questions asking what is known about a taxpayer, a taxpayer summary, recent activity, compliance, stock, production, or related records. The server verifies the employee's session and permissions before querying; only authorized modules are returned. Never infer data from missing modules.",
+    inputSchema: z.object({
+        tin: z.string().trim().min(5).max(32).describe("Taxpayer TIN"),
+    }),
+    execute: async ({ tin }) => getTaxpayerIntelligenceForAI({ tin }),
+});
+
+/** Find a trader directory record. Use the filtered intelligence tool for detail. */
 export const lookupTrader = tool({
-    description: "Look up a trader/merchant by TIN number, business name, or email. Returns their profile, role, clearance status, and district. If an RRA officer sends only a TIN, use this tool to identify the authorized record, summarize it briefly, and ask what they want to review next.",
+    description: "Find a registered trader by TIN, business name, or email and return only basic directory fields plus district. For a taxpayer summary or any compliance, stock, production, transaction, or history question, prefer getTaxpayerIntelligence, which enforces module permissions before retrieval.",
     inputSchema: z.object({
         query: z.string().describe("TIN number, business name, or email to search for"),
     }),
@@ -30,7 +40,6 @@ export const lookupTrader = tool({
         const q = `%${query}%`;
         const traders = await db
             .select({
-                id: user.id,
                 name: user.name,
                 businessName: user.businessName,
                 tinNumber: user.tinNumber,
@@ -93,7 +102,6 @@ export const searchTraders = tool({
 
         const traders = await db
             .select({
-                id: user.id,
                 name: user.name,
                 businessName: user.businessName,
                 tinNumber: user.tinNumber,
@@ -119,10 +127,16 @@ export const getTransactions = tool({
         sellerTin: z.string().optional().describe("Filter by seller TIN number"),
         productName: z.string().optional().describe("Filter by product name"),
         status: z.enum(["pending", "confirmed", "completed", "rejected", "expired"]).optional(),
+        from: z.iso.datetime().optional().describe("Inclusive start date/time in ISO 8601 format"),
+        to: z.iso.datetime().optional().describe("Inclusive end date/time in ISO 8601 format"),
         limit: z.number().min(1).max(50).default(20),
     }),
-    execute: async ({ traderTin, sellerTin, productName, status, limit }) => {
+    execute: async ({ traderTin, sellerTin, productName, status, from, to, limit }) => {
         const conditions = [];
+
+        if (from && to && new Date(from).getTime() > new Date(to).getTime()) {
+            return { count: 0, transactions: [], summary: { totalValue: 0, totalVat: 0 }, message: "The start date must be before the end date." };
+        }
 
         if (traderTin) {
             const [trader] = await db
@@ -151,12 +165,15 @@ export const getTransactions = tool({
         }
 
         if (status) conditions.push(eq(transaction.status, status));
+        if (from) conditions.push(gte(transaction.createdAt, new Date(from)));
+        if (to) conditions.push(lte(transaction.createdAt, new Date(to)));
 
-        let query = db
+        const query = db
             .select({
                 id: transaction.id,
                 productName: product.name,
                 sellerName: user.businessName,
+                buyerName: transaction.buyerName,
                 quantity: transaction.quantity,
                 unitPrice: transaction.unitPrice,
                 totalAmount: transaction.totalAmount,
@@ -181,6 +198,7 @@ export const getTransactions = tool({
 
         return {
             count: txns.length,
+            period: { from: from ?? null, to: to ?? null },
             transactions: txns,
             summary: {
                 totalValue: txns.reduce((s, t) => s + t.totalAmount, 0),
@@ -225,6 +243,41 @@ export const getStockLevels = tool({
             inventory,
             totalStockValue: inventory.reduce((s, i) => s + (i.quantity * (i.price ?? 0)), 0),
         };
+    },
+});
+
+/** Explain inventory changes using append-only stock movement evidence. */
+export const getStockMovements = tool({
+    description: "Get recorded inventory movements for a taxpayer by TIN, optionally filtered by product name. Use to explain when and how stock changed. A movement reason is only recorded evidence; do not invent a cause when it is missing.",
+    inputSchema: z.object({
+        traderTin: z.string().trim().min(5).max(32),
+        productName: z.string().trim().min(1).max(100).optional(),
+        limit: z.number().int().min(1).max(100).default(30),
+    }),
+    execute: async ({ traderTin, productName, limit }) => {
+        const [trader] = await db.select({ id: user.id, businessName: user.businessName })
+            .from(user)
+            .where(and(eq(user.tinNumber, traderTin), sql`${user.role} IN ('manufacturer', 'wholesaler', 'retailer')`))
+            .limit(1);
+        if (!trader) return { found: false, message: "No registered trader was found with that TIN." };
+
+        const conditions = [eq(stockMovement.businessId, trader.id)];
+        if (productName) conditions.push(ilike(product.name, `%${productName}%`));
+        const movements = await db.select({
+            productName: product.name,
+            movementType: stockMovement.movementType,
+            quantityDelta: stockMovement.quantityDelta,
+            quantityBefore: stockMovement.quantityBefore,
+            quantityAfter: stockMovement.quantityAfter,
+            sourceType: stockMovement.sourceType,
+            reason: stockMovement.reason,
+            createdAt: stockMovement.createdAt,
+        }).from(stockMovement)
+            .innerJoin(product, eq(stockMovement.productId, product.id))
+            .where(and(...conditions))
+            .orderBy(desc(stockMovement.createdAt))
+            .limit(limit);
+        return { found: true, businessName: trader.businessName, tin: traderTin, count: movements.length, movements };
     },
 });
 

@@ -9,13 +9,17 @@ test("RRA AI is advisory, labels potential findings, and defers official decisio
   assert.match(prompt, /never make, approve, execute, or finalize an official decision/i);
   assert.match(prompt, /recommendations are not approvals/i);
   assert.match(prompt, /potential\/system-generated indicators/i);
+  assert.match(prompt, /AI Recommendation — Human Review Required/);
+  assert.match(prompt, /getTaxpayerIntelligence/);
 });
 
 test("the chat API exposes read-only RRA tools and rejects client approval responses", async () => {
   const source = await readFile(new URL("../app/api/ai/query/route.ts", import.meta.url), "utf8");
   assert.doesNotMatch(source, /createRraActionTools/);
   assert.match(source, /const tools: ToolSet = isTrader \? createTraderTools\(userId\) : rraReadTools/);
-  assert.match(source, /lastMessage\?\.role !== "user"/);
+  assert.match(source, /lastMessage\.data\.role !== "user"/);
+  assert.match(source, /isRRAAIInjectionAttempt\(message\.content\)/);
+  assert.match(source, /getRRAAIToolNames\(staffRoles\)/);
 });
 
 test("automated compliance checks cannot change taxpayer status", async () => {

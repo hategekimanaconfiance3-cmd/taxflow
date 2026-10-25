@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { AIFeedbackControl } from "@/components/admin/ai-feedback-control";
+import type { RRAAIToolName } from "@/lib/ai/rra-tool-access";
 import {
     Brain,
     Send,
@@ -20,18 +21,30 @@ import {
 // RRA Intelligence Chat — Natural language interface for tax officers
 // ---------------------------------------------------------------------------
 
-const SUGGESTED_QUERIES = [
-    "Show me all traders in Gasabo district",
-    "What is the risk score for TIN 100000001?",
-    "Give me the revenue forecast for the last 6 months",
-    "Show system-wide statistics overview",
-    "Check stock levels for TIN 100000002",
-    "What is the tax compliance status for TIN 100000003?",
-];
+const SUGGESTIONS_BY_TOOL: Partial<Record<RRAAIToolName, string>> = {
+    getTaxpayerIntelligence: "Summarize the authorized records for TIN 100000001",
+    lookupTrader: "Find the taxpayer with TIN 100000001",
+    searchTraders: "Find registered manufacturers",
+    getTransactions: "Show today's transactions",
+    getStockLevels: "Show current stock for TIN 100000001",
+    getStockMovements: "Why did stock change for TIN 100000001?",
+    getTaxStatus: "Explain the tax status for TIN 100000001",
+    getRiskAssessment: "Show potential risk indicators for TIN 100000001",
+    getRevenueForecastTool: "Compare the revenue forecast with recent results",
+    getSystemStats: "Summarize current system statistics",
+    getBehavioralAnalysis: "Explain recent activity patterns for TIN 100000001",
+    traceSupplyChain: "Trace the supply chain for Cement",
+    traceProductJourney: "Trace the recorded journey for Cement",
+    getImportDeclarations: "Find import declarations for customs reference CUS-2026-0104",
+};
 
-export function IntelligenceChat() {
+export function IntelligenceChat({ authorizedTools }: { authorizedTools: readonly RRAAIToolName[] }) {
     const [input, setInput] = useState("");
     const messagesEndRef = useRef<HTMLDivElement>(null);
+    const suggestedQueries = [...new Set(authorizedTools.flatMap((toolName) => {
+        const suggestion = SUGGESTIONS_BY_TOOL[toolName];
+        return suggestion ? [suggestion] : [];
+    }))].slice(0, 6);
 
     const { messages, sendMessage, status, setMessages, error } = useChat({
         transport: new DefaultChatTransport({ api: "/api/ai/query" }),
@@ -61,8 +74,8 @@ export function IntelligenceChat() {
                 <CardTitle className="text-base font-semibold flex items-center gap-2">
                     <Brain className="h-4 w-4" />
                     Taxflow AI Intelligence
-                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400 font-medium">
-                        Powered by Qwen 2.5
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400 font-medium">
+                        Role-aware · Read-only
                     </span>
                 </CardTitle>
                 <p className="mt-2 text-xs text-muted-foreground">AI findings are advisory and require human review. Only authorized RRA employees make official decisions; the assistant cannot execute them.</p>
@@ -77,14 +90,14 @@ export function IntelligenceChat() {
                         </div>
                         <div className="text-center space-y-2">
                             <h3 className="font-semibold text-lg">
-                                Ask anything about your tax data
+                                Ask about authorized TaxFlow data or workflows
                             </h3>
                             <p className="text-sm text-muted-foreground max-w-md">
-                                Query traders, transactions, risk scores, stock levels, tax compliance, and revenue forecasts using natural language.
+                                Your verified RRA permissions control which records the assistant can search.
                             </p>
                         </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-w-lg w-full">
-                            {SUGGESTED_QUERIES.map((q) => (
+                        {suggestedQueries.length > 0 && <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-w-lg w-full">
+                            {suggestedQueries.map((q) => (
                                 <button
                                     key={q}
                                     onClick={() => handleSuggestion(q)}
@@ -93,7 +106,7 @@ export function IntelligenceChat() {
                                     {q}
                                 </button>
                             ))}
-                        </div>
+                        </div>}
                     </div>
                 )}
 

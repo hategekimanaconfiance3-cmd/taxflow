@@ -23,10 +23,12 @@ import { createHash } from "node:crypto";
 import { consumeRateLimit, getRequestIdentity } from "@/lib/rate-limit";
 import { createTraderTools } from "@/lib/ai/tools/trader-tools";
 import {
+    getTaxpayerIntelligence,
     lookupTrader,
     searchTraders,
     getTransactions,
     getStockLevels,
+    getStockMovements,
     getTaxStatus,
     getRiskAssessment,
     getRevenueForecastTool,
@@ -37,7 +39,7 @@ import {
     getImportDeclarations,
 } from "@/lib/ai/tools/rra-tools";
 import { hasRRAPermission, isRRARole } from "@/lib/rra-rbac";
-import { getRRAAIToolNames, type RRAAIToolName } from "@/lib/ai/rra-tool-access";
+import { getRRAAIToolNames, isRRAAIInjectionAttempt, type RRAAIToolName } from "@/lib/ai/rra-tool-access";
 import { getRRASystemPrompt, getTraderSystemPrompt } from "@/lib/ai/system-prompts";
 
 // ---------------------------------------------------------------------------
@@ -187,10 +189,11 @@ export async function POST(request: Request) {
     let isRRAStaff = false;
     let staffClearance = "";
     let staffRoles: string[] = [];
+    let staffDepartment: string | null = null;
 
     if (!isTrader) {
         const staffRecords = await db
-            .select({ id: rraStaff.id, clearanceLevel: rraStaff.clearanceLevel, isActive: rraStaff.isActive })
+            .select({ id: rraStaff.id, clearanceLevel: rraStaff.clearanceLevel, isActive: rraStaff.isActive, department: rraStaff.department })
             .from(rraStaff)
             .where(eq(rraStaff.userId, userId))
             .limit(1);
@@ -198,6 +201,7 @@ export async function POST(request: Request) {
         if (staffRecords.length > 0 && staffRecords[0].isActive) {
             isRRAStaff = true;
             staffClearance = staffRecords[0].clearanceLevel;
+            staffDepartment = staffRecords[0].department;
             const assignments = await db.select({ role: rraStaffRole.role }).from(rraStaffRole).where(eq(rraStaffRole.staffRecordId, staffRecords[0].id));
             staffRoles = assignments.length ? assignments.map(({ role }) => role) : [staffClearance];
         }
@@ -232,18 +236,8 @@ export async function POST(request: Request) {
 
     // ── 4. Prompt injection guard ────────────────────────────────────────────
     // Reject messages that attempt to override system prompt or exfiltrate data
-    const INJECTION_PATTERNS = [
-        /ignore.{0,30}(previous|above|all).{0,30}instruction/i,
-        /you are now/i,
-        /system prompt/i,
-        /jailbreak/i,
-        /act as.{0,20}(DAN|unrestricted|unfiltered)/i,
-        /reveal.{0,30}(api key|secret|password|env)/i,
-        /repeat.{0,30}everything.{0,30}said/i,
-    ];
-
     for (const message of parsedMessages.textMessages) {
-        if (message.role === "user" && INJECTION_PATTERNS.some((pattern) => pattern.test(message.content))) {
+        if (message.role === "user" && isRRAAIInjectionAttempt(message.content)) {
             return new Response(
                 JSON.stringify({
                     error: "Message blocked: potential prompt injection detected.",
@@ -253,34 +247,13 @@ export async function POST(request: Request) {
         }
     }
 
-    // ── 5. Audit log the query ───────────────────────────────────────────────
-    try {
-        await db.insert(auditLog).values({
-            userId,
-            action: "AI_QUERY",
-            targetType: "ai_assistant",
-            targetId: null,
-            metadata: JSON.stringify({
-                role: isTrader ? userRole : `rra_staff:${staffRoles.join(",")}`,
-                questionHash: createHash("sha256").update(questionText).digest("hex"),
-                questionLength: questionText.length,
-            }),
-        });
-    } catch (error) {
-        console.error("AI query audit logging failed", error);
-        return new Response(
-            JSON.stringify({ error: "The AI service is temporarily unavailable." }),
-            { status: 503, headers: { "Content-Type": "application/json" } },
-        );
-    }
-
-    // ── 6. Build tools for this role ──────────────────────────────────────────
+    // ── 5. Resolve the data tools using the current RBAC permission catalogue ─
     const rraToolRegistry = {
-        lookupTrader, searchTraders, getTransactions, getStockLevels, getTaxStatus,
+        getTaxpayerIntelligence, lookupTrader, searchTraders, getTransactions, getStockLevels, getStockMovements, getTaxStatus,
         getRiskAssessment, getRevenueForecastTool, getSystemStats, getBehavioralAnalysis,
         traceSupplyChain, traceProductJourney, getImportDeclarations,
     } satisfies Record<RRAAIToolName, ToolSet[RRAAIToolName]>;
-    const allowedRraTools = [...new Set(staffRoles.filter(isRRARole).flatMap((role) => getRRAAIToolNames(role)))];
+    const allowedRraTools = getRRAAIToolNames(staffRoles);
     const rraReadTools: ToolSet = isRRAStaff
         ? Object.fromEntries(allowedRraTools.map((name) => [name, rraToolRegistry[name]])) as ToolSet
         : {};
@@ -288,6 +261,35 @@ export async function POST(request: Request) {
     // be started in their dedicated authenticated human workflows, never by an
     // AI tool call or a client-supplied approval part.
     const tools: ToolSet = isTrader ? createTraderTools(userId) : rraReadTools;
+
+    // ── 6. Audit the request without storing the question or its TIN ─────────
+    let aiAuditId: string | null = null;
+    try {
+        const [audit] = await db.insert(auditLog).values({
+            userId,
+            action: "AI_QUERY",
+            targetType: "ai_assistant",
+            targetId: null,
+            metadata: JSON.stringify({
+                role: isTrader ? userRole : `rra_staff:${staffRoles.join(",")}`,
+                department: isRRAStaff ? staffDepartment : undefined,
+                questionHash: createHash("sha256").update(questionText).digest("hex"),
+                questionLength: questionText.length,
+                authorizedTools: isRRAStaff ? allowedRraTools : undefined,
+                modulesAccessed: [],
+                requestCategory: "pending_tool_selection",
+                aiRecommendationGenerated: false,
+            }),
+        }).returning({ id: auditLog.id });
+        aiAuditId = audit?.id ?? null;
+        if (!aiAuditId) throw new Error("AI usage audit record was not created.");
+    } catch (error) {
+        console.error("AI query audit logging failed", error);
+        return new Response(
+            JSON.stringify({ error: "The AI service is temporarily unavailable." }),
+            { status: 503, headers: { "Content-Type": "application/json" } },
+        );
+    }
 
     // ── 7. Stream the response ───────────────────────────────────────────────
     try {
@@ -300,13 +302,65 @@ export async function POST(request: Request) {
         });
         const result = streamText({
             model: MODEL,
-            system: isTrader ? getTraderSystemPrompt() : getRRASystemPrompt(),
+            system: isTrader ? getTraderSystemPrompt() : [
+                getRRASystemPrompt(),
+                "\nVERIFIED OFFICER CONTEXT (server supplied):",
+                `Roles: ${staffRoles.join(", ") || staffClearance}.`,
+                `Department: ${staffDepartment ?? "not recorded"}.`,
+                `Authorized data tools: ${allowedRraTools.join(", ") || "none"}.`,
+                "Adapt the focus of your answer to these roles and tools. Tool results are already filtered by server-side permissions. Never infer or describe data from a module whose tool is unavailable.",
+                "When making a recommendation, include the exact label: AI Recommendation — Human Review Required.",
+            ].join("\n"),
             messages: modelMessages,
             tools,
             stopWhen: stepCountIs(5),
             temperature: 0.1,      // low temperature for factual accuracy
             maxOutputTokens: 2048,
             abortSignal: AbortSignal.timeout(30_000),
+            onFinish: async ({ text, steps }) => {
+                if (!isRRAStaff || !aiAuditId) return;
+                const usedTools = [...new Set(steps.flatMap((step) => step.toolResults.map((toolResult) => toolResult.toolName)))];
+                const moduleByTool: Record<RRAAIToolName, string> = {
+                    getTaxpayerIntelligence: "taxpayer_intelligence",
+                    lookupTrader: "taxpayer_directory",
+                    searchTraders: "taxpayer_directory",
+                    getTransactions: "transactions",
+                    getStockLevels: "inventory",
+                    getStockMovements: "stock_movements",
+                    getTaxStatus: "tax_compliance",
+                    getRiskAssessment: "risk_assessment",
+                    getRevenueForecastTool: "revenue_analytics",
+                    getSystemStats: "aggregate_statistics",
+                    getBehavioralAnalysis: "behavioral_analysis",
+                    traceSupplyChain: "supply_chain",
+                    traceProductJourney: "product_journey",
+                    getImportDeclarations: "imports",
+                };
+                const modulesAccessed = [...new Set(usedTools
+                    .filter((toolName): toolName is RRAAIToolName => toolName in moduleByTool)
+                    .map((toolName) => moduleByTool[toolName]))];
+                const requestCategory = modulesAccessed.length > 1
+                    ? "cross_module"
+                    : modulesAccessed[0] ?? "general_guidance";
+                try {
+                    await db.update(auditLog).set({ metadata: JSON.stringify({
+                        role: `rra_staff:${staffRoles.join(",")}`,
+                        department: staffDepartment,
+                        questionHash: createHash("sha256").update(questionText).digest("hex"),
+                        questionLength: questionText.length,
+                        authorizedTools: allowedRraTools,
+                        modulesAccessed,
+                        requestCategory,
+                        aiRecommendationGenerated: /AI Recommendation\s*[—-]\s*Human Review Required/i.test(text),
+                    }) }).where(eq(auditLog.id, aiAuditId));
+                } catch (error) {
+                    console.error("AI usage audit completion failed", {
+                        userId,
+                        auditId: aiAuditId,
+                        errorName: error instanceof Error ? error.name : typeof error,
+                    });
+                }
+            },
             onError: ({ error }) => console.error("AI query provider stream failed", {
                 userId,
                 errorName: error instanceof Error ? error.name : typeof error,
