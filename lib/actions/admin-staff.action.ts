@@ -4,6 +4,7 @@ import { eq, sql, and } from "drizzle-orm";
 import db from "@/db/drizzle";
 import { account, auditLog, rraStaff, rraStaffRole, session as authSession, user } from "@/db/schema";
 import { requireRRASession } from "@/lib/auth-guard";
+import { updateClearanceStatus } from "@/lib/actions/admin.action";
 import { logAudit } from "@/lib/audit";
 import { hashPassword } from "better-auth/crypto";
 import { randomUUID } from "node:crypto";
@@ -383,61 +384,20 @@ export async function createStaffMember(data: {
 // Deactivate / soft-delete taxpayer
 // ---------------------------------------------------------------------------
 
-export async function deactivateTaxpayer(traderId: string) {
-    const { staff, ...session } = await requireRRASession("super_admin");
-
-    const [trader] = await db
-        .select({ id: user.id, clearanceStatus: user.clearanceStatus })
-        .from(user)
-        .where(eq(user.id, traderId))
-        .limit(1);
-
-    if (!trader) throw new Error("Trader not found");
-
-    await db
-        .update(user)
-        .set({
-            clearanceStatus: "suspended",
-            updatedAt: new Date(),
-        })
-        .where(eq(user.id, traderId));
-
-    await logAudit({
-        userId: session.user.id,
-        action: "TAXPAYER_DEACTIVATED",
-        targetType: "user",
-        targetId: traderId,
-        metadata: {
-            previousStatus: trader.clearanceStatus,
-            deactivatedBy: staff.staffId,
-        },
-    });
-
-    return { success: true };
+export async function deactivateTaxpayer(input: unknown) {
+    if (typeof input !== "object" || input === null || Array.isArray(input)) {
+        return { success: false as const, error: "Enter the taxpayer ID and a reason for suspension." };
+    }
+    return updateClearanceStatus({ ...input, status: "suspended" });
 }
 
 // ---------------------------------------------------------------------------
 // Reactivate taxpayer
 // ---------------------------------------------------------------------------
 
-export async function reactivateTaxpayer(traderId: string) {
-    const { staff, ...session } = await requireRRASession("super_admin");
-
-    await db
-        .update(user)
-        .set({
-            clearanceStatus: "approved",
-            updatedAt: new Date(),
-        })
-        .where(eq(user.id, traderId));
-
-    await logAudit({
-        userId: session.user.id,
-        action: "TAXPAYER_REACTIVATED",
-        targetType: "user",
-        targetId: traderId,
-        metadata: { reactivatedBy: staff.staffId },
-    });
-
-    return { success: true };
+export async function reactivateTaxpayer(input: unknown) {
+    if (typeof input !== "object" || input === null || Array.isArray(input)) {
+        return { success: false as const, error: "Enter the taxpayer ID and a reason for reinstatement." };
+    }
+    return updateClearanceStatus({ ...input, status: "approved" });
 }

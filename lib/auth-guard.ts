@@ -4,7 +4,7 @@ import db from '@/db/drizzle';
 import { auditLog, rraStaff, rraStaffRole } from '@/db/schema';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { hasOperationalRRAPermission, hasRRAPermission, isRRARole, isRRARoleAllowed, RRA_ROLE_VALUES, type RRAPermission, type RRARole } from '@/lib/rra-rbac';
+import { hasAnyOperationalRRAPermission, hasOperationalRRAPermission, hasRRAPermission, isRRARole, isRRARoleAllowed, RRA_ROLE_VALUES, type RRAPermission, type RRARole } from '@/lib/rra-rbac';
 
 // ---------------------------------------------------------------------------
 // RRA Roles (specialized, not hierarchical)
@@ -179,6 +179,20 @@ export async function requireRRAOperationalPermission(permission: RRAPermission)
         userRoles: rraSession.staff.clearanceRoles,
         requiredPermission: permission,
       },
+    });
+    redirect('/admin/dashboard');
+  }
+  return rraSession;
+}
+
+/** Require at least one of several existing permissions from an operational staff role. */
+export async function requireAnyRRAOperationalPermission(...permissions: RRAPermission[]) {
+  const rraSession = await requireRRASession();
+  if (!hasAnyOperationalRRAPermission(rraSession.staff.clearanceRoles, permissions)) {
+    await logAccessDenial(rraSession.user.id, {
+      action: 'ACCESS_DENIED_MISSING_PERMISSION',
+      targetType: 'rra_permission',
+      metadata: { userRoles: rraSession.staff.clearanceRoles, requiredPermissions: permissions },
     });
     redirect('/admin/dashboard');
   }

@@ -9,7 +9,7 @@ import {
 } from "@/lib/auth-guard";
 import { logAudit } from "@/lib/audit";
 import { getSystemConfig } from "@/lib/actions/system-config.action";
-import { getAllowedClearanceTransitions, updateClearanceStatusSchema } from "@/lib/validation/admin-taxpayer.schema";
+import { updateClearanceStatusInTransaction } from "@/lib/services/rra-taxpayer-operations";
 
 // ---------------------------------------------------------------------------
 // Trader management
@@ -62,7 +62,6 @@ export async function getTrader(traderId: string) {
 // Clearance management
 // ---------------------------------------------------------------------------
 
-const TRADER_ROLES = ["manufacturer", "wholesaler", "retailer"] as const;
 type ClearanceUpdateResult = { success: true } | { success: false; error: string };
 
 /**
@@ -73,50 +72,16 @@ export async function updateClearanceStatus(
     input: unknown,
 ): Promise<ClearanceUpdateResult> {
     const { staff, user: actor } = await requireRRAOperationalPermission("taxpayer.clearance.update");
-    const parsed = updateClearanceStatusSchema.safeParse(input);
-    if (!parsed.success) {
-        return { success: false, error: parsed.error.issues[0]?.message ?? "Enter valid clearance details." };
-    }
-
     try {
-        return await db.transaction(async (tx) => {
-            const [target] = await tx
-                .select({ clearanceStatus: user.clearanceStatus })
-                .from(user)
-                .where(and(eq(user.id, parsed.data.traderId), inArray(user.role, [...TRADER_ROLES])))
-                .for("update")
-                .limit(1);
-
-            if (!target) return { success: false, error: "Taxpayer record not found." };
-            if (!getAllowedClearanceTransitions(target.clearanceStatus).includes(parsed.data.status)) {
-                return { success: false, error: "This clearance status change is not allowed from the taxpayer's current status." };
-            }
-
-            const [updated] = await tx.update(user)
-                .set({ clearanceStatus: parsed.data.status, updatedAt: new Date() })
-                .where(and(
-                    eq(user.id, parsed.data.traderId),
-                    eq(user.clearanceStatus, target.clearanceStatus),
-                ))
-                .returning({ id: user.id });
-            if (!updated) return { success: false, error: "The taxpayer status changed while you were reviewing it. Refresh the record and try again." };
-
-            await logAudit({
-                userId: actor.id,
-                action: "CLEARANCE_UPDATED",
-                targetType: "user",
-                targetId: parsed.data.traderId,
-                beforeState: { clearanceStatus: target.clearanceStatus },
-                afterState: { clearanceStatus: parsed.data.status },
-                metadata: { reason: parsed.data.reason, updatedByStaffRecordId: staff.id },
-            }, async (entry) => { await tx.insert(auditLog).values(entry); });
-
-            return { success: true };
-        });
+        return await db.transaction(async (tx) => updateClearanceStatusInTransaction(
+            tx,
+            input,
+            { userId: actor.id, staffRecordId: staff.id, roles: staff.clearanceRoles },
+            (entry) => logAudit(entry, async (auditEntry) => { await tx.insert(auditLog).values(auditEntry); }),
+        ));
     } catch (error) {
         console.error("Taxpayer clearance update failed", {
             actorUserId: actor.id,
-            targetId: parsed.data.traderId,
             errorName: error instanceof Error ? error.name : typeof error,
         });
         return { success: false, error: "Clearance status could not be updated. Please try again." };

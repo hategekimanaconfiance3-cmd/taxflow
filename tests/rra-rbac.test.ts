@@ -229,6 +229,9 @@ test("taxpayer operational permissions require an assigned operational role", ()
     assert.equal(hasOperationalRRAPermission(["tax_compliance_officer"], "taxpayer.profile.update"), true);
     assert.equal(hasOperationalRRAPermission(["super_admin", "compliance_officer"], "taxpayer.clearance.update"), true);
     assert.equal(hasOperationalRRAPermission(["audit_officer"], "taxpayer.clearance.update"), false);
+    assert.equal(hasOperationalRRAPermission(["super_admin"], "compliance.followup.manage"), false);
+    assert.equal(hasOperationalRRAPermission(["tax_compliance_officer"], "compliance.followup.manage"), true);
+    assert.equal(hasOperationalRRAPermission(["audit_investigation_officer"], "compliance.followup.manage"), false);
 });
 
 test("legacy audit_officer has audit trail and investigation permissions", () => {

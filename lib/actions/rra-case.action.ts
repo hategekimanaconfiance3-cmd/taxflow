@@ -5,10 +5,13 @@ import { z } from "zod";
 import db from "@/db/drizzle";
 import { auditLog, rraCase, rraCaseEvent, rraStaff, rraStaffRole, user } from "@/db/schema";
 import { logAudit } from "@/lib/audit";
-import { requireRRASession } from "@/lib/auth-guard";
+import { requireAnyRRAOperationalPermission, requireRRAOperationalPermission } from "@/lib/auth-guard";
+import { requestTaxpayerInformationInTransaction } from "@/lib/services/rra-taxpayer-operations";
+import { getOperationalRRARolesWithAnyPermission, type RRAPermission } from "@/lib/rra-rbac";
 
 const CASE_STATUSES = ["open", "in_progress", "awaiting_information", "closed"] as const;
-const REVIEW_ROLES = ["compliance_officer", "audit_officer", "super_admin"] as const;
+const CASE_PERMISSIONS = ["compliance.followup.manage", "investigation.case.manage"] as const satisfies readonly RRAPermission[];
+const CASE_MANAGER_ROLES = getOperationalRRARolesWithAnyPermission(CASE_PERMISSIONS);
 const TRADER_ROLE_FILTER = sql`${user.role} IN ('manufacturer', 'wholesaler', 'retailer')`;
 
 const createCaseSchema = z.object({
@@ -29,8 +32,27 @@ const updateCaseSchema = z.object({
 
 export type RraCaseStatus = typeof CASE_STATUSES[number];
 
+/** Request additional information through the existing case timeline and taxpayer notification system. */
+export async function requestTaxpayerInformation(input: unknown) {
+  const { staff, user: actor } = await requireRRAOperationalPermission("compliance.followup.manage");
+  try {
+    return await db.transaction(async (tx) => requestTaxpayerInformationInTransaction(
+      tx,
+      input,
+      { userId: actor.id, staffRecordId: staff.id, roles: staff.clearanceRoles },
+      (entry) => logAudit(entry, async (auditEntry) => { await tx.insert(auditLog).values(auditEntry); }),
+    ));
+  } catch (error) {
+    console.error("RRA taxpayer information request failed", {
+      actorUserId: actor.id,
+      errorName: error instanceof Error ? error.name : typeof error,
+    });
+    return { success: false as const, error: "The taxpayer request could not be sent. Please try again." };
+  }
+}
+
 export async function getRraCases(filters: { status?: RraCaseStatus; query?: string } = {}) {
-  await requireRRASession(...REVIEW_ROLES);
+  await requireAnyRRAOperationalPermission(...CASE_PERMISSIONS);
   const conditions = [];
   if (filters.status) conditions.push(eq(rraCase.status, filters.status));
   const query = filters.query?.trim();
@@ -77,7 +99,7 @@ export async function getRraCases(filters: { status?: RraCaseStatus; query?: str
 }
 
 export async function getRraCaseDetails(caseId: string) {
-  await requireRRASession(...REVIEW_ROLES);
+  await requireAnyRRAOperationalPermission(...CASE_PERMISSIONS);
   const [record] = await db.select({
     id: rraCase.id,
     traderId: rraCase.traderId,
@@ -118,7 +140,7 @@ export async function getRraCaseDetails(caseId: string) {
     }).from(rraStaffRole)
       .innerJoin(rraStaff, eq(rraStaffRole.staffRecordId, rraStaff.id))
       .innerJoin(user, eq(rraStaff.userId, user.id))
-      .where(and(eq(rraStaff.isActive, true), inArray(rraStaffRole.role, [...REVIEW_ROLES]))),
+      .where(and(eq(rraStaff.isActive, true), inArray(rraStaffRole.role, CASE_MANAGER_ROLES))),
   ]);
 
   const uniqueOfficers = [...new Map(officers.map((officer) => [officer.id, officer])).values()];
@@ -126,7 +148,7 @@ export async function getRraCaseDetails(caseId: string) {
 }
 
 export async function createRraCase(input: unknown) {
-  const { staff, user: actor } = await requireRRASession("compliance_officer");
+  const { staff, user: actor } = await requireAnyRRAOperationalPermission(...CASE_PERMISSIONS);
   const parsed = createCaseSchema.safeParse(input);
   if (!parsed.success) return { success: false as const, error: parsed.error.issues[0]?.message ?? "Invalid case details." };
   const [trader] = await db.select({ id: user.id, name: user.name, businessName: user.businessName, role: user.role })
@@ -150,7 +172,7 @@ export async function createRraCase(input: unknown) {
 }
 
 export async function updateRraCase(input: unknown) {
-  const { staff, user: actor } = await requireRRASession(...REVIEW_ROLES);
+  const { staff, user: actor } = await requireAnyRRAOperationalPermission(...CASE_PERMISSIONS);
   const parsed = updateCaseSchema.safeParse(input);
   if (!parsed.success) return { success: false as const, error: parsed.error.issues[0]?.message ?? "Invalid case update." };
   const data = parsed.data;
@@ -173,7 +195,7 @@ export async function updateRraCase(input: unknown) {
       if (data.assignedStaffId !== null) {
         const [assignee] = await tx.select({ id: rraStaff.id }).from(rraStaff)
           .innerJoin(rraStaffRole, eq(rraStaffRole.staffRecordId, rraStaff.id))
-          .where(and(eq(rraStaff.id, data.assignedStaffId), eq(rraStaff.isActive, true), inArray(rraStaffRole.role, [...REVIEW_ROLES])))
+          .where(and(eq(rraStaff.id, data.assignedStaffId), eq(rraStaff.isActive, true), inArray(rraStaffRole.role, CASE_MANAGER_ROLES)))
           .limit(1);
         if (!assignee) return { success: false as const, error: "Choose an active compliance or audit officer." };
       }

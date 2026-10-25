@@ -90,6 +90,14 @@ export function hasOperationalRRAPermission(roles: readonly RRARole[], permissio
     return roles.some((role) => role !== "super_admin" && hasRRAPermission(role, permission));
 }
 
+export function hasAnyOperationalRRAPermission(roles: readonly RRARole[], permissions: readonly RRAPermission[]): boolean {
+    return permissions.some((permission) => hasOperationalRRAPermission(roles, permission));
+}
+
+export function getOperationalRRARolesWithAnyPermission(permissions: readonly RRAPermission[]): RRARole[] {
+    return RRA_ROLE_VALUES.filter((role) => role !== "super_admin" && permissions.some((permission) => hasRRAPermission(role, permission)));
+}
+
 export function getRRAProposedRoleLabel(role: string): string {
     return RRA_ROLE_OPTIONS.find((option) => option.value === role)?.label ?? role;
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { AlertCircle, Check, Clock3, Loader2, Plus, Search } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { createRraCase, getRraCaseDetails, updateRraCase, type RraCaseStatus } from "@/lib/actions/rra-case.action";
+import { createRraCase, getRraCaseDetails, requestTaxpayerInformation, updateRraCase, type RraCaseStatus } from "@/lib/actions/rra-case.action";
 
 type CaseRow = {
   id: string;
@@ -38,7 +38,7 @@ const statusLabels: Record<RraCaseStatus, string> = {
   closed: "Closed",
 };
 
-export function RraCaseManagement({ initialCases }: { initialCases: CaseRow[] }) {
+export function RraCaseManagement({ initialCases, canRequestTaxpayerInformation }: { initialCases: CaseRow[]; canRequestTaxpayerInformation: boolean }) {
   const router = useRouter();
   const [cases, setCases] = useState(initialCases);
   const [selectedId, setSelectedId] = useState<string | null>(initialCases[0]?.id ?? null);
@@ -46,6 +46,8 @@ export function RraCaseManagement({ initialCases }: { initialCases: CaseRow[] })
   const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [showCreate, setShowCreate] = useState(false);
+  const [requestType, setRequestType] = useState<"documents" | "corrections" | null>(null);
+  const [requestDetails, setRequestDetails] = useState("");
   const [loadingDetails, startLoadingDetails] = useTransition();
   const [saving, startSaving] = useTransition();
   const [message, setMessage] = useState("");
@@ -68,7 +70,41 @@ export function RraCaseManagement({ initialCases }: { initialCases: CaseRow[] })
     setSelectedId(caseId);
     setDetails(null);
     setMessage("");
+    setRequestType(null);
+    setRequestDetails("");
     startLoadingDetails(async () => setDetails(await getRraCaseDetails(caseId)));
+  };
+
+  const submitInformationRequest = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!selectedId || !requestType) return;
+    setMessage("");
+    startSaving(async () => {
+      try {
+        const result = await requestTaxpayerInformation({ caseId: selectedId, requestType, details: requestDetails });
+        if (!result.success) {
+          setMessage(result.error);
+          return;
+        }
+        const updated = await getRraCaseDetails(selectedId);
+        setDetails(updated);
+        if (updated) {
+          setCases((current) => current.map((item) => item.id === selectedId ? {
+            ...item,
+            status: updated.status as RraCaseStatus,
+            updatedAt: updated.updatedAt,
+            closedAt: updated.closedAt,
+          } : item));
+        }
+        setRequestType(null);
+        setRequestDetails("");
+        setMessage(requestType === "documents" ? "Document request sent to the taxpayer and added to the case history." : "Correction request sent to the taxpayer and added to the case history.");
+        router.refresh();
+      } catch (error) {
+        console.error("Taxpayer follow-up request failed", error);
+        setMessage("The taxpayer request could not be sent. Please try again.");
+      }
+    });
   };
 
   const submitUpdate = (payload: { status?: RraCaseStatus; assignedStaffId?: string | null; note?: string }) => {
@@ -195,6 +231,17 @@ export function RraCaseManagement({ initialCases }: { initialCases: CaseRow[] })
               </CardHeader>
               <CardContent className="space-y-5 p-4">
                 <section><h3 className="mb-1 text-sm font-semibold">Review reason</h3><p className="whitespace-pre-wrap text-sm text-muted-foreground">{details.reason}</p></section>
+                {canRequestTaxpayerInformation && details.status !== "closed" && <section className="space-y-3 rounded-md border p-3">
+                  <div><h3 className="text-sm font-semibold">Request taxpayer follow-up</h3><p className="mt-1 text-xs text-muted-foreground">Requests are sent to the taxpayer’s TaxFlow notifications and recorded in the case history.</p></div>
+                  {!requestType ? <div className="flex flex-wrap gap-2">
+                    <Button type="button" variant="outline" size="sm" disabled={saving} onClick={() => setRequestType("documents")}>Request documents</Button>
+                    <Button type="button" variant="outline" size="sm" disabled={saving} onClick={() => setRequestType("corrections")}>Request corrections</Button>
+                  </div> : <form onSubmit={submitInformationRequest} className="space-y-2">
+                    <label htmlFor="taxpayer-followup-details" className="text-sm font-medium">{requestType === "documents" ? "Documents needed" : "Corrections needed"}</label>
+                    <Textarea id="taxpayer-followup-details" value={requestDetails} onChange={(event) => setRequestDetails(event.target.value)} minLength={10} maxLength={1500} required rows={3} disabled={saving} placeholder={requestType === "documents" ? "List the documents the taxpayer should provide." : "Describe the information that needs correction."} />
+                    <div className="flex gap-2"><Button type="submit" size="sm" disabled={saving || requestDetails.trim().length < 10}>{saving ? "Sending…" : "Send request"}</Button><Button type="button" variant="ghost" size="sm" disabled={saving} onClick={() => { setRequestType(null); setRequestDetails(""); }}>Cancel</Button></div>
+                  </form>}
+                </section>}
                 <div className="grid gap-3 sm:grid-cols-2">
                   <label className="space-y-1 text-xs font-medium text-muted-foreground">Status<select value={details.status} disabled={details.status === "closed" || saving} onChange={(event) => submitUpdate({ status: event.target.value as RraCaseStatus })} className="mt-1 h-10 w-full rounded-md border bg-background px-3 text-sm text-foreground">{Object.entries(statusLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
                   <label className="space-y-1 text-xs font-medium text-muted-foreground">Assigned officer<select value={details.assignedStaffId ?? ""} disabled={details.status === "closed" || saving} onChange={(event) => submitUpdate({ assignedStaffId: event.target.value || null })} className="mt-1 h-10 w-full rounded-md border bg-background px-3 text-sm text-foreground"><option value="">Unassigned</option>{details.officers.map((officer) => <option key={officer.id} value={officer.id}>{officer.name} · {officer.clearanceLevel.replaceAll("_", " ")}</option>)}</select></label>
@@ -212,6 +259,6 @@ export function RraCaseManagement({ initialCases }: { initialCases: CaseRow[] })
 }
 
 function eventLabel(type: string) {
-  const labels: Record<string, string> = { case_opened: "Case opened", note_added: "Officer note added", status_changed: "Status changed", assignment_changed: "Assignment changed" };
+  const labels: Record<string, string> = { case_opened: "Case opened", note_added: "Officer note added", status_changed: "Status changed", assignment_changed: "Assignment changed", documents_requested: "Documents requested from taxpayer", corrections_requested: "Corrections requested from taxpayer" };
   return labels[type] ?? type.replaceAll("_", " ");
 }
