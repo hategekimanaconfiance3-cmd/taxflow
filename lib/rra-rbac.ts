@@ -29,7 +29,7 @@ export const RRA_PERMISSIONS = [
     "transaction.read", "audit.trail.read", "traceability.read", "stock.read",
     "imports.read", "imports.review", "payments.read", "payments.reconcile",
     "analytics.read", "ai.findings.read", "data_quality.read", "ai.assistant.use", "ai.feedback.review",
-    "stock.correction.review", "support.manage",
+    "stock.correction.review", "support.read", "support.manage",
     "taxpayer.profile.update", "taxpayer.clearance.update",
 ] as const;
 export type RRAPermission = (typeof RRA_PERMISSIONS)[number];
@@ -37,7 +37,7 @@ export type RRAPermission = (typeof RRA_PERMISSIONS)[number];
 const PROPOSED_ROLE_PERMISSIONS: Record<RRAProposedRole, readonly RRAPermission[]> = {
     super_admin: RRA_PERMISSIONS,
     director_executive: ["dashboard.executive.read", "reports.aggregate.read", "supply_chain.summary.read", "ai.assistant.use", "taxpayer.intelligence.search"],
-    tax_compliance_officer: ["taxpayer.intelligence.search", "taxpayer.compliance.read", "tax.records.read", "payments.read", "compliance.followup.manage", "support.manage", "ai.assistant.use", "taxpayer.profile.update", "taxpayer.clearance.update"],
+    tax_compliance_officer: ["taxpayer.intelligence.search", "taxpayer.compliance.read", "tax.records.read", "payments.read", "compliance.followup.manage", "support.read", "support.manage", "ai.assistant.use", "taxpayer.profile.update", "taxpayer.clearance.update"],
     audit_investigation_officer: ["taxpayer.intelligence.search", "investigation.case.manage", "transaction.read", "audit.trail.read", "traceability.read", "ai.assistant.use"],
     product_traceability_officer: ["taxpayer.intelligence.search", "traceability.read", "stock.read", "ai.assistant.use"],
     customs_import_officer: ["taxpayer.intelligence.search", "imports.read", "imports.review", "ai.assistant.use"],
@@ -46,11 +46,11 @@ const PROPOSED_ROLE_PERMISSIONS: Record<RRAProposedRole, readonly RRAPermission[
 };
 
 const LEGACY_ROLE_PERMISSIONS: Record<(typeof LEGACY_RRA_ROLES)[number], readonly RRAPermission[]> = {
-    compliance_officer: ["taxpayer.intelligence.search", "taxpayer.compliance.read", "tax.records.read", "payments.read", "compliance.followup.manage", "imports.review", "support.manage", "ai.assistant.use", "taxpayer.profile.update", "taxpayer.clearance.update"],
+    compliance_officer: ["taxpayer.intelligence.search", "taxpayer.compliance.read", "tax.records.read", "payments.read", "compliance.followup.manage", "imports.review", "support.read", "support.manage", "ai.assistant.use", "taxpayer.profile.update", "taxpayer.clearance.update"],
     audit_officer: ["taxpayer.intelligence.search", "investigation.case.manage", "transaction.read", "audit.trail.read", "traceability.read", "imports.read", "imports.review", "ai.assistant.use"],
     stock_officer: ["taxpayer.intelligence.search", "traceability.read", "stock.read", "ai.assistant.use"],
     correction_officer: ["taxpayer.intelligence.search", "stock.read", "stock.correction.review"],
-    reporting_officer: ["taxpayer.intelligence.search", "reports.aggregate.read", "analytics.read", "tax.records.read", "payments.read", "ai.assistant.use"],
+    reporting_officer: ["taxpayer.intelligence.search", "reports.aggregate.read", "analytics.read", "tax.records.read", "payments.read", "support.read", "ai.assistant.use"],
 };
 
 export const RRA_ROLE_PERMISSIONS: Record<RRARole | "super_admin", readonly RRAPermission[]> = {

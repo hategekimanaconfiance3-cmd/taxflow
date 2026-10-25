@@ -68,6 +68,13 @@ test("RRA taxpayer operations enforce roles and persist status, case events, not
       auditWriter(tx),
     ));
     assert.equal(unauthorized.success, false);
+    const superAdminAlone = await db.transaction((tx) => operations.updateClearanceStatusInTransaction(
+      tx,
+      { ...clearanceInput, status: "under_review" },
+      { ...actor, roles: ["super_admin"] },
+      auditWriter(tx),
+    ));
+    assert.equal(superAdminAlone.success, false);
     const invalidTransition = await db.transaction((tx) => operations.updateClearanceStatusInTransaction(
       tx,
       { ...clearanceInput, status: "suspended" },

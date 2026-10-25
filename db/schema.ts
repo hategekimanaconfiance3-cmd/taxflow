@@ -836,6 +836,29 @@ export const supportTicketRelations = relations(supportTicket, ({ one }) => ({
   }),
 }));
 
+export const supportTicketMessage = pgTable(
+  'support_ticket_message',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    ticketId: text('ticket_id').notNull().references(() => supportTicket.id, { onDelete: 'cascade' }),
+    authorId: text('author_id').notNull().references(() => user.id),
+    body: text('body').notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [index('support_ticket_message_ticket_created_idx').on(table.ticketId, table.createdAt)],
+);
+
+export const supportTicketMessageRelations = relations(supportTicketMessage, ({ one }) => ({
+  ticket: one(supportTicket, {
+    fields: [supportTicketMessage.ticketId],
+    references: [supportTicket.id],
+  }),
+  author: one(user, {
+    fields: [supportTicketMessage.authorId],
+    references: [user.id],
+  }),
+}));
+
 
 // ---------------------------------------------------------------------------
 // Production Batches — manufacturers declare production quantities per period

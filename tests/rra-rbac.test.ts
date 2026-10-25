@@ -113,6 +113,12 @@ test("tax_compliance_officer: compliance read + follow-up + support", () => {
     assert.ok(hasRRAPermission("tax_compliance_officer", "taxpayer.clearance.update"));
 });
 
+test("reporting officers can read support tickets but cannot manage them", () => {
+    assert.ok(hasOperationalRRAPermission(["reporting_officer"], "support.read"));
+    assert.equal(hasOperationalRRAPermission(["reporting_officer"], "support.manage"), false);
+    assert.equal(hasOperationalRRAPermission(["super_admin"], "support.read"), false);
+});
+
 test("audit_investigation_officer: case management, trail, traceability", () => {
     assert.ok(hasRRAPermission("audit_investigation_officer", "investigation.case.manage"));
     assert.ok(hasRRAPermission("audit_investigation_officer", "transaction.read"));
