@@ -16,7 +16,7 @@ import { getBusinessComplianceStatus } from '@/lib/compliance-status';
 import { getSystemConfig } from '@/lib/actions/system-config.action';
 import { validatePriceFloor } from '@/lib/ai/price-suggestion';
 import { calculateVat } from '@/lib/intelligence/tax-engine';
-import { assertBusinessActor } from '@/lib/b2b-authorization';
+import { assertVerifiedBusinessOwner } from '@/lib/b2b-authorization';
 
 type ReservationReleaseStatus = 'released' | 'expired' | 'cancelled';
 
@@ -58,8 +58,21 @@ async function releaseStockReservation(
 }
 
 function isRetryableTransactionError(error: unknown): boolean {
-  if (typeof error !== 'object' || error === null || !('code' in error)) return false;
-  return error.code === '40P01' || error.code === '40001';
+  const code = getDatabaseErrorCode(error);
+  return code === '40P01' || code === '40001';
+}
+
+function getDatabaseErrorCode(error: unknown): string | null {
+  const visited = new Set<object>();
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && typeof current === 'object' && current !== null && !visited.has(current); depth += 1) {
+    visited.add(current);
+    if ('code' in current && typeof current.code === 'string' && /^[0-9A-Z]{5}$/.test(current.code)) {
+      return current.code;
+    }
+    current = 'cause' in current ? current.cause : null;
+  }
+  return null;
 }
 
 async function withTransactionRetry<T>(operation: () => Promise<T>): Promise<T> {
@@ -235,6 +248,7 @@ async function createSaleForConfirmationInternal(data: {
   setFailureStage('reserve inventory and save sale');
   const expiresAt = new Date(Date.now() + config.buyerConfirmationWindowHours * 60 * 60 * 1000);
   const created = await withTransactionRetry(() => db.transaction(async (tx) => {
+    setFailureStage('lock seller inventory');
     const lockedStocks = await tx.select().from(stock).where(and(
       eq(stock.businessId, session.user.id),
       or(...validatedItems.map((item) => eq(stock.productId, item.productId))),
@@ -249,6 +263,7 @@ async function createSaleForConfirmationInternal(data: {
     for (const item of validatedItems) {
       const row = stockByProduct.get(item.productId)!;
       const quantityAfter = row.quantity - item.quantity;
+      setFailureStage('save transaction');
       const [txn] = await tx.insert(transaction).values({
         sellerId: session.user.id, buyerId: buyer.id, productId: item.productId, transactionType,
         buyerType: transactionType === 'DIRECT_BULK_SALE' && (!buyer.businessType || buyer.businessType === 'registered_business')
@@ -259,6 +274,7 @@ async function createSaleForConfirmationInternal(data: {
         vatAmount: item.vatAmount, vatRateBasisPoints: Math.round(config.vatRate * 10_000),
         pricingMode: 'exclusive', status: 'pending',
       }).returning();
+      setFailureStage('create stock reservation');
       const [reservation] = await tx.insert(stockReservation).values({
         transactionId: txn.id,
         productId: item.productId,
@@ -269,13 +285,16 @@ async function createSaleForConfirmationInternal(data: {
         expiresAt,
       }).returning({ id: stockReservation.id });
       if (!reservation) throw new Error('Could not create the stock reservation.');
+      setFailureStage('deduct seller stock');
       await tx.update(stock).set({ quantity: quantityAfter }).where(eq(stock.id, row.id));
+      setFailureStage('append stock movement');
       await tx.insert(stockMovement).values({
         businessId: session.user.id, productId: item.productId, quantityDelta: -item.quantity,
         quantityBefore: row.quantity, quantityAfter, movementType: 'sale_reservation',
         sourceType: 'stock_reservation', sourceId: reservation.id, actorUserId: session.user.id,
         reason: 'Held until buyer confirms or the request expires',
       });
+      setFailureStage('write transaction audit');
       await tx.insert(auditLog).values({
         userId: session.user.id, action: 'TRANSACTION_CREATED', targetType: 'transaction', targetId: txn.id,
         metadata: JSON.stringify({ buyerId: buyer.id, buyerTin: data.buyerTin, productId: item.productId,
@@ -284,6 +303,7 @@ async function createSaleForConfirmationInternal(data: {
       });
       if (item.priceCheck.suggestion.status !== 'no_data' && item.priceCheck.suggestion.ceiling > 0
         && item.unitPrice > item.priceCheck.suggestion.ceiling) {
+        setFailureStage('write price review audit');
         await tx.insert(auditLog).values({
           userId: session.user.id, action: 'PRICE_ABOVE_CEILING', targetType: 'transaction', targetId: txn.id,
           metadata: JSON.stringify({ declaredPrice: item.unitPrice, ceiling: item.priceCheck.suggestion.ceiling,
@@ -295,6 +315,7 @@ async function createSaleForConfirmationInternal(data: {
 
     const total = validatedItems.reduce((sum, item) => sum + item.totalAmount + item.vatAmount, 0);
     const summary = validatedItems.map((item) => `${item.name}: ${item.quantity} × ${item.unitPrice.toLocaleString()} RWF (tax ${item.vatAmount.toLocaleString()} RWF)`).join('; ');
+    setFailureStage('notify buyer');
     const [savedNotification] = await tx.insert(notification).values({
       userId: buyer.id, type: 'txn_incoming', title: 'New Purchase Confirmation Required',
       message: `${session.user.name} (TIN ${session.user.tinNumber ?? '—'}) sent ${summary}. Total incl. tax: ${total.toLocaleString()} RWF. References: ${txns.map((txn) => txn.id).join(', ')}. Confirm each item in Pending Confirmations by ${expiresAt.toLocaleString()}.`,
@@ -336,8 +357,7 @@ export async function createSaleForConfirmation(data: {
     return { success: true, transactions: await createSaleForConfirmationInternal(data, (stage) => { failureStage = stage; }) };
   } catch (error) {
     const reference = crypto.randomUUID();
-    const errorCode = typeof error === 'object' && error !== null && 'code' in error
-      && typeof error.code === 'string' ? error.code : null;
+    const errorCode = getDatabaseErrorCode(error);
     console.error(`[sale-create:${reference}] Sale creation failed during ${failureStage} (${errorCode ?? 'server validation or unexpected error'})`);
 
     // Domain validation/auth errors are already safe messages created by this action.
@@ -410,7 +430,11 @@ export async function confirmTransaction(transactionId: string) {
       throw new Error('Transaction not found or already processed');
     }
 
-    const actorAuthority = await assertBusinessActor(tx, lockedTxn.buyerId, session.user.id);
+    if (session.user.id !== lockedTxn.buyerId) {
+      throw new Error('Only the verified business owner can accept this order. Representatives may confirm receipts only.');
+    }
+    await assertVerifiedBusinessOwner(tx, lockedTxn.buyerId);
+    const actorAuthority = 'owner';
     const [existingAcceptance] = await tx.select({ id: b2bOrderAcceptance.id })
       .from(b2bOrderAcceptance).where(eq(b2bOrderAcceptance.transactionId, lockedTxn.id)).limit(1);
     if (existingAcceptance) throw new Error('This transaction already has an order acceptance record.');

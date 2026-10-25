@@ -302,9 +302,9 @@ export const transaction = pgTable(
   ],
 );
 
-// B2B inventory holds. An active reservation has already been removed from
-// available stock; confirmation converts the hold, while every release path
-// transitions the row out of ACTIVE exactly once.
+// B2B inventory holds. Creation removes the full reserved quantity from seller
+// available stock. Order acceptance retains the hold; full dispatch converts it.
+// Pending-only cancellation/expiry releases it exactly once before acceptance.
 export const stockReservation = pgTable(
   'stock_reservation',
   {

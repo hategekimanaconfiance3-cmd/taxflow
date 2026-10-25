@@ -1,6 +1,6 @@
 'use server';
 
-import { and, asc, eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import db from '@/db/drizzle';
 import { auditLog, b2bDispatch, b2bOrderAcceptance, b2bReceipt, businessRepresentative, stock, stockMovement, stockReservation, transaction, user } from '@/db/schema';
 import { assertBusinessActor, assertVerifiedBusinessOwner } from '@/lib/b2b-authorization';
@@ -77,12 +77,21 @@ export async function acceptBusinessRepresentativeInvitation(input: unknown): Pr
   const session = await requireTraderSession();
 
   await db.transaction(async (tx) => {
+    const [invitation] = await tx.select({ businessId: businessRepresentative.businessId })
+      .from(businessRepresentative).where(eq(businessRepresentative.id, representativeId)).limit(1);
+    if (!invitation) throw new Error('This invitation is unavailable or is not addressed to your account.');
+    await assertVerifiedBusinessOwner(tx, invitation.businessId);
+
     const [membership] = await tx.select().from(businessRepresentative)
-      .where(eq(businessRepresentative.id, representativeId)).for('update').limit(1);
-    if (!membership || membership.representativeUserId !== session.user.id || membership.status !== 'pending') {
+      .where(and(
+        eq(businessRepresentative.id, representativeId),
+        eq(businessRepresentative.businessId, invitation.businessId),
+        eq(businessRepresentative.representativeUserId, session.user.id),
+        eq(businessRepresentative.status, 'pending'),
+      )).for('update').limit(1);
+    if (!membership) {
       throw new Error('This invitation is unavailable or is not addressed to your account.');
     }
-    await assertVerifiedBusinessOwner(tx, membership.businessId);
     const [representative] = await tx.select({
       id: user.id, emailVerified: user.emailVerified, clearanceStatus: user.clearanceStatus, isActive: user.isActive,
     }).from(user).where(eq(user.id, session.user.id)).limit(1);
@@ -139,6 +148,12 @@ export async function revokeBusinessRepresentative(input: unknown): Promise<{ su
 }
 
 export async function recordB2BDispatch(input: unknown): Promise<{ success: true; dispatchId: string }> {
+  // Keep the public server action closed until PostgreSQL-backed lifecycle
+  // tests prove cancellation, expiry, correction, and dispute paths safe for
+  // partially dispatched orders. Hiding the UI alone is not an authorization
+  // boundary for exported server actions.
+  throw new Error('B2B dispatch is not enabled until fulfillment lifecycle validation is complete.');
+
   const data = parseOrThrow(dispatchInputSchema, input);
   const session = await requireTraderSession();
   const dispatchId = await db.transaction(async (tx) => {
@@ -194,6 +209,10 @@ export async function recordB2BDispatch(input: unknown): Promise<{ success: true
 }
 
 export async function recordB2BReceipt(input: unknown): Promise<{ success: true; receiptId: string }> {
+  // Receipt stock credit must remain unavailable until the same lifecycle
+  // validation covers held quantities, retries, rollback, and revocation races.
+  throw new Error('B2B receipt recording is not enabled until fulfillment lifecycle validation is complete.');
+
   const data = parseOrThrow(receiptInputSchema, input);
   const session = await requireTraderSession();
   const receiptId = await db.transaction(async (tx) => {
@@ -207,6 +226,12 @@ export async function recordB2BReceipt(input: unknown): Promise<{ success: true;
       throw new Error('The dispatch is not valid for an accepted B2B transaction.');
     }
     await assertBusinessActor(tx, txn.buyerId, session.user.id);
+    const [acceptance] = await tx.select({ id: b2bOrderAcceptance.id }).from(b2bOrderAcceptance)
+      .where(and(
+        eq(b2bOrderAcceptance.transactionId, txn.id),
+        eq(b2bOrderAcceptance.buyerBusinessId, txn.buyerId),
+      )).limit(1);
+    if (!acceptance) throw new Error('This legacy transaction has no explicit order-acceptance evidence and cannot accept a new receipt.');
 
     const [prior] = await tx.select().from(b2bReceipt).where(and(
       eq(b2bReceipt.dispatchId, dispatch.id), eq(b2bReceipt.idempotencyKey, data.idempotencyKey),
@@ -237,17 +262,15 @@ export async function recordB2BReceipt(input: unknown): Promise<{ success: true;
     if (!saved) throw new Error('Receipt evidence could not be saved.');
 
     if (data.acceptedQuantity > 0) {
-      const [buyerStock] = await tx.select().from(stock).where(and(
-        eq(stock.businessId, txn.buyerId), eq(stock.productId, txn.productId),
-      )).orderBy(asc(stock.businessId)).for('update').limit(1);
-      const before = buyerStock?.quantity ?? 0;
-      const after = before + data.acceptedQuantity;
-      if (buyerStock) {
-        const [updated] = await tx.update(stock).set({ quantity: after }).where(eq(stock.id, buyerStock.id)).returning({ quantity: stock.quantity });
-        if (!updated) throw new Error('Buyer available stock could not be updated.');
-      } else {
-        await tx.insert(stock).values({ businessId: txn.buyerId, productId: txn.productId, quantity: after });
-      }
+      const [updatedBuyerStock] = await tx.insert(stock).values({
+        businessId: txn.buyerId, productId: txn.productId, quantity: data.acceptedQuantity,
+      }).onConflictDoUpdate({
+        target: [stock.businessId, stock.productId],
+        set: { quantity: sql`${stock.quantity} + ${data.acceptedQuantity}` },
+      }).returning({ quantity: stock.quantity });
+      if (!updatedBuyerStock) throw new Error('Buyer available stock could not be updated.');
+      const after = updatedBuyerStock.quantity;
+      const before = after - data.acceptedQuantity;
       await tx.insert(stockMovement).values({
         businessId: txn.buyerId, productId: txn.productId, quantityDelta: data.acceptedQuantity,
         quantityBefore: before, quantityAfter: after, movementType: 'b2b_receipt_accepted',
