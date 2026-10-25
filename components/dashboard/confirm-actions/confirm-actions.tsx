@@ -44,7 +44,7 @@ export function ConfirmActions({ transactionId }: ConfirmActionsProps) {
                         : "text-red-500"
                     }`}
             >
-                {result === "confirmed" ? "✓ Confirmed" : "✕ Rejected"}
+                {result === "confirmed" ? "✓ Order accepted" : "✕ Rejected"}
             </span>
         );
     }
@@ -67,6 +67,7 @@ export function ConfirmActions({ transactionId }: ConfirmActionsProps) {
                 ) : (
                     <Check className="h-3.5 w-3.5" />
                 )}
+                <span className="ml-1 text-xs">Accept order</span>
             </Button>
             <Button
                 variant="ghost"

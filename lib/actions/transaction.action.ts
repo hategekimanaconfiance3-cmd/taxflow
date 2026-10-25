@@ -2,7 +2,7 @@
 
 import { eq, and, or, asc, desc, lt, sql } from 'drizzle-orm';
 import db from '@/db/drizzle';
-import { transaction, stock, stockMovement, stockReservation, vatRecord, product, user, auditLog, notification, customer } from '@/db/schema';
+import { transaction, stock, stockMovement, stockReservation, vatRecord, product, user, auditLog, notification, customer, b2bOrderAcceptance } from '@/db/schema';
 import {
   requireTraderSession,
   requireApprovedClearance,
@@ -16,6 +16,7 @@ import { getBusinessComplianceStatus } from '@/lib/compliance-status';
 import { getSystemConfig } from '@/lib/actions/system-config.action';
 import { validatePriceFloor } from '@/lib/ai/price-suggestion';
 import { calculateVat } from '@/lib/intelligence/tax-engine';
+import { assertBusinessActor } from '@/lib/b2b-authorization';
 
 type ReservationReleaseStatus = 'released' | 'expired' | 'cancelled';
 
@@ -54,27 +55,6 @@ async function releaseStockReservation(
     actorUserId, reason,
   });
   return true;
-}
-
-/** Caller must hold the transaction row lock before converting its reservation. */
-async function convertStockReservation(
-  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
-  txn: typeof transaction.$inferSelect,
-): Promise<{ reservation: typeof stockReservation.$inferSelect; expired: boolean } | null> {
-  const [reservation] = await tx.select().from(stockReservation)
-    .where(eq(stockReservation.transactionId, txn.id)).for('update').limit(1);
-  if (!reservation) return null; // Legacy pending transaction; confirm path deducts stock directly.
-  if (reservation.status !== 'active') throw new Error('This stock reservation is no longer active.');
-  if (reservation.sellerId !== txn.sellerId || reservation.buyerId !== txn.buyerId
-    || reservation.productId !== txn.productId || reservation.quantity !== txn.quantity) {
-    throw new Error(`Reservation ${reservation.id} does not match transaction ${txn.id}`);
-  }
-  if (reservation.expiresAt <= new Date()) return { reservation, expired: true };
-  const [converted] = await tx.update(stockReservation).set({ status: 'converted' })
-    .where(and(eq(stockReservation.id, reservation.id), eq(stockReservation.status, 'active')))
-    .returning({ id: stockReservation.id });
-  if (!converted) throw new Error('Stock reservation was already processed.');
-  return { reservation, expired: false };
 }
 
 function isRetryableTransactionError(error: unknown): boolean {
@@ -403,11 +383,13 @@ export async function createTransaction(data: {
 }
 
 // ---------------------------------------------------------------------------
-// Confirm Transaction (Buyer confirms receipt)
+// Accept B2B order. VAT remains at its existing confirmation trigger; stock is
+// credited only from separately recorded accepted receipt quantities.
 // ---------------------------------------------------------------------------
 
 export async function confirmTransaction(transactionId: string) {
   const { suspended, clearanceStatus, ...session } = await requireApprovedClearance();
+  await requireTraderSession();
 
   if (suspended) {
     throw new Error(`Your account is ${clearanceStatus}. Cannot confirm transactions.`);
@@ -424,12 +406,27 @@ export async function confirmTransaction(transactionId: string) {
       .for('update')
       .limit(1);
 
-    if (!lockedTxn || lockedTxn.buyerId !== session.user.id || lockedTxn.status !== 'pending') {
+    if (!lockedTxn || !lockedTxn.buyerId || lockedTxn.status !== 'pending') {
       throw new Error('Transaction not found or already processed');
     }
 
-    const conversion = await convertStockReservation(tx, lockedTxn);
-    if (conversion?.expired) {
+    const actorAuthority = await assertBusinessActor(tx, lockedTxn.buyerId, session.user.id);
+    const [existingAcceptance] = await tx.select({ id: b2bOrderAcceptance.id })
+      .from(b2bOrderAcceptance).where(eq(b2bOrderAcceptance.transactionId, lockedTxn.id)).limit(1);
+    if (existingAcceptance) throw new Error('This transaction already has an order acceptance record.');
+
+    const [reservation] = await tx.select().from(stockReservation)
+      .where(eq(stockReservation.transactionId, lockedTxn.id)).for('update').limit(1);
+    if (reservation && reservation.status !== 'active') {
+      throw new Error(`The transaction reservation is ${reservation.status}; acceptance requires manual review.`);
+    }
+    if (reservation && (
+      reservation.quantity !== lockedTxn.quantity || reservation.productId !== lockedTxn.productId
+      || reservation.sellerId !== lockedTxn.sellerId || reservation.buyerId !== lockedTxn.buyerId
+    )) {
+      throw new Error('The transaction reservation does not match its commercial agreement; acceptance requires manual review.');
+    }
+    if (reservation && reservation.expiresAt <= new Date()) {
       const reservationId = await releaseStockReservation(tx, lockedTxn, 'expired', session.user.id, 'Buyer confirmation window expired before confirmation');
       await tx.update(transaction).set({ status: 'expired' })
         .where(and(eq(transaction.id, lockedTxn.id), eq(transaction.status, 'pending')));
@@ -445,23 +442,16 @@ export async function confirmTransaction(transactionId: string) {
       }).returning();
       return { txn: lockedTxn, expired: true, savedNotification };
     }
-    const reservation = conversion?.reservation ?? null;
-
-    // Lock both stock rows in business ID order so opposing transfers acquire
-    // inventory locks consistently and reduce deadlock risk.
-    const lockedStocks = await tx
+    // The sale creation already removes reserved stock from seller availability.
+    // Legacy pending rows without a reservation retain the historical seller
+    // decrement here. No buyer stock is credited until receipt evidence exists.
+    const [sellerStock] = await tx
       .select()
       .from(stock)
       .where(
-        and(
-          or(eq(stock.businessId, lockedTxn.sellerId), eq(stock.businessId, session.user.id)),
-          eq(stock.productId, lockedTxn.productId),
-        ),
+        and(eq(stock.businessId, lockedTxn.sellerId), eq(stock.productId, lockedTxn.productId)),
       )
-      .orderBy(asc(stock.businessId))
       .for('update');
-    const sellerStock = lockedStocks.find((row) => row.businessId === lockedTxn.sellerId);
-    const buyerStock = lockedStocks.find((row) => row.businessId === session.user.id);
 
     if (!sellerStock || (!reservation && sellerStock.quantity < lockedTxn.quantity)) {
       throw new Error('Seller no longer has sufficient stock');
@@ -472,40 +462,18 @@ export async function confirmTransaction(transactionId: string) {
       await tx.update(stock).set({ quantity: sellerQuantityAfter }).where(eq(stock.id, sellerStock.id));
     }
 
-    // 2. Add/upsert buyer stock and use the database-returned quantity.
-    // The ON CONFLICT path can run when another confirmation creates this row
-    // concurrently, so the initially selected buyerStock may be absent/stale.
-    let buyerQuantityAfter: number;
-    if (buyerStock) {
-      const [updatedBuyerStock] = await tx
-        .update(stock)
-        .set({ quantity: buyerStock.quantity + lockedTxn.quantity })
-        .where(eq(stock.id, buyerStock.id))
-        .returning({ quantity: stock.quantity });
-      if (!updatedBuyerStock) throw new Error('Unable to update buyer stock');
-      buyerQuantityAfter = updatedBuyerStock.quantity;
-    } else {
-      const [upsertedBuyerStock] = await tx
-        .insert(stock)
-        .values({
-          businessId: session.user.id,
-          productId: lockedTxn.productId,
-          quantity: lockedTxn.quantity,
-        })
-        .onConflictDoUpdate({
-          target: [stock.businessId, stock.productId],
-          set: { quantity: sql`${stock.quantity} + ${lockedTxn.quantity}` },
-        })
-        .returning({ quantity: stock.quantity });
-      if (!upsertedBuyerStock) throw new Error('Unable to create or update buyer stock');
-      buyerQuantityAfter = upsertedBuyerStock.quantity;
+    if (!reservation) {
+      await tx.insert(stockMovement).values({
+        businessId: lockedTxn.sellerId, productId: lockedTxn.productId,
+        quantityDelta: -lockedTxn.quantity, quantityBefore: sellerStock.quantity, quantityAfter: sellerQuantityAfter,
+        movementType: 'sale', sourceType: 'transaction', sourceId: lockedTxn.id, actorUserId: session.user.id,
+      });
     }
-    const buyerQuantityBefore = buyerQuantityAfter - lockedTxn.quantity;
 
-    await tx.insert(stockMovement).values([
-      ...(reservation ? [{ businessId: lockedTxn.sellerId, productId: lockedTxn.productId, quantityDelta: 0, quantityBefore: sellerStock.quantity, quantityAfter: sellerQuantityAfter, movementType: 'sale_reservation_converted', sourceType: 'stock_reservation', sourceId: reservation.id, actorUserId: session.user.id }] : [{ businessId: lockedTxn.sellerId, productId: lockedTxn.productId, quantityDelta: -lockedTxn.quantity, quantityBefore: sellerStock.quantity, quantityAfter: sellerQuantityAfter, movementType: 'sale', sourceType: 'transaction', sourceId: lockedTxn.id, actorUserId: session.user.id }]),
-      { businessId: session.user.id, productId: lockedTxn.productId, quantityDelta: lockedTxn.quantity, quantityBefore: buyerQuantityBefore, quantityAfter: buyerQuantityAfter, movementType: 'purchase', sourceType: 'transaction', sourceId: lockedTxn.id, actorUserId: session.user.id },
-    ]);
+    const [acceptance] = await tx.insert(b2bOrderAcceptance).values({
+      transactionId: lockedTxn.id, buyerBusinessId: lockedTxn.buyerId, actorUserId: session.user.id,
+    }).returning({ id: b2bOrderAcceptance.id, acceptedAt: b2bOrderAcceptance.acceptedAt });
+    if (!acceptance) throw new Error('Order acceptance evidence could not be saved.');
 
     // 3. Create VAT output record (seller)
     await tx.insert(vatRecord).values({
@@ -545,20 +513,24 @@ export async function confirmTransaction(transactionId: string) {
       beforeState: {
         status: 'pending',
         sellerStockQuantity: sellerStock.quantity,
-        buyerStockQuantity: buyerQuantityBefore,
+        buyerStockQuantity: null,
       },
       afterState: {
         status: 'confirmed',
         sellerStockQuantity: sellerQuantityAfter,
-        buyerStockQuantity: buyerQuantityAfter,
+        buyerStockQuantity: null,
         vatAmount: lockedTxn.vatAmount,
       },
       metadata: JSON.stringify({
         sellerId: lockedTxn.sellerId,
         quantity: lockedTxn.quantity,
         vatAmount: lockedTxn.vatAmount,
-        stockMovements: [
-          ...(!reservation ? [{
+        eventType: 'b2b_order_accepted',
+        acceptanceId: acceptance.id,
+        acceptedAt: acceptance.acceptedAt,
+        acceptedBy: actorAuthority,
+        receiptRequiredForBuyerStockCredit: true,
+        stockMovements: !reservation ? [{
             movementId: `${lockedTxn.id}:seller`,
             movementType: 'sale',
             businessId: lockedTxn.sellerId,
@@ -566,23 +538,15 @@ export async function confirmTransaction(transactionId: string) {
             quantityDelta: -lockedTxn.quantity,
             quantityBefore: sellerStock.quantity,
             quantityAfter: sellerQuantityAfter,
-          }] : [{ movementType: 'sale_reservation_converted', sourceId: reservation!.id, quantityDelta: 0 }]),
-          {
-            movementId: `${lockedTxn.id}:buyer`,
-            movementType: 'purchase',
-            businessId: session.user.id,
-            productId: lockedTxn.productId,
-            quantityDelta: lockedTxn.quantity,
-            quantityBefore: buyerQuantityBefore,
-            quantityAfter: buyerQuantityAfter,
-          },
-        ],
+          }] : [],
+        stockCreditedToBuyer: 0,
+        reservationId: reservation?.id ?? null,
       }),
     });
 
     const [savedNotification] = await tx.insert(notification).values({
-      userId: lockedTxn.sellerId, type: 'txn_confirmed', title: 'Sale confirmed',
-      message: `${session.user.name} confirmed your sale of ${lockedTxn.quantity} units.`,
+      userId: lockedTxn.sellerId, type: 'txn_confirmed', title: 'Order accepted',
+      message: `${session.user.name} accepted your order for ${lockedTxn.quantity} units. Dispatch and receipt are recorded separately.`,
       link: '/dashboard/pending',
     }).returning();
     return { txn: lockedTxn, savedNotification, expired: false };

@@ -2,7 +2,7 @@
 
 import { eq, sql, desc, and, or, gte, lte, ilike } from "drizzle-orm";
 import db from "@/db/drizzle";
-import { dispute, user, transaction, vatRecord, auditLog, stock, stockMovement, stockReservation, product, taxPayment, notification } from "@/db/schema";
+import { dispute, user, transaction, vatRecord, auditLog, stock, stockMovement, stockReservation, product, taxPayment, notification, b2bOrderAcceptance } from "@/db/schema";
 import {
     requireRRASession,
     type RRARole,
@@ -366,6 +366,16 @@ export async function modifyTransaction(
     };
 
     await db.transaction(async (tx) => {
+        const [lockedTxn] = await tx.select().from(transaction).where(eq(transaction.id, transactionId)).for("update").limit(1);
+        if (!lockedTxn || lockedTxn.status !== "confirmed" && lockedTxn.status !== "completed") {
+            throw new Error("Transaction changed before the correction could be applied.");
+        }
+        const [fulfillmentAcceptance] = await tx.select({ id: b2bOrderAcceptance.id })
+            .from(b2bOrderAcceptance).where(eq(b2bOrderAcceptance.transactionId, transactionId)).limit(1);
+        if (fulfillmentAcceptance) {
+            throw new Error("This transaction has separate B2B fulfillment evidence. Quantity or price corrections are disabled until fulfillment-aware correction handling is completed.");
+        }
+
         // 1. Update the transaction
         await tx
             .update(transaction)
@@ -557,6 +567,11 @@ export async function cancelTransaction(
             .limit(1);
 
         if (!txn) throw new Error("Transaction not found.");
+        const [fulfillmentAcceptance] = await tx.select({ id: b2bOrderAcceptance.id })
+            .from(b2bOrderAcceptance).where(eq(b2bOrderAcceptance.transactionId, txn.id)).limit(1);
+        if (fulfillmentAcceptance) {
+            throw new Error("This transaction has separate B2B acceptance evidence. RRA cancellation is disabled until the fulfillment-aware reversal workflow is completed.");
+        }
         if (txn.status === "rejected") throw new Error("Transaction is already rejected.");
         if (!["pending", "confirmed", "completed"].includes(txn.status)) {
             throw new Error("Transaction cannot be cancelled from its current status.");

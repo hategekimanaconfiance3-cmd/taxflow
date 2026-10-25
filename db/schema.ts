@@ -327,6 +327,90 @@ export const stockReservation = pgTable(
   ],
 );
 
+// A business is represented by its verified owner account (the existing user
+// row). Representatives use their own verified user account; this table does
+// not create a second business identity or trust client-supplied business data.
+export const businessRepresentative = pgTable(
+  'business_representative',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    businessId: text('business_id').notNull().references(() => user.id),
+    representativeUserId: text('representative_user_id').notNull().references(() => user.id),
+    status: text('status').notNull().default('pending'),
+    invitedByUserId: text('invited_by_user_id').notNull().references(() => user.id),
+    invitedAt: timestamp('invited_at').defaultNow().notNull(),
+    acceptedAt: timestamp('accepted_at'),
+    revokedAt: timestamp('revoked_at'),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('business_representative_business_user_uniq').on(table.businessId, table.representativeUserId),
+    index('business_representative_user_status_idx').on(table.representativeUserId, table.status),
+    check('business_representative_status_check', sql`${table.status} IN ('pending', 'active', 'revoked')`),
+    check('business_representative_not_owner_check', sql`${table.businessId} <> ${table.representativeUserId}`),
+  ],
+);
+
+// B2B acceptance is distinct from physical dispatch and measured receipt.
+// Existing transaction rows intentionally receive no fabricated acceptance.
+export const b2bOrderAcceptance = pgTable(
+  'b2b_order_acceptance',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    transactionId: text('transaction_id').notNull().unique().references(() => transaction.id),
+    buyerBusinessId: text('buyer_business_id').notNull().references(() => user.id),
+    actorUserId: text('actor_user_id').notNull().references(() => user.id),
+    acceptedAt: timestamp('accepted_at').defaultNow().notNull(),
+  },
+  (table) => [index('b2b_order_acceptance_buyer_time_idx').on(table.buyerBusinessId, table.acceptedAt)],
+);
+
+export const b2bDispatch = pgTable(
+  'b2b_dispatch',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    transactionId: text('transaction_id').notNull().references(() => transaction.id),
+    sellerBusinessId: text('seller_business_id').notNull().references(() => user.id),
+    actorUserId: text('actor_user_id').notNull().references(() => user.id),
+    quantity: real('quantity').notNull(),
+    dispatchReference: text('dispatch_reference'),
+    idempotencyKey: text('idempotency_key').notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('b2b_dispatch_transaction_key_uniq').on(table.transactionId, table.idempotencyKey),
+    index('b2b_dispatch_transaction_created_idx').on(table.transactionId, table.createdAt),
+    uniqueIndex('b2b_dispatch_business_reference_uniq').on(table.sellerBusinessId, table.dispatchReference),
+    check('b2b_dispatch_quantity_check', sql`${table.quantity} > 0`),
+  ],
+);
+
+export const b2bReceipt = pgTable(
+  'b2b_receipt',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    dispatchId: text('dispatch_id').notNull().references(() => b2bDispatch.id),
+    transactionId: text('transaction_id').notNull().references(() => transaction.id),
+    buyerBusinessId: text('buyer_business_id').notNull().references(() => user.id),
+    actorUserId: text('actor_user_id').notNull().references(() => user.id),
+    quantityReceived: real('quantity_received').notNull(),
+    acceptedQuantity: real('accepted_quantity').notNull(),
+    damagedQuantity: real('damaged_quantity').notNull().default(0),
+    rejectedQuantity: real('rejected_quantity').notNull().default(0),
+    disputedQuantity: real('disputed_quantity').notNull().default(0),
+    notes: text('notes'),
+    idempotencyKey: text('idempotency_key').notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('b2b_receipt_dispatch_key_uniq').on(table.dispatchId, table.idempotencyKey),
+    index('b2b_receipt_transaction_created_idx').on(table.transactionId, table.createdAt),
+    check('b2b_receipt_quantity_positive_check', sql`${table.quantityReceived} > 0`),
+    check('b2b_receipt_classification_nonnegative_check', sql`${table.acceptedQuantity} >= 0 AND ${table.damagedQuantity} >= 0 AND ${table.rejectedQuantity} >= 0 AND ${table.disputedQuantity} >= 0`),
+    check('b2b_receipt_classification_total_check', sql`abs(${table.acceptedQuantity} + ${table.damagedQuantity} + ${table.rejectedQuantity} + ${table.disputedQuantity} - ${table.quantityReceived}) < 0.000001`),
+  ],
+);
+
 // ---------------------------------------------------------------------------
 // Transaction Items — line items within a transaction (multi-product support)
 // ---------------------------------------------------------------------------

@@ -6,7 +6,7 @@ import { generateText } from "ai";
 import { randomUUID } from "node:crypto";
 import { headers } from "next/headers";
 import db from "@/db/drizzle";
-import { auditLog, dispute, notification, product, stock, stockMovement, transaction, user, vatRecord } from "@/db/schema";
+import { auditLog, b2bOrderAcceptance, dispute, notification, product, stock, stockMovement, transaction, user, vatRecord } from "@/db/schema";
 import { requireTraderSession, requireRRASession } from "@/lib/auth-guard";
 import { emitToUser } from "@/lib/realtime";
 import { getSystemConfig } from "@/lib/actions/system-config.action";
@@ -593,6 +593,11 @@ export async function resolveDispute(
             .for("update")
             .limit(1);
         if (!txn) throw new Error("Disputed transaction not found");
+        const [fulfillmentAcceptance] = await tx.select({ id: b2bOrderAcceptance.id })
+            .from(b2bOrderAcceptance).where(eq(b2bOrderAcceptance.transactionId, txn.id)).limit(1);
+        if (fulfillmentAcceptance) {
+            throw new Error("This transaction has separate B2B fulfillment evidence. Dispute financial resolution is disabled until the fulfillment-aware stock and VAT disposition workflow is completed.");
+        }
 
         const frozenRecords = await tx
             .select()

@@ -119,7 +119,7 @@ function ConfirmRejectActions({ transactionId }: { transactionId: string }) {
                     : "text-red-500"
                     }`}
             >
-                {result === "confirmed" ? "✓ Confirmed" : "✕ Rejected"}
+                {result === "confirmed" ? "✓ Order accepted" : "✕ Rejected"}
             </span>
         );
     }
@@ -138,7 +138,7 @@ function ConfirmRejectActions({ transactionId }: { transactionId: string }) {
         disabled={isPending}
       >
         {isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
-        <span className="ml-1 text-xs">Confirm</span>
+        <span className="ml-1 text-xs">Accept order</span>
       </Button>
       <Button
         variant="ghost"
@@ -235,8 +235,8 @@ export function PendingPageClient({ incoming, outgoing }: PendingPageClientProps
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Pending Confirmations</h1>
-        <p className="text-sm text-muted-foreground mt-1">Review incoming purchases and track outgoing sales.</p>
+        <h1 className="text-2xl font-bold tracking-tight">Pending Orders</h1>
+        <p className="text-sm text-muted-foreground mt-1">Accept or reject business orders. Dispatch and measured receipt are recorded separately.</p>
       </div>
 
       {/* Tabs */}
@@ -289,7 +289,7 @@ export function PendingPageClient({ incoming, outgoing }: PendingPageClientProps
               <CardHeader className="pb-3">
                 <CardTitle className="text-base font-semibold flex items-center gap-2">
                   <Clock className="h-4 w-4 text-amber-500" />
-                  Awaiting Your Confirmation ({pendingIncoming.length})
+                  Awaiting Your Order Decision ({pendingIncoming.length})
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -392,7 +392,7 @@ export function PendingPageClient({ incoming, outgoing }: PendingPageClientProps
                   <CardHeader className="pb-3">
                     <CardTitle className="text-base font-semibold flex items-center gap-2">
                       <RefreshCw className="h-4 w-4 text-blue-500" />
-                      Awaiting Buyer Confirmation ({pendingOutgoing.length})
+                      Awaiting Buyer Order Acceptance ({pendingOutgoing.length})
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
