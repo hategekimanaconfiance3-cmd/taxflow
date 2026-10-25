@@ -22,7 +22,7 @@ export default async function AdminSupportPage({ searchParams }: { searchParams:
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Support Tickets</h1>
-        <p className="mt-1 text-sm text-muted-foreground">{tin ? `Support requests for TIN ${tin}.` : "Review and respond to trader support requests."}</p>
+        <p className="mt-1 text-sm text-muted-foreground">{tin ? `Support requests for TIN ${tin}.` : canManage ? "Review and respond to trader support requests." : "Review trader support requests and conversation history. Your current role has view-only access."}</p>
       </div>
       <div className="flex flex-wrap items-center gap-3">
         <Badge variant="secondary" className="bg-amber-100 text-amber-700">{stats.open} open</Badge>
