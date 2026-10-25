@@ -70,24 +70,26 @@ test("support ticket operations persist replies, assignments, status and audits 
     await assert.rejects(db.transaction((tx) => service.updateSupportTicketStatusInTransaction(tx, {
       ticketId, nextStatus: "in_progress", actorId, roles: ["audit_investigation_officer"],
     }, auditWriter(tx))), /do not have permission/);
+
+    const superAdminReopened = await db.transaction((tx) => service.updateSupportTicketStatusInTransaction(tx, {
+      ticketId, nextStatus: "in_progress", actorId, roles: ["super_admin"],
+    }, auditWriter(tx)));
+    assert.equal(superAdminReopened.status, "in_progress");
     await assert.rejects(db.transaction((tx) => service.updateSupportTicketStatusInTransaction(tx, {
-      ticketId, nextStatus: "resolved", resolution: "Another resolution attempt.", actorId, roles: ["super_admin"],
-    }, auditWriter(tx))), /do not have permission/);
-    await assert.rejects(db.transaction((tx) => service.updateSupportTicketStatusInTransaction(tx, {
-      ticketId, nextStatus: "open", actorId, roles: supportRoles,
+      ticketId, nextStatus: "closed", actorId, roles: supportRoles,
     }, auditWriter(tx))), /status change is not allowed/);
 
     await assert.rejects(db.transaction((tx) => service.updateSupportTicketStatusInTransaction(tx, {
-      ticketId, nextStatus: "closed", actorId, roles: supportRoles,
+      ticketId, nextStatus: "resolved", resolution: "Another resolution attempt.", actorId, roles: ["super_admin"],
     }, async (_transaction, entry) => {
       await auditWriter(tx)(tx, entry);
       throw new Error("Simulated audit failure");
     })), /Simulated audit failure/);
     const [afterRollback] = await db.select().from(schema.supportTicket).where(eq(schema.supportTicket.id, ticketId));
-    assert.equal(afterRollback?.status, "resolved");
+    assert.equal(afterRollback?.status, "in_progress");
     const statusAudits = await db.select({ id: schema.auditLog.id }).from(schema.auditLog)
       .where(and(eq(schema.auditLog.targetId, ticketId), eq(schema.auditLog.action, "TICKET_STATUS_UPDATED")));
-    assert.equal(statusAudits.length, 1);
+    assert.equal(statusAudits.length, 2);
   } finally {
     await db.delete(schema.supportTicketMessage).where(eq(schema.supportTicketMessage.ticketId, ticketId));
     await db.delete(schema.auditLog).where(eq(schema.auditLog.targetId, ticketId));

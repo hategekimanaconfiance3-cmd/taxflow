@@ -168,7 +168,7 @@ export async function requireRRAPermission(permission: RRAPermission) {
   return rraSession;
 }
 
-/** Require a permission granted by an operational role, excluding super_admin-only access. */
+/** Require the requested assigned role permission, including super_admin's explicit grants. */
 export async function requireRRAOperationalPermission(permission: RRAPermission) {
   const rraSession = await requireRRASession();
   if (!hasOperationalRRAPermission(rraSession.staff.clearanceRoles, permission)) {
@@ -185,7 +185,7 @@ export async function requireRRAOperationalPermission(permission: RRAPermission)
   return rraSession;
 }
 
-/** Require at least one of several existing permissions from an operational staff role. */
+/** Require at least one of several assigned permissions on the RRA staff record. */
 export async function requireAnyRRAOperationalPermission(...permissions: RRAPermission[]) {
   const rraSession = await requireRRASession();
   if (!hasAnyOperationalRRAPermission(rraSession.staff.clearanceRoles, permissions)) {

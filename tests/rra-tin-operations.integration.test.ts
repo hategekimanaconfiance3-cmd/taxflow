@@ -68,16 +68,18 @@ test("RRA taxpayer operations enforce roles and persist status, case events, not
       auditWriter(tx),
     ));
     assert.equal(unauthorized.success, false);
-    const superAdminAlone = await db.transaction((tx) => operations.updateClearanceStatusInTransaction(
+    const superAdminOperation = await db.transaction((tx) => operations.updateClearanceStatusInTransaction(
       tx,
       { ...clearanceInput, status: "under_review" },
       { ...actor, roles: ["super_admin"] },
       auditWriter(tx),
     ));
-    assert.equal(superAdminAlone.success, false);
+    assert.deepEqual(superAdminOperation, { success: true });
+    const [superAdminStoredTrader] = await db.select({ status: schema.user.clearanceStatus }).from(schema.user).where(eq(schema.user.id, traderId));
+    assert.equal(superAdminStoredTrader?.status, "under_review");
     const invalidTransition = await db.transaction((tx) => operations.updateClearanceStatusInTransaction(
       tx,
-      { ...clearanceInput, status: "suspended" },
+      { ...clearanceInput, status: "under_review" },
       actor,
       auditWriter(tx),
     ));
@@ -93,7 +95,7 @@ test("RRA taxpayer operations enforce roles and persist status, case events, not
     await assert.rejects(db.transaction(async (tx) => {
       await operations.updateClearanceStatusInTransaction(
         tx,
-        { ...clearanceInput, status: "under_review" },
+        { ...clearanceInput, status: "suspended" },
         actor,
         async (entry) => {
           await auditWriter(tx)(entry);
@@ -102,10 +104,10 @@ test("RRA taxpayer operations enforce roles and persist status, case events, not
       );
     }));
     const [afterRollback] = await db.select({ status: schema.user.clearanceStatus }).from(schema.user).where(eq(schema.user.id, traderId));
-    assert.equal(afterRollback?.status, "suspended");
+    assert.equal(afterRollback?.status, "under_review");
     const auditsAfterRollback = await db.select({ id: schema.auditLog.id }).from(schema.auditLog)
       .where(and(eq(schema.auditLog.userId, actorId), eq(schema.auditLog.targetId, traderId), eq(schema.auditLog.action, "CLEARANCE_UPDATED")));
-    assert.equal(auditsAfterRollback.length, 1);
+    assert.equal(auditsAfterRollback.length, 2);
 
     await db.insert(schema.rraCase).values({ id: caseId, traderId, title: "Document review", reason: "A review requires supporting documentation.", createdByStaffId: staffId });
     const followupResult = await db.transaction((tx) => operations.requestTaxpayerInformationInTransaction(

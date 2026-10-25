@@ -8,10 +8,8 @@ import {
     Scale,
     Shield,
     Settings,
-    HelpCircle,
     Bell,
     FileBarChart,
-    UserCheck,
     Gavel,
     Activity,
     TrendingUp,
@@ -119,8 +117,7 @@ const ALL: RRARole[] = [
     "director_executive",
 ];
 
-// System-admin access does not itself grant access to confidential taxpayer data.
-const TAXPAYER_SEARCH_ROLES = ALL.filter((role) => role !== "super_admin");
+const TAXPAYER_SEARCH_ROLES = getOperationalRRARolesWithAnyPermission(["taxpayer.intelligence.search"]);
 
 // ---------------------------------------------------------------------------
 // Navigation groups — ordered by operational priority

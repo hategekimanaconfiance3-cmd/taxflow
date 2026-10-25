@@ -82,12 +82,9 @@ export function hasRRAPermission(role: RRARole | "super_admin", permission: RRAP
     return RRA_ROLE_PERMISSIONS[role].includes(permission);
 }
 
-/**
- * Operational taxpayer access must come from an assigned business role.
- * A system administrator alone is not treated as a taxpayer operations role.
- */
+/** Permission evaluation for server-guarded operational modules, including the full super_admin grant. */
 export function hasOperationalRRAPermission(roles: readonly RRARole[], permission: RRAPermission): boolean {
-    return roles.some((role) => role !== "super_admin" && hasRRAPermission(role, permission));
+    return roles.some((role) => hasRRAPermission(role, permission));
 }
 
 export function hasAnyOperationalRRAPermission(roles: readonly RRARole[], permissions: readonly RRAPermission[]): boolean {
@@ -95,7 +92,7 @@ export function hasAnyOperationalRRAPermission(roles: readonly RRARole[], permis
 }
 
 export function getOperationalRRARolesWithAnyPermission(permissions: readonly RRAPermission[]): RRARole[] {
-    return RRA_ROLE_VALUES.filter((role) => role !== "super_admin" && permissions.some((permission) => hasRRAPermission(role, permission)));
+    return RRA_ROLE_VALUES.filter((role) => permissions.some((permission) => hasRRAPermission(role, permission)));
 }
 
 export function getRRAProposedRoleLabel(role: string): string {

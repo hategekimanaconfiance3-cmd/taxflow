@@ -1,15 +1,15 @@
 "use server";
 
-import { eq, sql, ilike } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import db from "@/db/drizzle";
 import { user } from "@/db/schema";
-import { requireRRASession } from "@/lib/auth-guard";
+import { requireRRAOperationalPermission } from "@/lib/auth-guard";
 
 /**
  * Search traders by TIN or business name. Returns up to 8 results.
  */
 export async function searchTraders(query: string) {
-    await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
+    await requireRRAOperationalPermission("taxpayer.intelligence.search");
 
     if (!query || query.trim().length < 2) return [];
 

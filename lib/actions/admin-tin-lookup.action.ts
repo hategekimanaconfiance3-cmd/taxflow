@@ -65,9 +65,7 @@ type LookupData = {
 };
 
 function roleHasPermission(roles: RRARole[], permission: Parameters<typeof hasRRAPermission>[1]) {
-  // Super Admin is a system-management role. Taxpayer-data access requires a
-  // separate assigned operational role, even when both roles belong to one user.
-  return roles.some((role) => role !== "super_admin" && hasRRAPermission(role, permission));
+  return roles.some((role) => hasRRAPermission(role, permission));
 }
 
 async function buildLookup(tin: string, staffRoles: RRARole[]): Promise<LookupData | null> {
