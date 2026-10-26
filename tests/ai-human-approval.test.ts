@@ -9,6 +9,8 @@ test("RRA AI is advisory, labels potential findings, and defers official decisio
   assert.match(prompt, /never make, approve, execute, or finalize an official decision/i);
   assert.match(prompt, /recommendations are not approvals/i);
   assert.match(prompt, /potential\/system-generated indicators/i);
+  assert.match(prompt, /FACT \(recorded data\), CALCULATION, SIGNAL, INTERPRETATION, and UNKNOWN/i);
+  assert.match(prompt, /incomplete status or withholds its score/i);
   assert.match(prompt, /AI Recommendation — Human Review Required/);
   assert.match(prompt, /getTaxpayerIntelligence/);
 });

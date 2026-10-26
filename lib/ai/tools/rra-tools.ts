@@ -11,6 +11,7 @@ import {
 import tinDb from "@/db/tin-drizzle";
 import { tinRecord } from "@/db/tin-schema";
 import { computeRiskScore } from "@/lib/ai/risk-scoring";
+import { presentRiskAssessmentForAI } from "@/lib/ai/risk-assessment-presentation";
 import { getRevenueForecast } from "@/lib/ai/revenue-forecast";
 import { analyzeMerchantBehavior } from "@/lib/ai/behavioral-analysis";
 import { searchProductJourney } from "@/lib/actions/product-journey.action";
@@ -329,7 +330,7 @@ export const getTaxStatus = tool({
 
 /** Get AI risk score for a trader. */
 export const getRiskAssessment = tool({
-    description: "Get the AI-computed fraud risk score for a trader. Returns a 0-100 score with detailed signal breakdown.",
+    description: "Get TaxFlow's existing system-generated risk signal for a trader. This is an uncalibrated review indicator, never proof of fraud or an official finding. The tool withholds the composite score if any component is unavailable or has insufficient data, and lists the component signals and limitations.",
     inputSchema: z.object({
         traderTin: z.string().describe("Trader TIN number"),
     }),
@@ -342,8 +343,8 @@ export const getRiskAssessment = tool({
 
         if (!trader) return { found: false, message: "Trader not found" };
 
-        const score = await computeRiskScore(trader.id);
-        return score;
+        const assessment = await computeRiskScore(trader.id);
+        return presentRiskAssessmentForAI(assessment);
     },
 });
 
