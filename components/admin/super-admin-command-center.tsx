@@ -4,16 +4,17 @@ import { useState, useTransition, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { Activity, Brain, Building2, Database, Search, ShieldAlert, Warehouse } from "lucide-react";
+import { Activity, Brain, Building2, Database, KeyRound, Search, ShieldAlert, ShieldCheck, Users, Warehouse } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { formatRWF } from "@/components/dashboard/stat-card/stat-card";
-import { getSuperAdminCommandCenter, searchSuperAdminCommand } from "@/lib/actions/super-admin-command-center.action";
+import { getSuperAdminCommandCenter, getSuperAdminControlPlaneSummary, searchSuperAdminCommand } from "@/lib/actions/super-admin-command-center.action";
 import type { SuperAdminDashboardComparison, SuperAdminDashboardPeriod } from "@/lib/super-admin-command-center";
 
 type DashboardData = Awaited<ReturnType<typeof getSuperAdminCommandCenter>>;
+type ControlPlaneSummary = Awaited<ReturnType<typeof getSuperAdminControlPlaneSummary>>;
 type SearchResponse = Awaited<ReturnType<typeof searchSuperAdminCommand>>;
 type SearchResult = SearchResponse["results"][number];
 
@@ -54,7 +55,7 @@ function SuperAdminCommandSearch() {
         const found = await searchSuperAdminCommand(query);
         setResults(found.results);
         setUnavailableSources(found.unavailableSources);
-        setMessage(found.results.length ? null : found.unavailableSources.length === 5 ? "All search sources are unavailable. Retry in a moment." : found.unavailableSources.length ? "No matches in the sources that were available." : "No matching businesses, products, transactions, signals, or cases.");
+        setMessage(found.results.length ? null : found.unavailableSources.length === 8 ? "All search sources are unavailable. Retry in a moment." : found.unavailableSources.length ? "No matches in the sources that were available." : "No matching businesses, products, transactions, signals, cases, admins, tickets, or audit events.");
       } catch {
         setResults([]);
         setUnavailableSources([]);
@@ -73,7 +74,7 @@ function SuperAdminCommandSearch() {
         <Button type="submit" disabled={pending}>{pending ? "Searching…" : "Search"}</Button>
       </form>
       {message && <p className="mt-1 text-xs text-muted-foreground" role="status">{message}</p>}
-      {unavailableSources.length > 0 && <p className="mt-1 text-xs text-amber-700" role="status">{unavailableSources.length === 5 ? "Search unavailable" : "Partial results"}: could not search {unavailableSources.join(", ")}.</p>}
+      {unavailableSources.length > 0 && <p className="mt-1 text-xs text-amber-700" role="status">{unavailableSources.length === 8 ? "Search unavailable" : "Partial results"}: could not search {unavailableSources.join(", ")}.</p>}
       {results.length > 0 && (
         <Card className="mt-2 max-h-72 overflow-auto">
           <CardContent className="p-2">
@@ -92,9 +93,11 @@ function openAssistant() {
   document.dispatchEvent(new KeyboardEvent("keydown", { key: "i", ctrlKey: true, bubbles: true }));
 }
 
-export function SuperAdminCommandCenter({ data, error, period, comparison, from, to }: {
+export function SuperAdminCommandCenter({ data, error, period, comparison, from, to, controlPlane, controlPlaneError }: {
   data: DashboardData | null;
   error: string | null;
+  controlPlane: ControlPlaneSummary | null;
+  controlPlaneError: string | null;
   period: SuperAdminDashboardPeriod;
   comparison: SuperAdminDashboardComparison;
   from?: string;
@@ -141,6 +144,25 @@ export function SuperAdminCommandCenter({ data, error, period, comparison, from,
             <Button type="button" variant="outline" onClick={openAssistant}><Brain data-icon="inline-start" /> Ask TaxFlow Intelligence</Button>
           </div>
         </div>
+      </section>
+
+      <section className="grid gap-3 md:grid-cols-3" aria-label="Super Admin control plane">
+        <Link href="/admin/settings#staff-management" className="rounded-lg border bg-card p-4 transition-colors hover:bg-accent/40">
+          <div className="flex items-center justify-between gap-2"><p className="text-sm font-medium">Admin Management</p><Users className="size-4 text-muted-foreground" /></div>
+          <p className="mt-2 text-2xl font-semibold">{controlPlane ? controlPlane.activeAdministrators + " / " + controlPlane.administrators : "Unavailable"}</p>
+          <p className="text-xs text-muted-foreground">Active / total RRA staff accounts · manage roles and status</p>
+        </Link>
+        <Link href="/admin/security" className="rounded-lg border bg-card p-4 transition-colors hover:bg-accent/40">
+          <div className="flex items-center justify-between gap-2"><p className="text-sm font-medium">Security Center</p><ShieldCheck className="size-4 text-muted-foreground" /></div>
+          <p className="mt-2 text-2xl font-semibold">{controlPlane ? controlPlane.currentStaffSessions : "Unavailable"}</p>
+          <p className="text-xs text-muted-foreground">Unexpired staff sessions · login history and API telemetry unavailable</p>
+        </Link>
+        <Link href="/admin/security" className="rounded-lg border bg-card p-4 transition-colors hover:bg-accent/40">
+          <div className="flex items-center justify-between gap-2"><p className="text-sm font-medium">Permission Changes</p><KeyRound className="size-4 text-muted-foreground" /></div>
+          <p className="mt-2 text-2xl font-semibold">{controlPlane ? controlPlane.roleChangesLast30Days : "Unavailable"}</p>
+          <p className="text-xs text-muted-foreground">Role-change audit records in the last 30 days</p>
+        </Link>
+        {controlPlaneError && <p className="text-xs text-destructive md:col-span-3" role="status">Control-plane summary unavailable. Open Security Center to retry with a fresh page load.</p>}
       </section>
 
       {error && <Card className="border-destructive/50"><CardContent className="flex flex-wrap items-center gap-3 py-4 text-sm text-destructive"><Database aria-hidden="true" /><span role="alert">{error}</span><Button className="ml-auto" variant="outline" size="sm" onClick={() => router.refresh()}>Retry</Button></CardContent></Card>}

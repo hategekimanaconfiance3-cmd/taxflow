@@ -35,7 +35,7 @@ export const RRA_PERMISSIONS = [
 export type RRAPermission = (typeof RRA_PERMISSIONS)[number];
 
 const PROPOSED_ROLE_PERMISSIONS: Record<RRAProposedRole, readonly RRAPermission[]> = {
-    super_admin: RRA_PERMISSIONS.filter((permission) => permission !== "taxpayer.intelligence.search"),
+    super_admin: RRA_PERMISSIONS,
     director_executive: ["dashboard.executive.read", "reports.aggregate.read", "supply_chain.summary.read", "ai.assistant.use", "taxpayer.intelligence.search"],
     tax_compliance_officer: ["taxpayer.intelligence.search", "taxpayer.compliance.read", "tax.records.read", "payments.read", "compliance.followup.manage", "support.read", "support.manage", "ai.assistant.use", "taxpayer.profile.update", "taxpayer.clearance.update"],
     audit_investigation_officer: ["taxpayer.intelligence.search", "investigation.case.manage", "transaction.read", "audit.trail.read", "traceability.read", "ai.assistant.use"],
@@ -56,7 +56,7 @@ const LEGACY_ROLE_PERMISSIONS: Record<(typeof LEGACY_RRA_ROLES)[number], readonl
 export const RRA_ROLE_PERMISSIONS: Record<RRARole | "super_admin", readonly RRAPermission[]> = {
     ...PROPOSED_ROLE_PERMISSIONS,
     ...LEGACY_ROLE_PERMISSIONS,
-    super_admin: RRA_PERMISSIONS.filter((permission) => permission !== "taxpayer.intelligence.search"),
+    super_admin: RRA_PERMISSIONS,
 };
 
 /** Compatibility for old route checks; the authenticated super_admin role grants all admin routes. */

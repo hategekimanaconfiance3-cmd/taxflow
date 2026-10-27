@@ -11,7 +11,7 @@ import type { PriorityAlert } from '@/components/admin/overview/priority-alerts'
 import { TinTaxpayerLookup } from '@/components/admin/tin-taxpayer-lookup';
 import { RoleWorkspace } from '@/components/admin/role-workspace';
 import { hasOperationalRRAPermission, hasRRAPermission } from '@/lib/rra-rbac';
-import { getSuperAdminCommandCenter } from '@/lib/actions/super-admin-command-center.action';
+import { getSuperAdminCommandCenter, getSuperAdminControlPlaneSummary } from '@/lib/actions/super-admin-command-center.action';
 import { SuperAdminCommandCenter } from '@/components/admin/super-admin-command-center';
 import type { SuperAdminDashboardComparison, SuperAdminDashboardPeriod } from '@/lib/super-admin-command-center';
 
@@ -28,14 +28,22 @@ export default async function AdminOverviewPage({ searchParams }: { searchParams
 
   if (roles.includes('super_admin')) {
     let data: Awaited<ReturnType<typeof getSuperAdminCommandCenter>> | null = null;
+    let controlPlane: Awaited<ReturnType<typeof getSuperAdminControlPlaneSummary>> | null = null;
     let error: string | null = null;
+    let controlPlaneError: string | null = null;
     try {
       data = await getSuperAdminCommandCenter({ period, comparison, from: first(params.from), to: first(params.to) });
     } catch (caught) {
       console.error('Super Admin command center failed to load', { errorName: caught instanceof Error ? caught.name : typeof caught });
       error = caught instanceof Error ? caught.message : 'Command center data is temporarily unavailable. Please retry.';
     }
-    return <SuperAdminCommandCenter data={data} error={error} period={period as SuperAdminDashboardPeriod} comparison={comparison as SuperAdminDashboardComparison} from={first(params.from)} to={first(params.to)} />;
+    try {
+      controlPlane = await getSuperAdminControlPlaneSummary();
+    } catch (caught) {
+      console.error('Super Admin control-plane summary failed', { errorName: caught instanceof Error ? caught.name : typeof caught });
+      controlPlaneError = 'Control-plane summary unavailable.';
+    }
+    return <SuperAdminCommandCenter data={data} error={error} controlPlane={controlPlane} controlPlaneError={controlPlaneError} period={period as SuperAdminDashboardPeriod} comparison={comparison as SuperAdminDashboardComparison} from={first(params.from)} to={first(params.to)} />;
   }
 
   const canViewAggregateDashboard = roles.some((role) => hasRRAPermission(role, "reports.aggregate.read"));

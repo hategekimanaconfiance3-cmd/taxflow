@@ -1,5 +1,5 @@
 import { requireRRAOperationalPermission } from "@/lib/auth-guard";
-import { getAllTickets, getSupportAssignees } from "@/lib/actions/admin-support-ticket.action";
+import { getAdminTicket, getAllTickets, getSupportAssignees } from "@/lib/actions/admin-support-ticket.action";
 import { AdminSupportTicketList } from "@/components/admin/support/admin-support-ticket-list";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -7,15 +7,17 @@ import { getTicketStats } from "@/lib/actions/admin-support-ticket.action";
 import { hasOperationalRRAPermission } from "@/lib/rra-rbac";
 import { HelpCircle } from "lucide-react";
 
-export default async function AdminSupportPage({ searchParams }: { searchParams: Promise<{ tin?: string }> }) {
+export default async function AdminSupportPage({ searchParams }: { searchParams: Promise<{ tin?: string; ticket?: string }> }) {
   const { staff } = await requireRRAOperationalPermission("support.read");
   const canManage = hasOperationalRRAPermission(staff.clearanceRoles, "support.manage");
   const params = await searchParams;
   const tin = params.tin?.trim();
-  const [tickets, assignees, stats] = await Promise.all([
+  const ticketId = params.ticket?.trim();
+  const [tickets, assignees, stats, initialTicket] = await Promise.all([
     getAllTickets(undefined, tin),
     canManage ? getSupportAssignees() : Promise.resolve([]),
     getTicketStats(),
+    ticketId && ticketId.length <= 100 ? getAdminTicket(ticketId).catch(() => null) : Promise.resolve(null),
   ]);
 
   return (
@@ -32,7 +34,7 @@ export default async function AdminSupportPage({ searchParams }: { searchParams:
         <Badge variant="secondary">{stats.total} total</Badge>
       </div>
       <Card><CardContent className="flex items-center gap-2 py-3 text-xs text-muted-foreground"><HelpCircle className="h-4 w-4 text-violet-500" />Ticket changes and replies are recorded with an audit trail.</CardContent></Card>
-      <AdminSupportTicketList tickets={tickets} assignees={assignees} canManage={canManage} />
+      <AdminSupportTicketList tickets={tickets} assignees={assignees} canManage={canManage} initialTicket={initialTicket} />
     </div>
   );
 }

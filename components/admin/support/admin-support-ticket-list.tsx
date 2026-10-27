@@ -28,9 +28,9 @@ const PRIORITY_COLORS: Record<string, string> = {
   urgent: "bg-red-100 text-red-700",
 };
 
-export function AdminSupportTicketList({ tickets, assignees, canManage }: { tickets: TicketRow[]; assignees: Assignee[]; canManage: boolean }) {
+export function AdminSupportTicketList({ tickets, assignees, canManage, initialTicket = null }: { tickets: TicketRow[]; assignees: Assignee[]; canManage: boolean; initialTicket?: TicketDetail | null }) {
   const router = useRouter();
-  const [selectedTicket, setSelectedTicket] = useState<TicketDetail | null>(null);
+  const [selectedTicket, setSelectedTicket] = useState<TicketDetail | null>(initialTicket);
   const [reply, setReply] = useState("");
   const [resolution, setResolution] = useState("");
   const [error, setError] = useState<string | null>(null);

@@ -4,7 +4,7 @@ import { and, asc, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { ilike, or } from "drizzle-orm";
 import { z } from "zod";
 import db from "@/db/drizzle";
-import { aiFinding, product, productionBatch, rraCase, stock, stockMovement, transaction, user } from "@/db/schema";
+import { aiFinding, auditLog, product, productionBatch, rraCase, rraStaff, session, stock, stockMovement, supportTicket, transaction, user } from "@/db/schema";
 import { getDashboardOverview } from "@/lib/actions/admin-dashboard.action";
 import { requireRRASession } from "@/lib/auth-guard";
 import { parseSuperAdminDashboardFilters, resolveSuperAdminComparisonRange, resolveSuperAdminDashboardRange } from "@/lib/super-admin-command-center";
@@ -132,6 +132,26 @@ export async function getSuperAdminCommandCenter(input: unknown) {
   }
 }
 
+export async function getSuperAdminControlPlaneSummary() {
+  await requireRRASession("super_admin");
+  const now = new Date();
+  const recentCutoff = new Date(now.getTime() - 30 * 24 * 60 * 60_000);
+  const [staffCounts, currentSessions, roleChanges] = await Promise.all([
+    db.select({ total: sql<number>`COUNT(*)::int`, active: sql<number>`COUNT(*) FILTER (WHERE ${rraStaff.isActive})::int` }).from(rraStaff),
+    db.select({ count: sql<number>`COUNT(*)::int` }).from(session)
+      .innerJoin(rraStaff, eq(rraStaff.userId, session.userId))
+      .where(and(eq(rraStaff.isActive, true), gte(session.expiresAt, now))),
+    db.select({ count: sql<number>`COUNT(*)::int` }).from(auditLog)
+      .where(and(eq(auditLog.action, "STAFF_ROLES_UPDATED"), gte(auditLog.createdAt, recentCutoff))),
+  ]);
+  return {
+    administrators: Number(staffCounts[0]?.total ?? 0),
+    activeAdministrators: Number(staffCounts[0]?.active ?? 0),
+    currentStaffSessions: Number(currentSessions[0]?.count ?? 0),
+    roleChangesLast30Days: Number(roleChanges[0]?.count ?? 0),
+  };
+}
+
 function logCommandCenterFailure(operation: string, error: unknown) {
   const candidate = error && typeof error === "object" ? error as { code?: unknown; cause?: { code?: unknown } } : null;
   const code = candidate?.code ?? candidate?.cause?.code;
@@ -169,12 +189,21 @@ export async function searchSuperAdminCommand(input: unknown) {
         .leftJoin(user, eq(aiFinding.businessId, user.id)).where(or(ilike(aiFinding.id, query), ilike(aiFinding.findingType, query), ilike(aiFinding.explanation, query))).orderBy(desc(aiFinding.createdAt)).limit(5),
       db.select({ id: rraCase.id, title: rraCase.title, status: rraCase.status, business: user.businessName }).from(rraCase)
         .innerJoin(user, eq(rraCase.traderId, user.id)).where(or(ilike(rraCase.id, query), ilike(rraCase.title, query), ilike(user.businessName, query))).orderBy(desc(rraCase.updatedAt)).limit(5),
+      db.select({ id: rraStaff.id, staffId: rraStaff.staffId, name: user.name, email: user.email, role: rraStaff.clearanceLevel, isActive: rraStaff.isActive }).from(rraStaff)
+        .innerJoin(user, eq(rraStaff.userId, user.id)).where(or(ilike(rraStaff.staffId, query), ilike(user.name, query), ilike(user.email, query))).orderBy(asc(rraStaff.staffId)).limit(5),
+      db.select({ id: supportTicket.id, subject: supportTicket.subject, status: supportTicket.status, trader: user.businessName }).from(supportTicket)
+        .innerJoin(user, eq(supportTicket.traderId, user.id)).where(or(ilike(supportTicket.id, query), ilike(supportTicket.subject, query), ilike(user.businessName, query))).orderBy(desc(supportTicket.updatedAt)).limit(5),
+      db.select({ id: auditLog.id, action: auditLog.action, targetType: auditLog.targetType, targetId: auditLog.targetId }).from(auditLog)
+        .where(or(ilike(auditLog.id, query), ilike(auditLog.action, query), ilike(auditLog.targetId, query))).orderBy(desc(auditLog.createdAt)).limit(5),
     ] as const);
     const businesses = readRows("business directory", settled[0]);
     const productsFound = readRows("products", settled[1]);
     const transactionsFound = readRows("transactions", settled[2]);
     const findings = readRows("risk signals", settled[3]);
     const cases = readRows("investigations", settled[4]);
+    const admins = readRows("administrators", settled[5]);
+    const tickets = readRows("support tickets", settled[6]);
+    const auditEvents = readRows("audit events", settled[7]);
 
     return {
       results: [
@@ -183,6 +212,9 @@ export async function searchSuperAdminCommand(input: unknown) {
         ...transactionsFound.map((row) => ({ id: row.id, title: row.id, detail: (row.business ?? "Business") + " · " + row.item + " · " + row.status, kind: "Transaction", href: "/admin/transactions" })),
         ...findings.map((row) => ({ id: row.id, title: row.type.replaceAll("_", " "), detail: row.severity + " · " + (row.business ?? "System"), kind: "Risk signal", href: "/admin/analytics" })),
         ...cases.map((row) => ({ id: row.id, title: row.title, detail: (row.business ?? "Business") + " · " + row.status, kind: "Investigation", href: "/admin/cases" })),
+        ...admins.map((row) => ({ id: row.id, title: row.name, detail: row.staffId + " · " + row.role + " · " + (row.isActive ? "active" : "inactive") + " · " + row.email, kind: "Administrator", href: "/admin/settings#staff-management" })),
+        ...tickets.map((row) => ({ id: row.id, title: row.subject, detail: (row.trader ?? "Trader") + " · " + row.status, kind: "Support ticket", href: "/admin/support?ticket=" + encodeURIComponent(row.id) })),
+        ...auditEvents.map((row) => ({ id: row.id, title: row.action.replaceAll("_", " "), detail: (row.targetType ?? "Audit event") + (row.targetId ? " · " + row.targetId : ""), kind: "Audit", href: "/admin/audit" })),
       ],
       unavailableSources,
     };

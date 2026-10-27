@@ -29,6 +29,7 @@ import {
     Cpu,
     Brain,
     Layers,
+    ShieldCheck,
 } from "lucide-react";
 import type { RRARole } from "@/lib/auth-guard";
 import { getOperationalRRARolesWithAnyPermission } from "@/lib/rra-rbac";
@@ -124,6 +125,14 @@ const TAXPAYER_SEARCH_ROLES = getOperationalRRARolesWithAnyPermission(["taxpayer
 // ---------------------------------------------------------------------------
 
 export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
+    {
+        label: "Super Admin Control Plane",
+        items: [
+            { label: "Admin Management", href: "/admin/settings#staff-management", icon: Users, allowedRoles: ["super_admin"] },
+            { label: "Security Center", href: "/admin/security", icon: ShieldCheck, allowedRoles: ["super_admin"] },
+            { label: "Audit Explorer", href: "/admin/audit", icon: ScrollText, allowedRoles: ["super_admin"] },
+        ],
+    },
     // ── Overview ────────────────────────────────────────────
     {
         items: [
