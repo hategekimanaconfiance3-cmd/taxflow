@@ -9,7 +9,7 @@ export async function getSuperAdminTraderLifecycle(now = new Date()) {
   await requireRRASession("super_admin");
   const pendingCutoff = new Date(now.getTime() - 7 * 24 * 60 * 60_000);
   const thirtyDayCutoff = new Date(now.getTime() - 30 * 24 * 60 * 60_000);
-  const approvedEvents = db.select({ traderId: auditLog.targetId, approvedAt: sql<Date>`MIN(${auditLog.createdAt})` })
+  const approvedEvents = db.select({ traderId: auditLog.targetId, approvedAt: sql<Date>`MIN(${auditLog.createdAt})`.as("approved_at") })
     .from(auditLog)
     .where(and(eq(auditLog.action, "CLEARANCE_UPDATED"), eq(auditLog.targetType, "user"), sql`${auditLog.afterState}->>'clearanceStatus' = 'approved'`))
     .groupBy(auditLog.targetId).as("recorded_first_approvals");
