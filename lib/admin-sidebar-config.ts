@@ -129,6 +129,10 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
         label: "Super Admin Control Plane",
         items: [
             { label: "Admin Management", href: "/admin/settings#staff-management", icon: Users, allowedRoles: ["super_admin"] },
+            { label: "Staff Activity", href: "/admin/staff-activity", icon: Activity, allowedRoles: ["super_admin"] },
+            { label: "Trader Lifecycle", href: "/admin/trader-lifecycle", icon: UserSearch, allowedRoles: ["super_admin"] },
+            { label: "KPI Targets", href: "/admin/reports/kpi-targets", icon: Target, allowedRoles: ["super_admin"] },
+            { label: "Platform Health", href: "/admin/platform-health", icon: Activity, allowedRoles: ["super_admin"] },
             { label: "Security Center", href: "/admin/security", icon: ShieldCheck, allowedRoles: ["super_admin"] },
             { label: "Audit Explorer", href: "/admin/audit", icon: ScrollText, allowedRoles: ["super_admin"] },
         ],

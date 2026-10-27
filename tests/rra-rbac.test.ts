@@ -144,7 +144,7 @@ test("Support Tickets navigation is visible exactly to roles with operational su
 test("Super Admin control-plane links are not exposed to other roles", () => {
     const superAdminGroups = getAdminSidebarGroups(["super_admin"]);
     const controlPlane = superAdminGroups.find((group) => group.label === "Super Admin Control Plane");
-    assert.deepEqual(controlPlane?.items.map((item) => item.href), ["/admin/settings#staff-management", "/admin/security", "/admin/audit"]);
+    assert.deepEqual(controlPlane?.items.map((item) => item.href), ["/admin/settings#staff-management", "/admin/staff-activity", "/admin/trader-lifecycle", "/admin/reports/kpi-targets", "/admin/platform-health", "/admin/security", "/admin/audit"]);
     for (const role of RRA_ROLE_VALUES) {
         if (role === "super_admin") continue;
         assert.equal(getAdminSidebarGroups([role]).some((group) => group.label === "Super Admin Control Plane"), false, `${role} must not see the Super Admin control plane`);

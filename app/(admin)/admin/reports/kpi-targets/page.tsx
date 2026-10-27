@@ -2,9 +2,11 @@ import { requireRRASession } from '@/lib/auth-guard';
 import { getKPIProgress } from '@/lib/actions/admin-kpi-targets.action';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Target } from 'lucide-react';
 import { formatRWF } from '@/components/dashboard/stat-card/stat-card';
 import { cn } from '@/lib/utils';
+import { KpiTargetEditor } from '@/components/admin/kpi-target-editor';
+import type { KPIPeriod } from '@/lib/actions/admin-kpi-targets.action';
+import { hasRRARole } from '@/lib/auth-guard';
 
 const STATUS_CONFIG: Record<string, { label: string; cls: string }> = {
   on_track: { label: 'On Track', cls: 'bg-emerald-100 text-emerald-700' },
@@ -13,12 +15,15 @@ const STATUS_CONFIG: Record<string, { label: string; cls: string }> = {
   no_target: { label: 'No Target', cls: 'bg-zinc-100 text-zinc-600' },
 };
 
-export default async function AdminKpiTargetsPage() {
-  await requireRRASession("compliance_officer", "reporting_officer", "tax_compliance_officer", "director_executive");
+export default async function AdminKpiTargetsPage({ searchParams }: { searchParams: Promise<{ period?: string }> }) {
+  const { staff } = await requireRRASession("compliance_officer", "reporting_officer", "tax_compliance_officer", "director_executive");
+  const params = await searchParams;
+  const period: KPIPeriod = params.period === "quarterly" || params.period === "annual" ? params.period : "monthly";
+  const canSetTargets = hasRRARole(staff, "super_admin");
 
   let report: Awaited<ReturnType<typeof getKPIProgress>> | null = null;
   try {
-    report = await getKPIProgress();
+    report = await getKPIProgress(period);
   } catch {
     // Insufficient permissions
   }
@@ -28,9 +33,15 @@ export default async function AdminKpiTargetsPage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">KPI Targets</h1>
         <p className="text-muted-foreground text-sm mt-1">
-          Track progress against RRA performance targets for revenue collection, compliance, and operations.
+          Track confirmed payment, registration, compliance, and operations metrics against RRA targets.
         </p>
       </div>
+
+      <form method="get" className="flex flex-wrap items-end gap-3 rounded-lg border bg-card p-4">
+        <label className="grid gap-1 text-xs text-muted-foreground">Reporting period<select name="period" defaultValue={period} className="h-9 rounded-md border bg-background px-3 text-sm text-foreground"><option value="monthly">Monthly</option><option value="quarterly">Quarterly</option><option value="annual">Annual</option></select></label>
+        <button type="submit" className="h-9 rounded-md border px-3 text-sm font-medium hover:bg-accent">Apply</button>
+        <p className="text-xs text-muted-foreground">{report?.periodLabel ?? "Selected period"}. Confirmed payments, new registrations, and transaction value use this date range. Compliance and dispute resolution are current system-wide snapshots.</p>
+      </form>
 
       {!report ? (
         <Card>
@@ -100,6 +111,7 @@ export default async function AdminKpiTargetsPage() {
                       </p>
                     </div>
                   )}
+                  {canSetTargets && <KpiTargetEditor metricKey={metric.key} metricLabel={metric.label} unit={metric.unit} targetValue={metric.targetValue} period={period} />}
                 </CardContent>
               </Card>
             );
