@@ -59,7 +59,7 @@ export const RRA_ROLE_PERMISSIONS: Record<RRARole | "super_admin", readonly RRAP
     super_admin: RRA_PERMISSIONS,
 };
 
-/** Compatibility for old route checks; super_admin is deliberately not an all-role bypass. */
+/** Compatibility for old route checks; the authenticated super_admin role grants all admin routes. */
 const LEGACY_GUARD_ALIASES: Partial<Record<RRAProposedRole, readonly string[]>> = {
     super_admin: ["super_admin"],
     tax_compliance_officer: ["compliance_officer"],
@@ -72,6 +72,7 @@ export function isRRARole(value: string): value is RRARole | "super_admin" {
 }
 
 export function isRRARoleAllowed(role: RRARole | "super_admin", allowedRoles: readonly string[]): boolean {
+    if (role === "super_admin") return true;
     if (allowedRoles.length === 0) return true;
     if (allowedRoles.includes(role)) return true;
     const aliases = LEGACY_GUARD_ALIASES[role as RRAProposedRole] ?? [];
@@ -82,9 +83,9 @@ export function hasRRAPermission(role: RRARole | "super_admin", permission: RRAP
     return RRA_ROLE_PERMISSIONS[role].includes(permission);
 }
 
-/** Operational taxpayer permissions require an operational role, not system administration alone. */
+/** Resolve operational access from the assigned permission map, including Super Admin's explicit full grant. */
 export function hasOperationalRRAPermission(roles: readonly RRARole[], permission: RRAPermission): boolean {
-    return roles.some((role) => role !== "super_admin" && hasRRAPermission(role, permission));
+    return roles.some((role) => hasRRAPermission(role, permission));
 }
 
 export function hasAnyOperationalRRAPermission(roles: readonly RRARole[], permissions: readonly RRAPermission[]): boolean {
@@ -92,7 +93,7 @@ export function hasAnyOperationalRRAPermission(roles: readonly RRARole[], permis
 }
 
 export function getOperationalRRARolesWithAnyPermission(permissions: readonly RRAPermission[]): RRARole[] {
-    return RRA_ROLE_VALUES.filter((role) => role !== "super_admin" && permissions.some((permission) => hasRRAPermission(role, permission)));
+    return RRA_ROLE_VALUES.filter((role) => permissions.some((permission) => hasRRAPermission(role, permission)));
 }
 
 export function getRRAProposedRoleLabel(role: string): string {

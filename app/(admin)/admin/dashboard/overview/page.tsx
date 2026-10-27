@@ -11,10 +11,33 @@ import type { PriorityAlert } from '@/components/admin/overview/priority-alerts'
 import { TinTaxpayerLookup } from '@/components/admin/tin-taxpayer-lookup';
 import { RoleWorkspace } from '@/components/admin/role-workspace';
 import { hasOperationalRRAPermission, hasRRAPermission } from '@/lib/rra-rbac';
+import { getSuperAdminCommandCenter } from '@/lib/actions/super-admin-command-center.action';
+import { SuperAdminCommandCenter } from '@/components/admin/super-admin-command-center';
+import type { SuperAdminDashboardComparison, SuperAdminDashboardPeriod } from '@/lib/super-admin-command-center';
 
-export default async function AdminOverviewPage() {
+const periods = ['today', '7d', '30d', '90d', 'custom'] as const;
+const comparisons = ['previous_period', 'previous_month', 'previous_year'] as const;
+
+export default async function AdminOverviewPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const { user, staff } = await requireRRASession();
   const roles = staff.clearanceRoles;
+  const params = await searchParams;
+  const first = (value: string | string[] | undefined) => Array.isArray(value) ? value[0] : value;
+  const period = periods.find((value) => value === first(params.period)) ?? '30d';
+  const comparison = comparisons.find((value) => value === first(params.comparison)) ?? 'previous_period';
+
+  if (roles.includes('super_admin')) {
+    let data: Awaited<ReturnType<typeof getSuperAdminCommandCenter>> | null = null;
+    let error: string | null = null;
+    try {
+      data = await getSuperAdminCommandCenter({ period, comparison, from: first(params.from), to: first(params.to) });
+    } catch (caught) {
+      console.error('Super Admin command center failed to load', { errorName: caught instanceof Error ? caught.name : typeof caught });
+      error = caught instanceof Error ? caught.message : 'Command center data is temporarily unavailable. Please retry.';
+    }
+    return <SuperAdminCommandCenter data={data} error={error} period={period as SuperAdminDashboardPeriod} comparison={comparison as SuperAdminDashboardComparison} from={first(params.from)} to={first(params.to)} />;
+  }
+
   const canViewAggregateDashboard = roles.some((role) => hasRRAPermission(role, "reports.aggregate.read"));
   const canSearchTaxpayers = hasOperationalRRAPermission(roles, "taxpayer.intelligence.search");
   const canViewTransactionDetails = hasOperationalRRAPermission(roles, "transaction.read");
