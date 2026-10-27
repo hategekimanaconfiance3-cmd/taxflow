@@ -4,7 +4,7 @@ import { useState, useTransition, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { Activity, Brain, Building2, Database, KeyRound, Search, ShieldAlert, ShieldCheck, Users, Warehouse } from "lucide-react";
+import { Activity, Building2, Database, KeyRound, Search, ShieldAlert, ShieldCheck, Users, Warehouse } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -89,10 +89,6 @@ function SuperAdminCommandSearch() {
   );
 }
 
-function openAssistant() {
-  document.dispatchEvent(new KeyboardEvent("keydown", { key: "i", ctrlKey: true, bubbles: true }));
-}
-
 export function SuperAdminCommandCenter({ data, error, period, comparison, from, to, controlPlane, controlPlaneError }: {
   data: DashboardData | null;
   error: string | null;
@@ -141,7 +137,6 @@ export function SuperAdminCommandCenter({ data, error, period, comparison, from,
               <label className="grid gap-1 text-xs text-muted-foreground">To<input name="to" type="date" defaultValue={to} className="h-9 rounded-md border bg-background px-2 text-sm text-foreground" /></label>
               <Button type="submit" variant="secondary">Apply</Button>
             </form>
-            <Button type="button" variant="outline" onClick={openAssistant}><Brain data-icon="inline-start" /> Ask TaxFlow Intelligence</Button>
           </div>
         </div>
       </section>
