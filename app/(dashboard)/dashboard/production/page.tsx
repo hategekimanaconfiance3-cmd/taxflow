@@ -1,0 +1,57 @@
+import { randomUUID } from 'node:crypto';
+import { ProductionForm } from '@/components/dashboard/production-form/production-form';
+import { ProductionRegister } from '@/components/dashboard/production-register/production-register';
+import { requireTraderSession } from '@/lib/auth-guard';
+import { listManufacturerProduction, listManufacturerProducts } from '@/lib/production-service';
+import { getSystemConfig } from '@/lib/actions/system-config.action';
+
+function logLoadFailure(operation: string, requestId: string, error: unknown): void {
+  if (process.env.NODE_ENV !== 'production') {
+    console.error(`[production:${operation}] requestId=${requestId}`, error);
+    return;
+  }
+  const errorName = error instanceof Error ? error.name : 'UnknownError';
+  const errorCode = typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : undefined;
+  console.error(`[production:${operation}]`, { requestId, errorName, errorCode });
+}
+
+export default async function ProductionPage() {
+  const session = await requireTraderSession(['manufacturer']);
+  const requestId = randomUUID();
+  const [productsResult, recordsResult, configResult] = await Promise.allSettled([
+    listManufacturerProducts(session.user.id),
+    listManufacturerProduction(session.user.id),
+    getSystemConfig(),
+  ]);
+
+  if (productsResult.status === 'rejected') logLoadFailure('products', requestId, productsResult.reason);
+  if (recordsResult.status === 'rejected') logLoadFailure('history', requestId, recordsResult.reason);
+  if (configResult.status === 'rejected') logLoadFailure('tax-config', requestId, configResult.reason);
+
+  const products = productsResult.status === 'fulfilled' ? productsResult.value : [];
+  const records = recordsResult.status === 'fulfilled' ? recordsResult.value : [];
+  const vatRate = configResult.status === 'fulfilled' ? configResult.value.vatRate : 0;
+  const hasLoadError = productsResult.status === 'rejected'
+    || recordsResult.status === 'rejected'
+    || configResult.status === 'rejected';
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight">Production</h1>
+        <p className="mt-1 text-sm text-muted-foreground">Record production runs and manage your product inventory.</p>
+      </div>
+
+      {hasLoadError && (
+        <div role="alert" className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          Some production information could not be loaded. Refresh the page or contact support with reference {requestId}.
+        </div>
+      )}
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <ProductionForm products={products} vatRate={vatRate} />
+        <ProductionRegister records={records} />
+      </div>
+    </div>
+  );
+}
