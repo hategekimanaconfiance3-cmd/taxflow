@@ -31,6 +31,7 @@ import {
     Cpu,
     Brain,
     Layers,
+    MessageSquare,
 } from "lucide-react";
 import type { RRARole } from "@/lib/auth-guard";
 
@@ -429,6 +430,12 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 label: "Notifications",
                 href: "/admin/notifications",
                 icon: Bell,
+                allowedRoles: ALL,
+            },
+            {
+                label: "Communications",
+                href: "/admin/communications",
+                icon: MessageSquare,
                 allowedRoles: ALL,
             },
             {

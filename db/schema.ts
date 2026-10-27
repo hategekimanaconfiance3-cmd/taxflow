@@ -902,6 +902,79 @@ export const staffBulletinRelations = relations(staffBulletin, ({ one }) => ({
 }));
 
 // ---------------------------------------------------------------------------
+// Private RRA communications (direct conversations and one-way broadcasts)
+// ---------------------------------------------------------------------------
+
+export const adminConversation = pgTable(
+  'admin_conversation',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    kind: text('kind').notNull(), // direct | broadcast
+    subject: text('subject').notNull(),
+    priority: text('priority').notNull().default('normal'), // low | normal | high
+    createdBy: text('created_by').notNull().references(() => user.id, { onDelete: 'restrict' }),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('admin_conversation_created_idx').on(table.createdAt),
+    check('admin_conversation_kind_check', sql`${table.kind} IN ('direct', 'broadcast')`),
+    check('admin_conversation_priority_check', sql`${table.priority} IN ('low', 'normal', 'high')`),
+    check('admin_conversation_subject_length_check', sql`length(${table.subject}) BETWEEN 1 AND 160`),
+  ],
+);
+
+export const adminConversationParticipant = pgTable(
+  'admin_conversation_participant',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    conversationId: text('conversation_id').notNull().references(() => adminConversation.id, { onDelete: 'cascade' }),
+    userId: text('user_id').notNull().references(() => user.id, { onDelete: 'restrict' }),
+    participantType: text('participant_type').notNull(), // sender | recipient
+    joinedAt: timestamp('joined_at').notNull().defaultNow(),
+    lastReadAt: timestamp('last_read_at'),
+  },
+  (table) => [
+    uniqueIndex('admin_conversation_participant_unique').on(table.conversationId, table.userId),
+    index('admin_conversation_participant_user_idx').on(table.userId, table.joinedAt),
+    check('admin_conversation_participant_type_check', sql`${table.participantType} IN ('sender', 'recipient')`),
+  ],
+);
+
+export const adminCommunicationMessage = pgTable(
+  'admin_communication_message',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    conversationId: text('conversation_id').notNull().references(() => adminConversation.id, { onDelete: 'cascade' }),
+    senderId: text('sender_id').notNull().references(() => user.id, { onDelete: 'restrict' }),
+    body: text('body').notNull(),
+    idempotencyKey: text('idempotency_key').unique(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('admin_communication_message_conversation_idx').on(table.conversationId, table.createdAt),
+    index('admin_communication_message_sender_idx').on(table.senderId, table.createdAt),
+    check('admin_communication_message_body_length_check', sql`length(${table.body}) BETWEEN 1 AND 10000`),
+  ],
+);
+
+export const adminConversationRelations = relations(adminConversation, ({ one, many }) => ({
+  creator: one(user, { fields: [adminConversation.createdBy], references: [user.id] }),
+  participants: many(adminConversationParticipant),
+  messages: many(adminCommunicationMessage),
+}));
+
+export const adminConversationParticipantRelations = relations(adminConversationParticipant, ({ one }) => ({
+  conversation: one(adminConversation, { fields: [adminConversationParticipant.conversationId], references: [adminConversation.id] }),
+  user: one(user, { fields: [adminConversationParticipant.userId], references: [user.id] }),
+}));
+
+export const adminCommunicationMessageRelations = relations(adminCommunicationMessage, ({ one }) => ({
+  conversation: one(adminConversation, { fields: [adminCommunicationMessage.conversationId], references: [adminConversation.id] }),
+  sender: one(user, { fields: [adminCommunicationMessage.senderId], references: [user.id] }),
+}));
+
+// ---------------------------------------------------------------------------
 // Support Tickets — taxpayer service requests (Weakness 6)
 // ---------------------------------------------------------------------------
 

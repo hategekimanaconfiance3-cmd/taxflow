@@ -92,6 +92,17 @@ test("super_admin has every defined permission except taxpayer intelligence sear
     assert.equal(hasRRAPermission("super_admin", "taxpayer.intelligence.search"), false);
 });
 
+test("communications send is Super Admin only; admin inbox and direct replies are role-scoped", () => {
+    assert.equal(hasRRAPermission("super_admin", "communications.send"), true);
+    assert.equal(hasRRAPermission("super_admin", "communications.read"), true);
+    assert.equal(hasRRAPermission("super_admin", "communications.reply"), true);
+    for (const role of RRA_ROLE_VALUES.filter((role) => role !== "super_admin")) {
+        assert.equal(hasRRAPermission(role, "communications.send"), false, `${role} cannot initiate admin communications`);
+        assert.equal(hasRRAPermission(role, "communications.read"), true, `${role} can read only participant conversations`);
+        assert.equal(hasRRAPermission(role, "communications.reply"), true, `${role} can reply only in direct conversations they joined`);
+    }
+});
+
 // ---------------------------------------------------------------------------
 // Per-role permission matrix — positive grants
 // ---------------------------------------------------------------------------
