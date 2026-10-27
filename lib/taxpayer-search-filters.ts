@@ -21,6 +21,27 @@ export interface TaxpayerSearchFilters {
     dateTo?: string;   // ISO date "YYYY-MM-DD"
 }
 
+export interface TaxpayerSearchRow {
+    id: string;
+    name: string;
+    businessName: string | null;
+    tinNumber: string | null;
+    role: string | null;
+    businessType: string | null;
+    clearanceStatus: string | null;
+    email: string;
+    phoneNumber: string | null;
+    createdAt: Date;
+}
+
+export interface TaxpayerSearchResult {
+    rows: TaxpayerSearchRow[];
+    totalRows: number;
+    totalPages: number;
+    page: number;
+    pageSize: number;
+}
+
 // ---------------------------------------------------------------------------
 // validateSearchFilters — validate date/range inputs before querying
 // ---------------------------------------------------------------------------

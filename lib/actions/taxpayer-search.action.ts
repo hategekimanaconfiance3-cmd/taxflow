@@ -7,36 +7,10 @@ import { requireRRAPermission } from "@/lib/auth-guard";
 import { logAudit } from "@/lib/audit";
 import {
     type TaxpayerSearchFilters,
+    type TaxpayerSearchResult,
+    type TaxpayerSearchRow,
     validateSearchFilters,
 } from "@/lib/taxpayer-search-filters";
-
-// Re-export types and validation for client-side use
-export { type TaxpayerSearchFilters, validateSearchFilters } from "@/lib/taxpayer-search-filters";
-
-// ---------------------------------------------------------------------------
-// Result types
-// ---------------------------------------------------------------------------
-
-export interface TaxpayerSearchRow {
-    id: string;
-    name: string;
-    businessName: string | null;
-    tinNumber: string | null;
-    role: string | null;
-    businessType: string | null;
-    clearanceStatus: string | null;
-    email: string;
-    phoneNumber: string | null;
-    createdAt: Date;
-}
-
-export interface TaxpayerSearchResult {
-    rows: TaxpayerSearchRow[];
-    totalRows: number;
-    totalPages: number;
-    page: number;
-    pageSize: number;
-}
 
 const PAGE_SIZE = 20;
 

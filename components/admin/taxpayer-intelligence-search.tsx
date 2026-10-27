@@ -31,13 +31,11 @@ import {
 } from "@/components/ui/table";
 import {
     type TaxpayerSearchFilters,
-    validateSearchFilters,
-} from "@/lib/taxpayer-search-filters";
-import {
-    searchTaxpayers,
     type TaxpayerSearchResult,
     type TaxpayerSearchRow,
-} from "@/lib/actions/taxpayer-search.action";
+    validateSearchFilters,
+} from "@/lib/taxpayer-search-filters";
+import { searchTaxpayers } from "@/lib/actions/taxpayer-search.action";
 
 // ---------------------------------------------------------------------------
 // Constants
