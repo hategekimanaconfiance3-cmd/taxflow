@@ -164,6 +164,32 @@ export async function requireRRAPermission(permission: RRAPermission) {
   return rraSession;
 }
 
+/** Request-handler authorization that returns an HTTP decision instead of redirecting. */
+export async function authorizeRRAPermissionForRequest(permission: RRAPermission, requestHeaders: Headers): Promise<
+  | { authorized: true; userId: string; clearanceRoles: RRARole[] }
+  | { authorized: false; status: 401 | 403 }
+> {
+  const session = await auth.api.getSession({ headers: requestHeaders });
+  if (!session?.user || session.user.isActive === false) return { authorized: false, status: 401 };
+
+  const [staff] = await db.select().from(rraStaff).where(eq(rraStaff.userId, session.user.id)).limit(1);
+  if (!staff?.isActive) return { authorized: false, status: 401 };
+  const assignedRows = await db.select({ role: rraStaffRole.role })
+    .from(rraStaffRole)
+    .where(eq(rraStaffRole.staffRecordId, staff.id));
+  const assignedRoles = assignedRows.length ? assignedRows.map((row) => row.role) : [staff.clearanceLevel];
+  const clearanceRoles = [...new Set(assignedRoles.filter(isRRARole))];
+  if (clearanceRoles.length === 0 || !clearanceRoles.some((role) => hasRRAPermission(role, permission))) {
+    await logAccessDenial(session.user.id, {
+      action: clearanceRoles.length === 0 ? 'ACCESS_DENIED_UNKNOWN_ROLE' : 'ACCESS_DENIED_MISSING_PERMISSION',
+      targetType: clearanceRoles.length === 0 ? 'rra_staff' : 'rra_permission',
+      metadata: { clearanceRoles, requiredPermission: permission },
+    });
+    return { authorized: false, status: 403 };
+  }
+  return { authorized: true, userId: session.user.id, clearanceRoles };
+}
+
 export function hasRRARole(staff: { clearanceLevel: string; clearanceRoles?: RRARole[] }, role: RRARole): boolean {
   return staff.clearanceRoles?.includes(role) ?? staff.clearanceLevel === role;
 }

@@ -1074,6 +1074,7 @@ export const productionBatch = pgTable(
       .references(() => product.id),
     batchReference: text('batch_reference').notNull().unique(), // e.g. BATCH-SOAP-2026-000123
     declaredQuantity: real('declared_quantity').notNull(),
+    plannedQuantity: real('planned_quantity'),
     unitPrice: integer('unit_price').notNull().default(0),
     vatRateBasisPoints: integer('vat_rate_basis_points').notNull().default(0),
     idempotencyKey: text('idempotency_key'),
@@ -1095,6 +1096,77 @@ export const productionBatch = pgTable(
     index('prod_batch_status_idx').on(table.status),
     uniqueIndex('prod_batch_ref_uniq').on(table.batchReference),
     uniqueIndex('prod_batch_idempotency_key_uniq').on(table.idempotencyKey),
+  ],
+);
+
+// Confidential manufacturer formulation data. Recipe versions and their
+// material lines are immutable so later corrections cannot rewrite history.
+export const manufacturingMaterial = pgTable(
+  'manufacturing_material',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    materialCode: text('material_code').notNull(),
+    confidentialName: text('confidential_name').notNull(),
+    unit: text('unit').notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('manufacturing_material_owner_code_uniq').on(table.manufacturerId, table.materialCode),
+    index('manufacturing_material_owner_idx').on(table.manufacturerId),
+  ],
+);
+
+export const manufacturingRecipe = pgTable(
+  'manufacturing_recipe',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    productId: text('product_id').notNull().references(() => product.id),
+    version: integer('version').notNull(),
+    batchOutputQuantity: real('batch_output_quantity').notNull(),
+    materialTolerancePercent: real('material_tolerance_percent').notNull().default(5),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('manufacturing_recipe_product_version_uniq').on(table.manufacturerId, table.productId, table.version),
+    index('manufacturing_recipe_owner_product_idx').on(table.manufacturerId, table.productId),
+    check('manufacturing_recipe_output_check', sql`${table.batchOutputQuantity} > 0`),
+    check('manufacturing_recipe_tolerance_check', sql`${table.materialTolerancePercent} >= 0 AND ${table.materialTolerancePercent} <= 100`),
+  ],
+);
+
+export const manufacturingRecipeMaterial = pgTable(
+  'manufacturing_recipe_material',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    recipeId: text('recipe_id').notNull().references(() => manufacturingRecipe.id),
+    materialId: text('material_id').notNull().references(() => manufacturingMaterial.id),
+    plannedQuantity: real('planned_quantity').notNull(),
+  },
+  (table) => [
+    uniqueIndex('manufacturing_recipe_material_uniq').on(table.recipeId, table.materialId),
+    check('manufacturing_recipe_material_quantity_check', sql`${table.plannedQuantity} > 0`),
+  ],
+);
+
+export const productionBatchMaterial = pgTable(
+  'production_batch_material',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    batchId: text('batch_id').notNull().references(() => productionBatch.id),
+    recipeId: text('recipe_id').notNull().references(() => manufacturingRecipe.id),
+    recipeMaterialId: text('recipe_material_id').notNull().references(() => manufacturingRecipeMaterial.id),
+    materialId: text('material_id').notNull().references(() => manufacturingMaterial.id),
+    plannedQuantity: real('planned_quantity').notNull(),
+    actualQuantity: real('actual_quantity').notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('production_batch_material_uniq').on(table.batchId, table.materialId),
+    index('production_batch_material_batch_idx').on(table.batchId),
+    check('production_batch_material_planned_check', sql`${table.plannedQuantity} > 0`),
+    check('production_batch_material_actual_check', sql`${table.actualQuantity} >= 0`),
   ],
 );
 

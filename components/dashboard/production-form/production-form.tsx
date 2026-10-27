@@ -24,8 +24,16 @@ interface Product {
     categoryCode: string | null;
 }
 
+interface Recipe {
+    id: string;
+    productId: string;
+    batchOutputQuantity: number;
+    materials: Array<{ materialId: string; materialCode: string; materialName: string; unit: string; plannedQuantity: number }>;
+}
+
 interface ProductionFormProps {
     products: Product[];
+    recipes: Recipe[];
     vatRate: number;
 }
 
@@ -34,7 +42,7 @@ interface ApiError {
     requestId?: string;
 }
 
-export function ProductionForm({ products, vatRate }: ProductionFormProps) {
+export function ProductionForm({ products, recipes, vatRate }: ProductionFormProps) {
     const router = useRouter();
     const [isPending, startTransition] = useTransition();
     const [availableProducts, setAvailableProducts] = useState(products);
@@ -43,6 +51,9 @@ export function ProductionForm({ products, vatRate }: ProductionFormProps) {
     const [newProductUnit, setNewProductUnit] = useState("box");
     const [newProductCategory, setNewProductCategory] = useState("");
     const [selectedProductId, setSelectedProductId] = useState("");
+    const [selectedRecipeId, setSelectedRecipeId] = useState("");
+    const [plannedOutputQuantity, setPlannedOutputQuantity] = useState("");
+    const [actualMaterialUsage, setActualMaterialUsage] = useState<Record<string, string>>({});
     const [quantity, setQuantity] = useState("");
     const [unitPrice, setUnitPrice] = useState("");
     const [message, setMessage] = useState<{ text: string; type: "success" | "error" } | null>(null);
@@ -100,8 +111,16 @@ export function ProductionForm({ products, vatRate }: ProductionFormProps) {
         const parsed = productionEntrySchema.safeParse({
             productId: selectedProductId,
             quantity: qty,
+            ...(selectedRecipeId ? { plannedOutputQuantity: Number(plannedOutputQuantity) } : {}),
             unitPrice: price,
             idempotencyKey: idempotencyKey.current ?? crypto.randomUUID(),
+            ...(selectedRecipeId ? {
+                recipeId: selectedRecipeId,
+                materialUsage: selectedRecipe?.materials.map((material) => ({
+                    materialId: material.materialId,
+                    actualQuantity: Number(actualMaterialUsage[material.materialId]),
+                })),
+            } : {}),
         });
         if (!parsed.success) {
             setMessage({ text: parsed.error.issues[0]?.message ?? "Enter valid production details.", type: "error" });
@@ -137,6 +156,8 @@ export function ProductionForm({ products, vatRate }: ProductionFormProps) {
             }
         });
     }
+
+    const selectedRecipe = recipes.find((recipe) => recipe.id === selectedRecipeId);
 
     return (
         <Card>
@@ -194,7 +215,7 @@ export function ProductionForm({ products, vatRate }: ProductionFormProps) {
                     <div className="space-y-3">
                         <div className="space-y-1.5">
                             <Label className="text-xs">Product Name</Label>
-                            <Select value={selectedProductId} onValueChange={(value) => { setSelectedProductId(value); resetSubmissionKey(); }}>
+                            <Select value={selectedProductId} onValueChange={(value) => { setSelectedProductId(value); setSelectedRecipeId(""); setActualMaterialUsage({}); resetSubmissionKey(); }}>
                                 <SelectTrigger><SelectValue placeholder="Select your registered product" /></SelectTrigger>
                                 <SelectContent>
                                     {availableProducts.map((product) => (
@@ -211,6 +232,23 @@ export function ProductionForm({ products, vatRate }: ProductionFormProps) {
                             <Label htmlFor="production-unit-price" className="text-xs">Price Per Unit (RWF)</Label>
                             <Input id="production-unit-price" type="number" placeholder="7000" value={unitPrice} onChange={(event) => { setUnitPrice(event.target.value); resetSubmissionKey(); }} min="0" step="1" />
                         </div>
+                        {recipes.some((recipe) => recipe.productId === selectedProductId) && <div className="space-y-2 rounded-md border p-3 md:col-span-2">
+                            <Label htmlFor="production-recipe" className="text-xs">Recipe version (optional)</Label>
+                            <select id="production-recipe" className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={selectedRecipeId} onChange={(event) => { setSelectedRecipeId(event.target.value); setPlannedOutputQuantity(""); setActualMaterialUsage({}); resetSubmissionKey(); }}>
+                                <option value="">Record output only</option>
+                                {recipes.filter((recipe) => recipe.productId === selectedProductId).map((recipe) => <option key={recipe.id} value={recipe.id}>Version {recipe.id.slice(0, 8)} · expected input per {recipe.batchOutputQuantity.toLocaleString()} output units</option>)}
+                            </select>
+                            {selectedRecipe && <div className="space-y-1.5"><Label htmlFor="planned-output" className="text-xs">Planned output quantity ({availableProducts.find((item) => item.id === selectedProductId)?.unit})</Label><Input id="planned-output" type="number" min="0.0001" step="any" value={plannedOutputQuantity} onChange={(event) => { setPlannedOutputQuantity(event.target.value); resetSubmissionKey(); }} /></div>}
+                            {selectedRecipe?.materials.map((material) => {
+                                const plannedOutput = Number(plannedOutputQuantity) || 0;
+                                const expected = plannedOutput > 0 ? material.plannedQuantity * plannedOutput / selectedRecipe.batchOutputQuantity : material.plannedQuantity;
+                                return <div key={material.materialId} className="grid grid-cols-[1fr_8rem] items-center gap-2">
+                                    <Label htmlFor={`actual-${material.materialId}`} className="text-xs">{material.materialCode} · {material.materialName} ({material.unit}); planned {expected.toLocaleString()}</Label>
+                                    <Input id={`actual-${material.materialId}`} type="number" min="0" step="any" placeholder="Actual" value={actualMaterialUsage[material.materialId] ?? ""} onChange={(event) => { setActualMaterialUsage((current) => ({ ...current, [material.materialId]: event.target.value })); resetSubmissionKey(); }} />
+                                </div>;
+                            })}
+                            {selectedRecipe && <p className="text-xs text-muted-foreground">The actual quantities are stored with the recipe version. RRA production views show protected material codes.</p>}
+                        </div>}
                     </div>
 
                     <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
@@ -227,7 +265,7 @@ export function ProductionForm({ products, vatRate }: ProductionFormProps) {
                     </div>
                 </div>
 
-                <Button onClick={handleRecordProduction} disabled={isPending || !selectedProductId || qty <= 0 || !Number.isInteger(price) || !Number.isFinite(qty * price)} className="gap-2">
+                <Button onClick={handleRecordProduction} disabled={isPending || !selectedProductId || qty <= 0 || !Number.isInteger(price) || !Number.isFinite(qty * price) || Boolean(selectedRecipe && (!Number.isFinite(Number(plannedOutputQuantity)) || Number(plannedOutputQuantity) <= 0 || selectedRecipe.materials.some((material) => actualMaterialUsage[material.materialId] === undefined || actualMaterialUsage[material.materialId] === "")))} className="gap-2">
                     {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                     Save Production
                 </Button>

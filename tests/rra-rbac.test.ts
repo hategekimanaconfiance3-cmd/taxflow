@@ -78,18 +78,19 @@ test("isRRARole returns false for trader roles and unknown strings", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Super Admin is highly privileged but does not receive taxpayer intelligence search.
+// Super Admin does not receive taxpayer search or confidential recipe access by default.
 // ---------------------------------------------------------------------------
 
-test("super_admin has every defined permission except taxpayer intelligence search", () => {
+test("super_admin has every defined permission except taxpayer search and confidential recipe access", () => {
     for (const perm of RRA_PERMISSIONS) {
-        if (perm === "taxpayer.intelligence.search") continue;
+        if (perm === "taxpayer.intelligence.search" || perm === "production.recipe.confidential.read") continue;
         assert.ok(
             hasRRAPermission("super_admin", perm as RRAPermission),
             `super_admin should have permission: ${perm}`,
         );
     }
     assert.equal(hasRRAPermission("super_admin", "taxpayer.intelligence.search"), false);
+    assert.equal(hasRRAPermission("super_admin", "production.recipe.confidential.read"), false);
 });
 
 test("communications send is Super Admin only; admin inbox and direct replies are role-scoped", () => {
@@ -371,4 +372,12 @@ test("only super_admin can manage staff accounts", () => {
             assert.equal(has, false, `"${role}" should NOT have staff.manage`);
         }
     }
+});
+
+test("confidential manufacturing recipe access is limited to audit investigators and never inferred for super_admin", () => {
+    assert.equal(hasRRAPermission("audit_investigation_officer", "production.recipe.confidential.read"), true);
+    assert.equal(hasRRAPermission("audit_officer", "production.recipe.confidential.read"), true);
+    assert.equal(hasRRAPermission("stock_officer", "production.recipe.confidential.read"), false);
+    assert.equal(hasRRAPermission("product_traceability_officer", "production.recipe.confidential.read"), false);
+    assert.equal(hasRRAPermission("super_admin", "production.recipe.confidential.read"), false);
 });

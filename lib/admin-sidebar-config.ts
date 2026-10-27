@@ -217,6 +217,18 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 ],
             },
             {
+                label: "Production Monitoring",
+                href: "/admin/production",
+                icon: Package,
+                allowedRoles: [
+                    "super_admin",
+                    "stock_officer",
+                    "audit_officer",
+                    "audit_investigation_officer",
+                    "product_traceability_officer",
+                ],
+            },
+            {
                 label: "Sell-Through Control",
                 href: "/admin/stock-control",
                 icon: Package,

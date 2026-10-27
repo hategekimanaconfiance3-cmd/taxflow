@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { productionEntrySchema, productRegistrationSchema } from '../lib/validation/production.schema';
+import {
+  manufacturingRecipeSchema,
+  productionEntrySchema,
+  productRegistrationSchema,
+} from '../lib/validation/production.schema';
 
 test('production entry accepts a valid manufacturer submission and zero unit price', () => {
   const parsed = productionEntrySchema.safeParse({
@@ -38,4 +42,30 @@ test('product registration validates unit and trims the name', () => {
   assert.equal(parsed.success, true);
   if (parsed.success) assert.equal(parsed.data.name, 'Soap');
   assert.equal(productRegistrationSchema.safeParse({ name: 'Soap', unit: 'unknown' }).success, false);
+});
+
+test('production recipe usage is optional for legacy batches but required as a complete pair', () => {
+  const base = {
+    productId: 'd2719b25-2f2c-4fa0-a2fc-ae9e2218a6b2',
+    quantity: 10,
+    unitPrice: 10,
+    idempotencyKey: '78a2f784-9e22-4810-aebf-a0f283dba2f0',
+  };
+  assert.equal(productionEntrySchema.safeParse(base).success, true);
+  assert.equal(productionEntrySchema.safeParse({ ...base, recipeId: 'recipe-1' }).success, false);
+  assert.equal(productionEntrySchema.safeParse({ ...base, materialUsage: [{ materialId: 'material-1', actualQuantity: 2 }] }).success, false);
+  assert.equal(productionEntrySchema.safeParse({ ...base, recipeId: 'recipe-1', plannedOutputQuantity: 10, materialUsage: [
+    { materialId: 'material-1', actualQuantity: 2 },
+  ] }).success, true);
+  assert.equal(productionEntrySchema.safeParse({ ...base, recipeId: 'recipe-1', materialUsage: [
+    { materialId: 'material-1', actualQuantity: 2 },
+    { materialId: 'material-1', actualQuantity: 3 },
+  ] }).success, false);
+});
+
+test('recipe validation rejects duplicate materials and invalid tolerances', () => {
+  const base = { productId: 'product-1', batchOutputQuantity: 100, materials: [{ materialId: 'material-1', plannedQuantity: 20 }] };
+  assert.equal(manufacturingRecipeSchema.safeParse(base).success, true);
+  assert.equal(manufacturingRecipeSchema.safeParse({ ...base, materialTolerancePercent: 101 }).success, false);
+  assert.equal(manufacturingRecipeSchema.safeParse({ ...base, materials: [...base.materials, ...base.materials] }).success, false);
 });

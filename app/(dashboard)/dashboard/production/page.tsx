@@ -1,8 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { ProductionForm } from '@/components/dashboard/production-form/production-form';
 import { ProductionRegister } from '@/components/dashboard/production-register/production-register';
+import { ManufacturingRecipeManager } from '@/components/dashboard/manufacturing-recipe-manager';
 import { requireTraderSession } from '@/lib/auth-guard';
-import { listManufacturerProduction, listManufacturerProducts } from '@/lib/production-service';
+import {
+  listManufacturerMaterials,
+  listManufacturerProduction,
+  listManufacturerProducts,
+  listManufacturerRecipes,
+} from '@/lib/production-service';
 import { getSystemConfig } from '@/lib/actions/system-config.action';
 
 function logLoadFailure(operation: string, requestId: string, error: unknown): void {
@@ -18,22 +24,30 @@ function logLoadFailure(operation: string, requestId: string, error: unknown): v
 export default async function ProductionPage() {
   const session = await requireTraderSession(['manufacturer']);
   const requestId = randomUUID();
-  const [productsResult, recordsResult, configResult] = await Promise.allSettled([
+  const [productsResult, recordsResult, configResult, materialsResult, recipesResult] = await Promise.allSettled([
     listManufacturerProducts(session.user.id),
     listManufacturerProduction(session.user.id),
     getSystemConfig(),
+    listManufacturerMaterials(session.user.id),
+    listManufacturerRecipes(session.user.id),
   ]);
 
   if (productsResult.status === 'rejected') logLoadFailure('products', requestId, productsResult.reason);
   if (recordsResult.status === 'rejected') logLoadFailure('history', requestId, recordsResult.reason);
   if (configResult.status === 'rejected') logLoadFailure('tax-config', requestId, configResult.reason);
+  if (materialsResult.status === 'rejected') logLoadFailure('materials', requestId, materialsResult.reason);
+  if (recipesResult.status === 'rejected') logLoadFailure('recipes', requestId, recipesResult.reason);
 
   const products = productsResult.status === 'fulfilled' ? productsResult.value : [];
   const records = recordsResult.status === 'fulfilled' ? recordsResult.value : [];
   const vatRate = configResult.status === 'fulfilled' ? configResult.value.vatRate : 0;
+  const materials = materialsResult.status === 'fulfilled' ? materialsResult.value : [];
+  const recipes = recipesResult.status === 'fulfilled' ? recipesResult.value : [];
   const hasLoadError = productsResult.status === 'rejected'
     || recordsResult.status === 'rejected'
-    || configResult.status === 'rejected';
+    || configResult.status === 'rejected'
+    || materialsResult.status === 'rejected'
+    || recipesResult.status === 'rejected';
 
   return (
     <div className="space-y-6">
@@ -49,9 +63,10 @@ export default async function ProductionPage() {
       )}
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <ProductionForm products={products} vatRate={vatRate} />
+        <ProductionForm products={products} recipes={recipes} vatRate={vatRate} />
         <ProductionRegister records={records} />
       </div>
+      <ManufacturingRecipeManager products={products} initialMaterials={materials} recipes={recipes} />
     </div>
   );
 }
