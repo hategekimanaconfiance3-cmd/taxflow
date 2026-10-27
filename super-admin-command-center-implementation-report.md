@@ -2,14 +2,14 @@
 
 ## Scope
 
-Implemented on the isolated branch `codex/super-admin-command-center`, based on `dfb0bc6`. The work changes the Super Admin overview only; regular RRA staff and trader dashboard rendering remains on its existing path. No production data was modified. No commit, push, or merge was performed.
+Implemented on the isolated branch `codex/super-admin-command-center`, currently based on `8aafbd9`. The current follow-up edits are uncommitted and unpushed; no production data, migration, or deployment was modified.
 
 ## What changed
 
 - Added a Super Admin command center with bounded date selection (today, 7/30/90 days, and custom), comparison selection, command search, source freshness, transaction activity, unresolved stored findings, recorded VAT and confirmed payments, business ranking, stock movements, declared production, and a deterministic activity brief.
-- Added server-side actions that require an authenticated `super_admin` session before running aggregates or search. Queries are bounded, aggregated in PostgreSQL, and search results link to existing business, product journey, transaction, analytics, and case pages.
+- Added server-side actions that require an authenticated `super_admin` session before running aggregates or search. Queries are bounded, aggregated in PostgreSQL, and search results link to a limited business directory record or existing product journey, transaction, analytics, and case pages.
 - Reused TaxFlow's current dashboard aggregate service for existing transaction, tax, and business definitions. Displayed tax amounts as separate recorded values; did not calculate or present a VAT collection percentage or official liability.
-- Updated the existing RBAC helper to honor the already-authorized full `super_admin` permission policy. Other role permission mappings were not broadened. Updated the stale role guard assertions accordingly.
+- Updated Super Admin grants to preserve all administrative permissions except the separately restricted `taxpayer.intelligence.search` permission. Command-center business directory search is separately guarded by the Super Admin role and returns only basic registration fields. Other role permission mappings were not broadened.
 - Added date-filter tests, including invalid calendar dates and previous-month date clamping.
 
 ## Metric definitions
@@ -25,7 +25,7 @@ Implemented on the isolated branch `codex/super-admin-command-center`, based on 
 
 - Both new server actions call `requireRRASession("super_admin")`; client visibility does not grant access.
 - Search and dashboard data are fetched on the server and returned as bounded summaries.
-- Super Admin role checks follow the currently authorized full-access policy. Non-Super Admin role mappings remain unchanged.
+- Super Admin retains administrative permissions but does not receive `taxpayer.intelligence.search`. The limited directory detail route is guarded by the Super Admin role; existing intelligence record pages require the separate taxpayer-intelligence permission. Non-Super Admin role mappings remain unchanged.
 
 ## Verification
 
@@ -51,3 +51,19 @@ Implemented on the isolated branch `codex/super-admin-command-center`, based on 
 - Added `db/migrations/taxflow/0019_ai_finding.sql`, an additive, transaction-wrapped, idempotent table/index creation matching `db/schema.ts`. Existing records are not modified.
 - Added server-side PostgreSQL error-code logging to the command-center actions while retaining generic user-facing error messages.
 - `pnpm typecheck` passed after this follow-up. The production database was not queried or changed here. Apply the new migration to the TaxFlow Neon database to activate the fix; until then, the deployed page can continue to show the unavailable state if `ai_finding` is absent. The exact production-side missing-table condition could not be confirmed without database access.
+
+
+## Follow-up: form validation, partial-source handling, and access boundaries
+
+- Blank rom/	o query values from preset-period form submissions now normalize to omitted filters. Custom periods still require both valid real calendar dates. Invalid filter errors use a safe user-facing message instead of exposing the validation regex.
+- Command search now returns successful source results even if a separate source (for example, stored risk findings) is unavailable, and the UI identifies partial or total search failure rather than claiming there are no matches.
+- Risk and data-quality query failures no longer prevent business/transaction/tax dashboard sections from rendering. The risk section reports unavailable separately from an empty findings result.
+- Super Admin business search results link to a read-only, limited directory record. Taxpayer intelligence routes continue to enforce the separate 	axpayer.intelligence.search permission, which Super Admin does not receive under the current request.
+
+
+## Follow-up diagnosis from the supplied screenshot
+
+- **Period filter failure (confirmed from code and request shape):** native date inputs submit empty rom and 	o values as empty strings. The old Zod schema treated these as malformed dates even when the selected period was a preset. Blank values now normalize to omitted filters; custom ranges still require real dates.
+- **Business search failure (failure mechanism confirmed; production cause not directly observable):** business, product, transaction, risk, and case queries were grouped in one Promise.all, so a failure in any source caused all search results to be discarded. The AI findings table is referenced by the schema but had no tracked migration; if it is missing in the live database, its query is a likely trigger. Search now isolates source failures and returns available results with a partial-source warning. The findings table migration is available at db/migrations/taxflow/0019_ai_finding.sql; it has not been applied to production.
+- Dashboard risk/data-quality queries are now isolated from core aggregates. If the findings source is unavailable, the other dashboard metrics can render and the risk section says unavailable rather than showing a false zero.
+- **Rollout remains pending:** the live Neon schema and browser session were not available for verification. The code edits have not been pushed or deployed under the attached request's no-push/no-deploy instruction.

@@ -11,7 +11,7 @@ import { parseSuperAdminDashboardFilters, resolveSuperAdminComparisonRange, reso
 
 export async function getSuperAdminCommandCenter(input: unknown) {
   const parsed = parseSuperAdminDashboardFilters(input);
-  if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? "Choose a valid dashboard period.");
+  if (!parsed.success) throw new Error("Choose a valid period and date range.");
   await requireRRASession("super_admin");
   const now = new Date();
   const range = resolveSuperAdminDashboardRange(parsed.data, now);
@@ -22,16 +22,10 @@ export async function getSuperAdminCommandCenter(input: unknown) {
   const chartBucket = parsed.data.period === "today" ? "hour" : "day";
 
   try {
-    const [overview, activeBusinesses, findings, quality, stockSnapshot, movements, production, latestSources, selectedValue, priorValue, recentActivity, seriesRows, rankedBusinesses] = await Promise.all([
+    const [overview, activeBusinesses, stockSnapshot, movements, production, latestTransaction, selectedValue, priorValue, recentActivity, seriesRows, rankedBusinesses] = await Promise.all([
       getDashboardOverview(range.from, range.to),
       db.select({ count: sql<number>`COUNT(*)::int` }).from(user)
         .where(and(inArray(user.role, ["manufacturer", "wholesaler", "retailer"]), eq(user.isActive, true))),
-      db.select({ id: aiFinding.id, type: aiFinding.findingType, severity: aiFinding.severity, status: aiFinding.reviewStatus, reason: aiFinding.explanation, observed: aiFinding.observedValue, expected: aiFinding.expectedValue, evidence: aiFinding.evidenceRefs, at: aiFinding.createdAt, businessId: aiFinding.businessId, business: user.businessName, tin: user.tinNumber, productId: aiFinding.productId })
-        .from(aiFinding).leftJoin(user, eq(aiFinding.businessId, user.id))
-        .where(and(inArray(aiFinding.reviewStatus, ["open", "under_review", "pending"]), gte(aiFinding.createdAt, range.from), lte(aiFinding.createdAt, range.to)))
-        .orderBy(desc(aiFinding.createdAt)).limit(10),
-      db.select({ count: sql<number>`COUNT(*)::int` }).from(aiFinding)
-        .where(and(eq(aiFinding.findingType, "data_quality"), inArray(aiFinding.reviewStatus, ["open", "under_review", "pending"]))),
       db.select({ units: sql<number>`COALESCE(SUM(${stock.quantity}),0)::float8`, businesses: sql<number>`COUNT(DISTINCT ${stock.businessId})::int` }).from(stock),
       db.select({ businessId: user.id, business: user.businessName, productId: stockMovement.productId, delta: sql<number>`COALESCE(SUM(${stockMovement.quantityDelta}),0)::float8`, count: sql<number>`COUNT(*)::int` })
         .from(stockMovement).innerJoin(user, eq(stockMovement.businessId, user.id))
@@ -40,10 +34,7 @@ export async function getSuperAdminCommandCenter(input: unknown) {
         .orderBy(desc(sql`ABS(COALESCE(SUM(${stockMovement.quantityDelta}),0))`)).limit(8),
       db.select({ batches: sql<number>`COUNT(*)::int`, units: sql<number>`COALESCE(SUM(${productionBatch.declaredQuantity}),0)::float8` }).from(productionBatch)
         .where(and(gte(productionBatch.createdAt, range.from), lte(productionBatch.createdAt, range.to))),
-      Promise.all([
-        db.select({ at: sql<Date | null>`MAX(${transaction.createdAt})` }).from(transaction),
-        db.select({ at: sql<Date | null>`MAX(${aiFinding.createdAt})` }).from(aiFinding),
-      ]),
+      db.select({ at: sql<Date | null>`MAX(${transaction.createdAt})` }).from(transaction),
       db.select({ value: sql<number>`COALESCE(SUM(${transaction.totalAmount}) FILTER (WHERE ${transaction.status} IN ('confirmed','completed')),0)::float8` })
         .from(transaction).where(and(gte(transaction.createdAt, range.from), lte(transaction.createdAt, range.to))),
       db.select({ value: sql<number>`COALESCE(SUM(${transaction.totalAmount}) FILTER (WHERE ${transaction.status} IN ('confirmed','completed')),0)::float8` })
@@ -60,6 +51,19 @@ export async function getSuperAdminCommandCenter(input: unknown) {
         .from(transaction).innerJoin(user, eq(transaction.sellerId, user.id))
         .where(and(gte(transaction.createdAt, range.from), lte(transaction.createdAt, range.to), inArray(transaction.status, ["confirmed", "completed"])))
         .groupBy(user.id, user.businessName, user.tinNumber, user.role).orderBy(desc(sql`COALESCE(SUM(${transaction.totalAmount}),0)`)).limit(8),
+    ]);
+
+    const [findingRows, qualityRows, findingFreshness] = await Promise.all([
+      db.select({ id: aiFinding.id, type: aiFinding.findingType, severity: aiFinding.severity, status: aiFinding.reviewStatus, reason: aiFinding.explanation, observed: aiFinding.observedValue, expected: aiFinding.expectedValue, evidence: aiFinding.evidenceRefs, at: aiFinding.createdAt, businessId: aiFinding.businessId, business: user.businessName, tin: user.tinNumber, productId: aiFinding.productId })
+        .from(aiFinding).leftJoin(user, eq(aiFinding.businessId, user.id))
+        .where(and(inArray(aiFinding.reviewStatus, ["open", "under_review", "pending"]), gte(aiFinding.createdAt, range.from), lte(aiFinding.createdAt, range.to)))
+        .orderBy(desc(aiFinding.createdAt)).limit(10)
+        .catch((error: unknown) => { logCommandCenterFailure("Super Admin risk findings unavailable", error); return null; }),
+      db.select({ count: sql<number>`COUNT(*)::int` }).from(aiFinding)
+        .where(and(eq(aiFinding.findingType, "data_quality"), inArray(aiFinding.reviewStatus, ["open", "under_review", "pending"])))
+        .catch((error: unknown) => { logCommandCenterFailure("Super Admin data-quality findings unavailable", error); return null; }),
+      db.select({ at: sql<Date | null>`MAX(${aiFinding.createdAt})` }).from(aiFinding)
+        .catch((error: unknown) => { logCommandCenterFailure("Super Admin findings freshness unavailable", error); return null; }),
     ]);
 
     const current = Number(selectedValue[0]?.value ?? 0);
@@ -81,7 +85,8 @@ export async function getSuperAdminCommandCenter(input: unknown) {
     return {
       period: { label: range.label, comparison: comparison.label },
       refreshedAt: now.toISOString(),
-      sourceFreshness: latestSources.map((rows) => rows[0]?.at ? new Date(rows[0].at).toISOString() : null),
+      sourceFreshness: [latestTransaction[0]?.at ?? null, findingFreshness?.[0]?.at ?? null].map((at) => at ? new Date(at).toISOString() : null),
+      riskSourceAvailable: findingRows !== null && qualityRows !== null && findingFreshness !== null,
       businesses: {
         ...overview.traders,
         active: Number(activeBusinesses[0]?.count ?? 0),
@@ -101,12 +106,12 @@ export async function getSuperAdminCommandCenter(input: unknown) {
         payments: overview.revenue.taxPaymentsTotal, paymentCount: overview.revenue.taxPaymentsCount,
         comparison: "Unavailable — confirmed payments are not linked to matched VAT liabilities.",
       },
-      risks: findings.map((row) => ({
+      risks: (findingRows ?? []).map((row) => ({
         id: row.id, type: row.type, severity: row.severity, status: row.status ?? "open", reason: row.reason,
         observed: row.observed, expected: row.expected, evidence: parseEvidence(row.evidence), at: row.at.toISOString(),
         businessId: row.businessId, business: row.business ?? "System-level signal", tin: row.tin, productId: row.productId,
       })),
-      dataQuality: Number(quality[0]?.count ?? 0),
+      dataQuality: qualityRows ? Number(qualityRows[0]?.count ?? 0) : null,
       stock: {
         units: Number(stockSnapshot[0]?.units ?? 0), businesses: Number(stockSnapshot[0]?.businesses ?? 0),
         movements: movements.map((row) => ({ businessId: row.businessId, business: row.business ?? "Unnamed business", productId: row.productId, delta: Number(row.delta), count: Number(row.count) })),
@@ -140,11 +145,19 @@ const commandQuerySchema = z.string().trim().min(2).max(100);
 
 export async function searchSuperAdminCommand(input: unknown) {
   const parsed = commandQuerySchema.safeParse(input);
-  if (!parsed.success) return [];
+  if (!parsed.success) return { results: [], unavailableSources: [] as string[] };
   await requireRRASession("super_admin");
   const query = "%" + parsed.data + "%";
+  const unavailableSources: string[] = [];
+  const readRows = <T,>(source: string, result: PromiseSettledResult<T[]>): T[] => {
+    if (result.status === "fulfilled") return result.value;
+    unavailableSources.push(source);
+    logCommandCenterFailure("Super Admin command search source failed: " + source, result.reason);
+    return [];
+  };
+
   try {
-    const [businesses, productsFound, transactionsFound, findings, cases] = await Promise.all([
+    const settled = await Promise.allSettled([
       db.select({ id: user.id, name: user.businessName, tin: user.tinNumber, role: user.role }).from(user)
         .where(and(sql`${user.role} IN ('manufacturer','wholesaler','retailer')`, or(ilike(user.businessName, query), ilike(user.tinNumber, query), ilike(user.name, query)))).limit(5),
       db.select({ id: product.id, name: product.name, category: product.categoryCode }).from(product)
@@ -156,14 +169,23 @@ export async function searchSuperAdminCommand(input: unknown) {
         .leftJoin(user, eq(aiFinding.businessId, user.id)).where(or(ilike(aiFinding.id, query), ilike(aiFinding.findingType, query), ilike(aiFinding.explanation, query))).orderBy(desc(aiFinding.createdAt)).limit(5),
       db.select({ id: rraCase.id, title: rraCase.title, status: rraCase.status, business: user.businessName }).from(rraCase)
         .innerJoin(user, eq(rraCase.traderId, user.id)).where(or(ilike(rraCase.id, query), ilike(rraCase.title, query), ilike(user.businessName, query))).orderBy(desc(rraCase.updatedAt)).limit(5),
-    ]);
-    return [
-      ...businesses.map((row) => ({ id: row.id, title: row.name ?? row.tin ?? "Business", detail: row.role + " · TIN " + (row.tin ?? "unavailable"), kind: "Business", href: "/admin/traders/" + row.id })),
-      ...productsFound.map((row) => ({ id: row.id, title: row.name, detail: row.category ?? "Product", kind: "Product", href: "/admin/product-journey?productId=" + encodeURIComponent(row.id) })),
-      ...transactionsFound.map((row) => ({ id: row.id, title: row.id, detail: (row.business ?? "Business") + " · " + row.item + " · " + row.status, kind: "Transaction", href: "/admin/transactions" })),
-      ...findings.map((row) => ({ id: row.id, title: row.type.replaceAll("_", " "), detail: row.severity + " · " + (row.business ?? "System"), kind: "Risk signal", href: "/admin/analytics" })),
-      ...cases.map((row) => ({ id: row.id, title: row.title, detail: (row.business ?? "Business") + " · " + row.status, kind: "Investigation", href: "/admin/cases" })),
-    ];
+    ] as const);
+    const businesses = readRows("business directory", settled[0]);
+    const productsFound = readRows("products", settled[1]);
+    const transactionsFound = readRows("transactions", settled[2]);
+    const findings = readRows("risk signals", settled[3]);
+    const cases = readRows("investigations", settled[4]);
+
+    return {
+      results: [
+        ...businesses.map((row) => ({ id: row.id, title: row.name ?? row.tin ?? "Business", detail: row.role + " · TIN " + (row.tin ?? "unavailable"), kind: "Business", href: "/admin/directory/business/" + row.id })),
+        ...productsFound.map((row) => ({ id: row.id, title: row.name, detail: row.category ?? "Product", kind: "Product", href: "/admin/product-journey?productId=" + encodeURIComponent(row.id) })),
+        ...transactionsFound.map((row) => ({ id: row.id, title: row.id, detail: (row.business ?? "Business") + " · " + row.item + " · " + row.status, kind: "Transaction", href: "/admin/transactions" })),
+        ...findings.map((row) => ({ id: row.id, title: row.type.replaceAll("_", " "), detail: row.severity + " · " + (row.business ?? "System"), kind: "Risk signal", href: "/admin/analytics" })),
+        ...cases.map((row) => ({ id: row.id, title: row.title, detail: (row.business ?? "Business") + " · " + row.status, kind: "Investigation", href: "/admin/cases" })),
+      ],
+      unavailableSources,
+    };
   } catch (error) {
     logCommandCenterFailure("Super Admin command search failed", error);
     throw new Error("Command search is temporarily unavailable.");

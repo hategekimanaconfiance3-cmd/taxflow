@@ -11,6 +11,7 @@ test("dashboard date presets use Kigali calendar days and bounded ranges", () =>
   assert.equal(today.from.toISOString(), "2026-10-26T22:00:00.000Z");
   assert.equal(today.to.toISOString(), now.toISOString());
 
+  assert.equal(parseSuperAdminDashboardFilters({ period: "7d", from: "", to: "" }).success, true);
   const weekFilters = parseSuperAdminDashboardFilters({ period: "7d" });
   assert.equal(weekFilters.success, true);
   if (!weekFilters.success) return;
@@ -20,6 +21,7 @@ test("dashboard date presets use Kigali calendar days and bounded ranges", () =>
 
 test("custom ranges reject missing, reversed, and excessively long dates", () => {
   assert.equal(parseSuperAdminDashboardFilters({ period: "custom" }).success, false);
+  assert.equal(parseSuperAdminDashboardFilters({ period: "custom", from: "", to: "" }).success, false);
   assert.equal(parseSuperAdminDashboardFilters({ period: "custom", from: "2026-10-20", to: "2026-10-19" }).success, false);
   assert.equal(parseSuperAdminDashboardFilters({ period: "custom", from: "2025-01-01", to: "2026-01-02" }).success, false);
   assert.equal(parseSuperAdminDashboardFilters({ period: "custom", from: "2026-02-30", to: "2026-03-01" }).success, false);

@@ -1,4 +1,4 @@
-import { requireRRASession } from '@/lib/auth-guard';
+import { requireRRASession, requireRRAPermission } from '@/lib/auth-guard';
 import { computeRiskScore } from '@/lib/ai/risk-scoring';
 import { getFindings } from '@/lib/actions/ai-finding.action';
 import db from '@/db/drizzle';
@@ -82,6 +82,7 @@ export default async function BusinessIntelligencePage({
   params: Promise<{ id: string }>;
 }) {
   await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
+  await requireRRAPermission("taxpayer.intelligence.search");
   const { id } = await params;
 
   // ── Fetch trader profile ─────────────────────────────────────────────────

@@ -14,7 +14,8 @@ import { getSuperAdminCommandCenter, searchSuperAdminCommand } from "@/lib/actio
 import type { SuperAdminDashboardComparison, SuperAdminDashboardPeriod } from "@/lib/super-admin-command-center";
 
 type DashboardData = Awaited<ReturnType<typeof getSuperAdminCommandCenter>>;
-type SearchResult = Awaited<ReturnType<typeof searchSuperAdminCommand>>[number];
+type SearchResponse = Awaited<ReturnType<typeof searchSuperAdminCommand>>;
+type SearchResult = SearchResponse["results"][number];
 
 function dateLabel(value: string | null) {
   if (!value) return "No source records";
@@ -36,12 +37,14 @@ function Metric({ label, value, detail, source, icon: Icon }: { label: string; v
 function SuperAdminCommandSearch() {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
+  const [unavailableSources, setUnavailableSources] = useState<string[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
   function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setMessage(null);
+    setUnavailableSources([]);
     if (query.trim().length < 2) {
       setMessage("Enter at least two characters.");
       return;
@@ -49,10 +52,12 @@ function SuperAdminCommandSearch() {
     startTransition(async () => {
       try {
         const found = await searchSuperAdminCommand(query);
-        setResults(found);
-        setMessage(found.length ? null : "No matching businesses, products, transactions, signals, or cases.");
+        setResults(found.results);
+        setUnavailableSources(found.unavailableSources);
+        setMessage(found.results.length ? null : found.unavailableSources.length === 5 ? "All search sources are unavailable. Retry in a moment." : found.unavailableSources.length ? "No matches in the sources that were available." : "No matching businesses, products, transactions, signals, or cases.");
       } catch {
         setResults([]);
+        setUnavailableSources([]);
         setMessage("Command search is temporarily unavailable. Try again.");
       }
     });
@@ -68,6 +73,7 @@ function SuperAdminCommandSearch() {
         <Button type="submit" disabled={pending}>{pending ? "Searching…" : "Search"}</Button>
       </form>
       {message && <p className="mt-1 text-xs text-muted-foreground" role="status">{message}</p>}
+      {unavailableSources.length > 0 && <p className="mt-1 text-xs text-amber-700" role="status">{unavailableSources.length === 5 ? "Search unavailable" : "Partial results"}: could not search {unavailableSources.join(", ")}.</p>}
       {results.length > 0 && (
         <Card className="mt-2 max-h-72 overflow-auto">
           <CardContent className="p-2">
@@ -109,8 +115,8 @@ export function SuperAdminCommandCenter({ data, error, period, comparison, from,
   return (
     <main className="flex flex-col gap-4">
       <section className="rounded-xl border bg-card p-4">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-          <div className="min-w-0 flex-1">
+        <div className="flex flex-col gap-4">
+          <div className="min-w-0 w-full">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">TaxFlow · Super Admin</p>
             <h1 className="mt-1 text-2xl font-semibold tracking-tight">Revenue Intelligence Command Center</h1>
             <p className="mt-1 text-sm text-muted-foreground">Recorded system activity, evidence-linked review signals, and investigation entry points.</p>
@@ -173,9 +179,9 @@ export function SuperAdminCommandCenter({ data, error, period, comparison, from,
           <Card>
             <CardHeader><CardTitle className="flex items-center gap-2"><ShieldAlert /> Risk &amp; anomaly center</CardTitle><CardDescription>Stored unresolved findings; an alert is a review signal, not an official decision.</CardDescription></CardHeader>
             <CardContent className="flex flex-col gap-3">
-              <div className="flex items-center justify-between rounded-md border p-3"><span className="text-sm">High-priority signals in view</span><Badge variant={highRiskCount ? "destructive" : "secondary"}>{highRiskCount}</Badge></div>
-              {data.risks.length === 0 ? <p className="rounded-md border border-dashed p-5 text-center text-sm text-muted-foreground">No unresolved signals recorded in this period.</p> : data.risks.slice(0, 6).map((risk) =>
-                <Link key={risk.id} href={risk.businessId ? "/admin/traders/" + risk.businessId : "/admin/analytics"} className="rounded-md border p-3 hover:bg-accent/50">
+              <div className="flex items-center justify-between rounded-md border p-3"><span className="text-sm">High-priority signals in view</span><Badge variant={!data.riskSourceAvailable ? "outline" : highRiskCount ? "destructive" : "secondary"}>{data.riskSourceAvailable ? highRiskCount : "Unavailable"}</Badge></div>
+              {!data.riskSourceAvailable ? <p className="rounded-md border border-dashed p-5 text-center text-sm text-amber-700">Risk findings are unavailable. Apply the AI findings database migration and retry.</p> : data.risks.length === 0 ? <p className="rounded-md border border-dashed p-5 text-center text-sm text-muted-foreground">No unresolved signals recorded in this period.</p> : data.risks.slice(0, 6).map((risk) =>
+                <Link key={risk.id} href={risk.businessId ? "/admin/directory/business/" + risk.businessId : "/admin/analytics"} className="rounded-md border p-3 hover:bg-accent/50">
                   <div className="flex items-start justify-between gap-2"><div><p className="font-medium">{risk.business}</p><p className="text-xs capitalize text-muted-foreground">{risk.type.replaceAll("_", " ")} · {dateLabel(risk.at)}</p></div><Badge variant={risk.severity === "critical" || risk.severity === "high" ? "destructive" : "outline"}>{risk.severity}</Badge></div>
                   <p className="mt-2 line-clamp-2 text-sm">{risk.reason}</p>
                   <p className="mt-2 text-xs text-muted-foreground">Observed {risk.observed ?? "not recorded"} · Expected {risk.expected ?? "not recorded"} · Evidence IDs: {risk.evidence.join(", ") || "No linked IDs recorded"}</p>
@@ -196,7 +202,7 @@ export function SuperAdminCommandCenter({ data, error, period, comparison, from,
 
           <Card><CardHeader><CardTitle>Business intelligence</CardTitle><CardDescription>Top recorded seller transaction value in the selected period.</CardDescription></CardHeader>
             <CardContent>{data.businessesByValue.length === 0 ? <p className="rounded-md border border-dashed p-5 text-center text-sm text-muted-foreground">Not enough data for a business ranking.</p> :
-              <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="border-b text-left text-xs text-muted-foreground"><th className="pb-2">Business</th><th className="pb-2">Role</th><th className="pb-2 text-right">Count</th><th className="pb-2 text-right">Value</th></tr></thead><tbody>{data.businessesByValue.map((business) => <tr key={business.id} className="border-b last:border-0"><td className="py-2"><Link className="font-medium hover:underline" href={"/admin/traders/" + business.id}>{business.name}</Link><span className="block font-mono text-xs text-muted-foreground">{business.tin ?? "TIN unavailable"}</span></td><td className="py-2 capitalize">{business.role}</td><td className="py-2 text-right">{business.transactions.toLocaleString()}</td><td className="py-2 text-right">{formatRWF(business.value)}</td></tr>)}</tbody></table></div>}
+              <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="border-b text-left text-xs text-muted-foreground"><th className="pb-2">Business</th><th className="pb-2">Role</th><th className="pb-2 text-right">Count</th><th className="pb-2 text-right">Value</th></tr></thead><tbody>{data.businessesByValue.map((business) => <tr key={business.id} className="border-b last:border-0"><td className="py-2"><Link className="font-medium hover:underline" href={"/admin/directory/business/" + business.id}>{business.name}</Link><span className="block font-mono text-xs text-muted-foreground">{business.tin ?? "TIN unavailable"}</span></td><td className="py-2 capitalize">{business.role}</td><td className="py-2 text-right">{business.transactions.toLocaleString()}</td><td className="py-2 text-right">{formatRWF(business.value)}</td></tr>)}</tbody></table></div>}
             </CardContent>
           </Card>
         </section>
@@ -212,8 +218,8 @@ export function SuperAdminCommandCenter({ data, error, period, comparison, from,
 
           <Card><CardHeader><CardTitle className="flex items-center gap-2"><Database /> Data quality &amp; intelligence brief</CardTitle><CardDescription>Summarized from actual TaxFlow records.</CardDescription></CardHeader>
             <CardContent className="flex flex-col gap-3">
-              <div className="flex items-center justify-between rounded-md border p-3"><span className="text-sm">Open data-quality findings</span><Badge variant={data.dataQuality ? "outline" : "secondary"}>{data.dataQuality}</Badge></div>
-              <div className="rounded-md bg-muted/30 p-4"><p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Recorded activity brief · {data.period.label}</p><ul className="mt-2 flex flex-col gap-2 text-sm"><li>{data.risks.length} unresolved stored finding(s) fall in the selected period.</li><li>{data.dataQuality} unresolved data-quality finding(s) are stored.</li><li>{data.transactions.total.toLocaleString()} transactions were recorded; confirmed/completed value is {formatRWF(data.transactions.confirmedValue)}.</li><li>{data.production.batches} production batches declare {data.production.declaredUnits.toLocaleString()} units.</li></ul></div>
+              <div className="flex items-center justify-between rounded-md border p-3"><span className="text-sm">Open data-quality findings</span><Badge variant={data.dataQuality ? "outline" : "secondary"}>{data.dataQuality === null ? "Unavailable" : data.dataQuality}</Badge></div>
+              <div className="rounded-md bg-muted/30 p-4"><p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Recorded activity brief · {data.period.label}</p><ul className="mt-2 flex flex-col gap-2 text-sm"><li>{data.riskSourceAvailable ? data.risks.length + " unresolved stored finding(s) fall in the selected period." : "Stored findings are unavailable; see the risk source status."}</li><li>{data.dataQuality === null ? "Data-quality finding count is unavailable." : data.dataQuality + " unresolved data-quality finding(s) are stored."}</li><li>{data.transactions.total.toLocaleString()} transactions were recorded; confirmed/completed value is {formatRWF(data.transactions.confirmedValue)}.</li><li>{data.production.batches} production batches declare {data.production.declaredUnits.toLocaleString()} units.</li></ul></div>
               <p className="text-xs text-muted-foreground">This is a deterministic summary, not generated AI analysis. Open the existing assistant for evidence-based questions; recommendations require human review.</p>
             </CardContent>
           </Card>

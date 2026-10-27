@@ -1,10 +1,12 @@
 import { z } from "zod";
 
+const optionalDateInput = z.union([z.literal(""), z.string().regex(/^\d{4}-\d{2}-\d{2}$/)]).optional().transform((value) => value || undefined);
+
 export const superAdminDashboardFilterSchema = z.object({
   period: z.enum(["today", "7d", "30d", "90d", "custom"]).default("30d"),
   comparison: z.enum(["previous_period", "previous_month", "previous_year"]).default("previous_period"),
-  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  from: optionalDateInput,
+  to: optionalDateInput,
 }).superRefine((value, context) => {
   if (value.period !== "custom") return;
   if (!value.from || !value.to || value.from > value.to) {
