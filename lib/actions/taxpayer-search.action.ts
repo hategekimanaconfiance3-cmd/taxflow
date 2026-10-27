@@ -1,62 +1,30 @@
 "use server";
 
-import { and, asc, gte, ilike, lte, or, sql } from "drizzle-orm";
+import { and, asc, count, gte, ilike, lte, or, sql } from "drizzle-orm";
 import db from "@/db/drizzle";
 import { user } from "@/db/schema";
 import { requireRRAPermission } from "@/lib/auth-guard";
 import { logAudit } from "@/lib/audit";
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-export interface TaxpayerSearchFilters {
-    query?: string;
-    role?: "manufacturer" | "wholesaler" | "retailer" | "";
-    clearanceStatus?: "pending" | "approved" | "under_review" | "suspended" | "";
-    dateFrom?: string; // ISO date "YYYY-MM-DD"
-    dateTo?: string;   // ISO date "YYYY-MM-DD"
-}
-
-export interface TaxpayerSearchRow {
-    id: string;
-    name: string;
-    businessName: string | null;
-    tinNumber: string | null;
-    role: string | null;
-    clearanceStatus: string | null;
-    email: string;
-    phoneNumber: string | null;
-    createdAt: Date;
-}
-
-export interface TaxpayerSearchResult {
-    rows: TaxpayerSearchRow[];
-    totalRows: number;
-    totalPages: number;
-    page: number;
-    pageSize: number;
-}
+import {
+    type TaxpayerSearchFilters,
+    type TaxpayerSearchResult,
+    type TaxpayerSearchRow,
+    validateSearchFilters,
+} from "@/lib/taxpayer-search-filters";
 
 const PAGE_SIZE = 20;
 
 // ---------------------------------------------------------------------------
-// searchTaxpayers — main search action
+// buildFilterConditions — Drizzle WHERE conditions from validated filters
 // ---------------------------------------------------------------------------
 
-export async function searchTaxpayers(
-    filters: TaxpayerSearchFilters,
-    page = 1,
-): Promise<TaxpayerSearchResult> {
-    const { user: actor } = await requireRRAPermission("taxpayer.intelligence.search");
-
-    // Build WHERE conditions
+function buildFilterConditions(filters: TaxpayerSearchFilters) {
     const conditions = [
         // Always restrict to trader roles only
         sql`${user.role} IN ('manufacturer', 'wholesaler', 'retailer')`,
     ];
 
-    // Text search across TIN, business name, name
+    // Text search across TIN, business name, name, email
     if (filters.query && filters.query.trim().length >= 2) {
         const q = `%${filters.query.trim()}%`;
         conditions.push(
@@ -69,9 +37,14 @@ export async function searchTaxpayers(
         );
     }
 
-    // Role filter
+    // Business role filter
     if (filters.role) {
         conditions.push(sql`${user.role} = ${filters.role}`);
+    }
+
+    // Business type filter (registered_business | institution | government | large_bulk_buyer)
+    if (filters.businessType) {
+        conditions.push(sql`${user.businessType} = ${filters.businessType}`);
     }
 
     // Clearance status filter
@@ -79,50 +52,91 @@ export async function searchTaxpayers(
         conditions.push(sql`${user.clearanceStatus} = ${filters.clearanceStatus}`);
     }
 
-    // Date range
-    if (filters.dateFrom) {
+    // Account creation date range
+    if (filters.dateFrom && filters.dateFrom.trim()) {
         conditions.push(gte(user.createdAt, new Date(filters.dateFrom)));
     }
-    if (filters.dateTo) {
+    if (filters.dateTo && filters.dateTo.trim()) {
         // Include the full day by extending to end of day
         const end = new Date(filters.dateTo);
         end.setHours(23, 59, 59, 999);
         conditions.push(lte(user.createdAt, end));
     }
 
+    return conditions;
+}
+
+// ---------------------------------------------------------------------------
+// searchTaxpayers — main search server action
+// ---------------------------------------------------------------------------
+
+export async function searchTaxpayers(
+    filters: TaxpayerSearchFilters,
+    page = 1,
+): Promise<TaxpayerSearchResult> {
+    const { user: actor } = await requireRRAPermission("taxpayer.intelligence.search");
+
+    // Validate inputs before hitting DB
+    const validationError = validateSearchFilters(filters);
+    if (validationError) throw new Error(validationError);
+
+    const conditions = buildFilterConditions(filters);
     const whereClause = and(...conditions);
 
-    // Count total matching rows
-    const [countResult] = await db
-        .select({ count: sql<number>`COUNT(*)::int`.as("count") })
-        .from(user)
-        .where(whereClause);
-
-    const totalRows = Number(countResult?.count ?? 0);
-    const totalPages = Math.max(1, Math.ceil(totalRows / PAGE_SIZE));
-    const safePage = Math.max(1, Math.min(page, totalPages));
+    const safePage = Math.max(1, page);
     const offset = (safePage - 1) * PAGE_SIZE;
 
-    // Fetch paginated rows
-    const rows = await db
-        .select({
-            id: user.id,
-            name: user.name,
-            businessName: user.businessName,
-            tinNumber: user.tinNumber,
-            role: user.role,
-            clearanceStatus: user.clearanceStatus,
-            email: user.email,
-            phoneNumber: user.phoneNumber,
-            createdAt: user.createdAt,
-        })
-        .from(user)
-        .where(whereClause)
-        .orderBy(asc(user.businessName))
-        .limit(PAGE_SIZE)
-        .offset(offset);
+    // Count total and fetch current page in parallel
+    const [countResult, rows] = await Promise.all([
+        db.select({ count: count() }).from(user).where(whereClause),
+        db
+            .select({
+                id: user.id,
+                name: user.name,
+                businessName: user.businessName,
+                tinNumber: user.tinNumber,
+                role: user.role,
+                businessType: user.businessType,
+                clearanceStatus: user.clearanceStatus,
+                email: user.email,
+                phoneNumber: user.phoneNumber,
+                createdAt: user.createdAt,
+            })
+            .from(user)
+            .where(whereClause)
+            .orderBy(asc(user.businessName))
+            .limit(PAGE_SIZE)
+            .offset(offset),
+    ]);
 
-    // Audit log — record that a search was made, but never log the result data
+    const totalRows = Number(countResult[0]?.count ?? 0);
+    const totalPages = Math.max(1, Math.ceil(totalRows / PAGE_SIZE));
+    const clampedPage = Math.max(1, Math.min(safePage, totalPages));
+
+    // Re-fetch if page was out of range
+    let finalRows = rows;
+    if (clampedPage !== safePage) {
+        finalRows = await db
+            .select({
+                id: user.id,
+                name: user.name,
+                businessName: user.businessName,
+                tinNumber: user.tinNumber,
+                role: user.role,
+                businessType: user.businessType,
+                clearanceStatus: user.clearanceStatus,
+                email: user.email,
+                phoneNumber: user.phoneNumber,
+                createdAt: user.createdAt,
+            })
+            .from(user)
+            .where(whereClause)
+            .orderBy(asc(user.businessName))
+            .limit(PAGE_SIZE)
+            .offset((clampedPage - 1) * PAGE_SIZE);
+    }
+
+    // Audit log — record that a search was made; never log result data
     await logAudit({
         userId: actor.id,
         action: "TAXPAYER_INTELLIGENCE_SEARCH",
@@ -131,20 +145,21 @@ export async function searchTaxpayers(
             filters: {
                 hasQuery: Boolean(filters.query && filters.query.trim().length >= 2),
                 role: filters.role || null,
+                businessType: filters.businessType || null,
                 clearanceStatus: filters.clearanceStatus || null,
-                hasDateFrom: Boolean(filters.dateFrom),
-                hasDateTo: Boolean(filters.dateTo),
+                hasDateFrom: Boolean(filters.dateFrom && filters.dateFrom.trim()),
+                hasDateTo: Boolean(filters.dateTo && filters.dateTo.trim()),
             },
             resultCount: totalRows,
-            page: safePage,
+            page: clampedPage,
         },
     });
 
     return {
-        rows,
+        rows: finalRows,
         totalRows,
         totalPages,
-        page: safePage,
+        page: clampedPage,
         pageSize: PAGE_SIZE,
     };
 }

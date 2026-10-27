@@ -71,6 +71,12 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (!result.ok && result.code === 'PRODUCT_NOT_FOUND') {
       return json({ error: 'Product not found or not registered to your manufacturer account.' }, 404, requestId);
     }
+    if (!result.ok && result.code === 'RECIPE_NOT_FOUND') {
+      return json({ error: 'The selected recipe was not found for this product.' }, 404, requestId);
+    }
+    if (!result.ok && result.code === 'MATERIAL_USAGE_MISMATCH') {
+      return json({ error: 'Enter actual quantities for every material in the selected recipe.' }, 422, requestId);
+    }
     if (!result.ok) {
       return json({ error: 'This submission could not be matched to the earlier request. Refresh before retrying.' }, 409, requestId);
     }

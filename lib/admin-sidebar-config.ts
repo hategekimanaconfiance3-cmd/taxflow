@@ -8,10 +8,8 @@ import {
     Scale,
     Shield,
     Settings,
-    HelpCircle,
     Bell,
     FileBarChart,
-    UserCheck,
     Gavel,
     Activity,
     TrendingUp,
@@ -31,6 +29,7 @@ import {
     Cpu,
     Brain,
     Layers,
+    MessageSquare,
 } from "lucide-react";
 import type { RRARole } from "@/lib/auth-guard";
 
@@ -213,6 +212,28 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                     "audit_officer",
                     "product_traceability_officer",
                     "audit_investigation_officer",
+                ],
+            },
+            {
+                label: "Production Monitoring",
+                href: "/admin/production",
+                icon: Package,
+                allowedRoles: [
+                    "super_admin",
+                    "stock_officer",
+                    "audit_officer",
+                    "audit_investigation_officer",
+                    "product_traceability_officer",
+                ],
+            },
+            {
+                label: "Sell-Through Control",
+                href: "/admin/stock-control",
+                icon: Package,
+                allowedRoles: [
+                    "super_admin",
+                    "stock_officer",
+                    "correction_officer",
                 ],
             },
             {
@@ -429,6 +450,12 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 label: "Notifications",
                 href: "/admin/notifications",
                 icon: Bell,
+                allowedRoles: ALL,
+            },
+            {
+                label: "Communications",
+                href: "/admin/communications",
+                icon: MessageSquare,
                 allowedRoles: ALL,
             },
             {

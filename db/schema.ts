@@ -709,6 +709,43 @@ export const dispute = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// Sell-Through Exceptions — admin-approved exceptions for traders who have
+// not met the configured sell-through threshold before restocking.
+// ---------------------------------------------------------------------------
+
+export const sellThroughException = pgTable(
+  'sell_through_exception',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    businessId: text('business_id').notNull().references(() => user.id),
+    productId: text('product_id').notNull().references(() => product.id),
+    requestedRestockQty: real('requested_restock_qty').notNull(),
+    thresholdPct: real('threshold_pct').notNull(),
+    actualSellThroughPct: real('actual_sell_through_pct').notNull(),
+    lookbackDays: integer('lookback_days').notNull().default(90),
+    qualifyingSold: real('qualifying_sold').notNull().default(0),
+    qualifyingAcquired: real('qualifying_acquired').notNull().default(0),
+    reason: text('reason').notNull(),
+    status: text('status').notNull().default('pending'),
+    // 'pending' | 'approved' | 'denied'
+    requestedById: text('requested_by_id').notNull().references(() => user.id),
+    reviewedById: text('reviewed_by_id').references(() => user.id),
+    reviewerNote: text('reviewer_note'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    reviewedAt: timestamp('reviewed_at'),
+  },
+  (table) => [
+    index('sell_through_exception_business_idx').on(table.businessId),
+    index('sell_through_exception_status_idx').on(table.status),
+    index('sell_through_exception_product_idx').on(table.productId),
+    index('sell_through_exception_created_idx').on(table.createdAt),
+    check('sell_through_exception_status_check', sql`${table.status} IN ('pending', 'approved', 'denied')`),
+    check('sell_through_exception_qty_check', sql`${table.requestedRestockQty} > 0`),
+    check('sell_through_exception_threshold_check', sql`${table.thresholdPct} >= 0 AND ${table.thresholdPct} <= 100`),
+  ],
+);
+
+// ---------------------------------------------------------------------------
 // Relations
 // ---------------------------------------------------------------------------
 
@@ -902,6 +939,79 @@ export const staffBulletinRelations = relations(staffBulletin, ({ one }) => ({
 }));
 
 // ---------------------------------------------------------------------------
+// Private RRA communications (direct conversations and one-way broadcasts)
+// ---------------------------------------------------------------------------
+
+export const adminConversation = pgTable(
+  'admin_conversation',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    kind: text('kind').notNull(), // direct | broadcast
+    subject: text('subject').notNull(),
+    priority: text('priority').notNull().default('normal'), // low | normal | high
+    createdBy: text('created_by').notNull().references(() => user.id, { onDelete: 'restrict' }),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('admin_conversation_created_idx').on(table.createdAt),
+    check('admin_conversation_kind_check', sql`${table.kind} IN ('direct', 'broadcast')`),
+    check('admin_conversation_priority_check', sql`${table.priority} IN ('low', 'normal', 'high')`),
+    check('admin_conversation_subject_length_check', sql`length(${table.subject}) BETWEEN 1 AND 160`),
+  ],
+);
+
+export const adminConversationParticipant = pgTable(
+  'admin_conversation_participant',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    conversationId: text('conversation_id').notNull().references(() => adminConversation.id, { onDelete: 'cascade' }),
+    userId: text('user_id').notNull().references(() => user.id, { onDelete: 'restrict' }),
+    participantType: text('participant_type').notNull(), // sender | recipient
+    joinedAt: timestamp('joined_at').notNull().defaultNow(),
+    lastReadAt: timestamp('last_read_at'),
+  },
+  (table) => [
+    uniqueIndex('admin_conversation_participant_unique').on(table.conversationId, table.userId),
+    index('admin_conversation_participant_user_idx').on(table.userId, table.joinedAt),
+    check('admin_conversation_participant_type_check', sql`${table.participantType} IN ('sender', 'recipient')`),
+  ],
+);
+
+export const adminCommunicationMessage = pgTable(
+  'admin_communication_message',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    conversationId: text('conversation_id').notNull().references(() => adminConversation.id, { onDelete: 'cascade' }),
+    senderId: text('sender_id').notNull().references(() => user.id, { onDelete: 'restrict' }),
+    body: text('body').notNull(),
+    idempotencyKey: text('idempotency_key').unique(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('admin_communication_message_conversation_idx').on(table.conversationId, table.createdAt),
+    index('admin_communication_message_sender_idx').on(table.senderId, table.createdAt),
+    check('admin_communication_message_body_length_check', sql`length(${table.body}) BETWEEN 1 AND 10000`),
+  ],
+);
+
+export const adminConversationRelations = relations(adminConversation, ({ one, many }) => ({
+  creator: one(user, { fields: [adminConversation.createdBy], references: [user.id] }),
+  participants: many(adminConversationParticipant),
+  messages: many(adminCommunicationMessage),
+}));
+
+export const adminConversationParticipantRelations = relations(adminConversationParticipant, ({ one }) => ({
+  conversation: one(adminConversation, { fields: [adminConversationParticipant.conversationId], references: [adminConversation.id] }),
+  user: one(user, { fields: [adminConversationParticipant.userId], references: [user.id] }),
+}));
+
+export const adminCommunicationMessageRelations = relations(adminCommunicationMessage, ({ one }) => ({
+  conversation: one(adminConversation, { fields: [adminCommunicationMessage.conversationId], references: [adminConversation.id] }),
+  sender: one(user, { fields: [adminCommunicationMessage.senderId], references: [user.id] }),
+}));
+
+// ---------------------------------------------------------------------------
 // Support Tickets — taxpayer service requests (Weakness 6)
 // ---------------------------------------------------------------------------
 
@@ -964,6 +1074,7 @@ export const productionBatch = pgTable(
       .references(() => product.id),
     batchReference: text('batch_reference').notNull().unique(), // e.g. BATCH-SOAP-2026-000123
     declaredQuantity: real('declared_quantity').notNull(),
+    plannedQuantity: real('planned_quantity'),
     unitPrice: integer('unit_price').notNull().default(0),
     vatRateBasisPoints: integer('vat_rate_basis_points').notNull().default(0),
     idempotencyKey: text('idempotency_key'),
@@ -985,6 +1096,77 @@ export const productionBatch = pgTable(
     index('prod_batch_status_idx').on(table.status),
     uniqueIndex('prod_batch_ref_uniq').on(table.batchReference),
     uniqueIndex('prod_batch_idempotency_key_uniq').on(table.idempotencyKey),
+  ],
+);
+
+// Confidential manufacturer formulation data. Recipe versions and their
+// material lines are immutable so later corrections cannot rewrite history.
+export const manufacturingMaterial = pgTable(
+  'manufacturing_material',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    materialCode: text('material_code').notNull(),
+    confidentialName: text('confidential_name').notNull(),
+    unit: text('unit').notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('manufacturing_material_owner_code_uniq').on(table.manufacturerId, table.materialCode),
+    index('manufacturing_material_owner_idx').on(table.manufacturerId),
+  ],
+);
+
+export const manufacturingRecipe = pgTable(
+  'manufacturing_recipe',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    productId: text('product_id').notNull().references(() => product.id),
+    version: integer('version').notNull(),
+    batchOutputQuantity: real('batch_output_quantity').notNull(),
+    materialTolerancePercent: real('material_tolerance_percent').notNull().default(5),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('manufacturing_recipe_product_version_uniq').on(table.manufacturerId, table.productId, table.version),
+    index('manufacturing_recipe_owner_product_idx').on(table.manufacturerId, table.productId),
+    check('manufacturing_recipe_output_check', sql`${table.batchOutputQuantity} > 0`),
+    check('manufacturing_recipe_tolerance_check', sql`${table.materialTolerancePercent} >= 0 AND ${table.materialTolerancePercent} <= 100`),
+  ],
+);
+
+export const manufacturingRecipeMaterial = pgTable(
+  'manufacturing_recipe_material',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    recipeId: text('recipe_id').notNull().references(() => manufacturingRecipe.id),
+    materialId: text('material_id').notNull().references(() => manufacturingMaterial.id),
+    plannedQuantity: real('planned_quantity').notNull(),
+  },
+  (table) => [
+    uniqueIndex('manufacturing_recipe_material_uniq').on(table.recipeId, table.materialId),
+    check('manufacturing_recipe_material_quantity_check', sql`${table.plannedQuantity} > 0`),
+  ],
+);
+
+export const productionBatchMaterial = pgTable(
+  'production_batch_material',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    batchId: text('batch_id').notNull().references(() => productionBatch.id),
+    recipeId: text('recipe_id').notNull().references(() => manufacturingRecipe.id),
+    recipeMaterialId: text('recipe_material_id').notNull().references(() => manufacturingRecipeMaterial.id),
+    materialId: text('material_id').notNull().references(() => manufacturingMaterial.id),
+    plannedQuantity: real('planned_quantity').notNull(),
+    actualQuantity: real('actual_quantity').notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('production_batch_material_uniq').on(table.batchId, table.materialId),
+    index('production_batch_material_batch_idx').on(table.batchId),
+    check('production_batch_material_planned_check', sql`${table.plannedQuantity} > 0`),
+    check('production_batch_material_actual_check', sql`${table.actualQuantity} >= 0`),
   ],
 );
 
