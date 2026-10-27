@@ -30,6 +30,7 @@ import {
     Brain,
     Layers,
     ShieldCheck,
+    MessageSquare,
 } from "lucide-react";
 import type { RRARole } from "@/lib/auth-guard";
 import { getOperationalRRARolesWithAnyPermission } from "@/lib/rra-rbac";
@@ -432,6 +433,12 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 href: "/admin/notifications",
                 icon: Bell,
                 allowedRoles: ALL,
+            },
+            {
+                label: "Communications",
+                href: "/admin/communications",
+                icon: MessageSquare,
+                allowedRoles: getOperationalRRARolesWithAnyPermission(["communications.read"]),
             },
             {
                 label: "Bulletin Board",

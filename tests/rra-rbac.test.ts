@@ -91,6 +91,15 @@ test("super_admin has every permission in the authoritative permission map", () 
     assert.equal(hasRRAPermission("super_admin", "taxpayer.intelligence.search"), true);
 });
 
+test("communications sends are Super Admin only while staff inbox and direct replies are role-scoped", () => {
+    assert.ok(hasRRAPermission("super_admin", "communications.send"));
+    for (const role of RRA_ROLE_VALUES.filter((role) => role !== "super_admin")) {
+        assert.equal(hasRRAPermission(role, "communications.send"), false, `${role} must not send staff broadcasts or initiate messages`);
+        assert.equal(hasRRAPermission(role, "communications.read"), true, `${role} should access only participant conversations`);
+        assert.equal(hasRRAPermission(role, "communications.reply"), true, `${role} should reply only in direct conversations they joined`);
+    }
+});
+
 test("super_admin operational access includes taxpayer intelligence search", () => {
     assert.equal(hasOperationalRRAPermission(["super_admin"], "taxpayer.intelligence.search"), true);
     assert.equal(hasOperationalRRAPermission(["super_admin"], "taxpayer.compliance.read"), true);
