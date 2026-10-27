@@ -217,6 +217,16 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 ],
             },
             {
+                label: "Sell-Through Control",
+                href: "/admin/stock-control",
+                icon: Package,
+                allowedRoles: [
+                    "super_admin",
+                    "stock_officer",
+                    "correction_officer",
+                ],
+            },
+            {
                 label: "Taxpayer Discovery",
                 href: "/admin/intelligence/unregistered",
                 icon: UserSearch,

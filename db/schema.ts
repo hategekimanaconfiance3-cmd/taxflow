@@ -709,6 +709,43 @@ export const dispute = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// Sell-Through Exceptions — admin-approved exceptions for traders who have
+// not met the configured sell-through threshold before restocking.
+// ---------------------------------------------------------------------------
+
+export const sellThroughException = pgTable(
+  'sell_through_exception',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    businessId: text('business_id').notNull().references(() => user.id),
+    productId: text('product_id').notNull().references(() => product.id),
+    requestedRestockQty: real('requested_restock_qty').notNull(),
+    thresholdPct: real('threshold_pct').notNull(),
+    actualSellThroughPct: real('actual_sell_through_pct').notNull(),
+    lookbackDays: integer('lookback_days').notNull().default(90),
+    qualifyingSold: real('qualifying_sold').notNull().default(0),
+    qualifyingAcquired: real('qualifying_acquired').notNull().default(0),
+    reason: text('reason').notNull(),
+    status: text('status').notNull().default('pending'),
+    // 'pending' | 'approved' | 'denied'
+    requestedById: text('requested_by_id').notNull().references(() => user.id),
+    reviewedById: text('reviewed_by_id').references(() => user.id),
+    reviewerNote: text('reviewer_note'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    reviewedAt: timestamp('reviewed_at'),
+  },
+  (table) => [
+    index('sell_through_exception_business_idx').on(table.businessId),
+    index('sell_through_exception_status_idx').on(table.status),
+    index('sell_through_exception_product_idx').on(table.productId),
+    index('sell_through_exception_created_idx').on(table.createdAt),
+    check('sell_through_exception_status_check', sql`${table.status} IN ('pending', 'approved', 'denied')`),
+    check('sell_through_exception_qty_check', sql`${table.requestedRestockQty} > 0`),
+    check('sell_through_exception_threshold_check', sql`${table.thresholdPct} >= 0 AND ${table.thresholdPct} <= 100`),
+  ],
+);
+
+// ---------------------------------------------------------------------------
 // Relations
 // ---------------------------------------------------------------------------
 
