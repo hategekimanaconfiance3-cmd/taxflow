@@ -6,7 +6,7 @@ import { ConfidentialFormulaAccess } from '@/components/admin/confidential-formu
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 export default async function AdminProductionBatchPage({ params }: { params: Promise<{ batchId: string }> }) {
-  const { staff } = await requireRRAPermission('stock.read');
+  const { staff } = await requireRRAPermission('traceability.read');
   const { batchId } = await params;
   const batch = await getProductionComplianceDetail(batchId);
   if (!batch) notFound();

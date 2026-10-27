@@ -7,7 +7,7 @@ import { logAudit } from '@/lib/audit';
 export async function GET(_request: Request, context: { params: Promise<{ batchId: string }> }): Promise<NextResponse> {
   const requestId = randomUUID();
   try {
-    const access = await authorizeRRAPermissionForRequest('stock.read', _request.headers);
+    const access = await authorizeRRAPermissionForRequest('traceability.read', _request.headers);
     if (!access.authorized) return NextResponse.json({ error: access.status === 401 ? 'Sign in with an authorized RRA account.' : 'You do not have permission to view production monitoring details.' }, { status: access.status, headers: { 'x-request-id': requestId } });
     const { batchId } = await context.params;
     const detail = await getProductionComplianceDetail(batchId);

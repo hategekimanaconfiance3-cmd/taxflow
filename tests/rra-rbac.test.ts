@@ -381,3 +381,10 @@ test("confidential manufacturing recipe access is limited to audit investigators
     assert.equal(hasRRAPermission("product_traceability_officer", "production.recipe.confidential.read"), false);
     assert.equal(hasRRAPermission("super_admin", "production.recipe.confidential.read"), false);
 });
+
+test("production monitoring uses the existing traceability permission across its sidebar roles", () => {
+    const authorized = ["super_admin", "stock_officer", "audit_officer", "audit_investigation_officer", "product_traceability_officer"] as const;
+    const denied = ["director_executive", "tax_compliance_officer", "customs_import_officer", "payments_reconciliation_officer", "data_ai_analyst", "reporting_officer", "correction_officer"] as const;
+    for (const role of authorized) assert.equal(hasRRAPermission(role, "traceability.read"), true, `${role} should open production monitoring`);
+    for (const role of denied) assert.equal(hasRRAPermission(role, "traceability.read"), false, `${role} must remain blocked from production monitoring`);
+});

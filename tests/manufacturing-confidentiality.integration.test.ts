@@ -22,8 +22,11 @@ test('confidential manufacturing migration is repeatable and preserves private r
   const client = postgres(testDatabaseUrl!);
   const db = drizzle(client, { schema });
   const manufacturerId = randomUUID();
+  const otherManufacturerId = randomUUID();
   const productId = randomUUID();
+  const otherProductId = randomUUID();
   const materialId = randomUUID();
+  const otherMaterialId = randomUUID();
   const recipeId = randomUUID();
   const recipeMaterialId = randomUUID();
   const batchId = randomUUID();
@@ -37,10 +40,16 @@ test('confidential manufacturing migration is repeatable and preserves private r
     await client.unsafe(migration);
     migrationApplied = true;
     await client.unsafe(migration);
+    const ownershipMigration = await readFile('db/migrations/taxflow/0022_manufacturing_ownership_guards.sql', 'utf8');
+    await client.unsafe(ownershipMigration);
+    await client.unsafe(ownershipMigration);
 
     await db.insert(schema.user).values({ id: manufacturerId, name: 'Manufacturing integration test', email: `${manufacturerId}@test.invalid`, role: 'manufacturer' });
+    await db.insert(schema.user).values({ id: otherManufacturerId, name: 'Other manufacturer integration test', email: `${otherManufacturerId}@test.invalid`, role: 'manufacturer' });
     await db.insert(schema.product).values({ id: productId, name: 'Test product', unit: 'kg', createdByUserId: manufacturerId });
+    await db.insert(schema.product).values({ id: otherProductId, name: 'Other test product', unit: 'kg', createdByUserId: otherManufacturerId });
     await db.insert(schema.manufacturingMaterial).values({ id: materialId, manufacturerId, materialCode: 'M-001', confidentialName: 'test confidential ingredient', unit: 'kg' });
+    await db.insert(schema.manufacturingMaterial).values({ id: otherMaterialId, manufacturerId: otherManufacturerId, materialCode: 'M-001', confidentialName: 'other confidential ingredient', unit: 'kg' });
     await db.insert(schema.manufacturingRecipe).values({ id: recipeId, manufacturerId, productId, version: 1, batchOutputQuantity: 100, materialTolerancePercent: 5 });
     await db.insert(schema.manufacturingRecipeMaterial).values({ id: recipeMaterialId, recipeId, materialId, plannedQuantity: 12 });
     await db.insert(schema.productionBatch).values({
@@ -62,6 +71,19 @@ test('confidential manufacturing migration is repeatable and preserves private r
       .innerJoin(schema.manufacturingMaterial, eq(schema.productionBatchMaterial.materialId, schema.manufacturingMaterial.id))
       .where(eq(schema.productionBatchMaterial.batchId, batchId));
     assert.deepEqual(storedMaterial, { code: 'M-001', actual: 13 });
+
+    await assert.rejects(
+      db.insert(schema.manufacturingRecipe).values({ id: randomUUID(), manufacturerId, productId: otherProductId, version: 1, batchOutputQuantity: 100 }),
+      /recipe product must belong/i,
+    );
+    await assert.rejects(
+      db.insert(schema.manufacturingRecipeMaterial).values({ id: randomUUID(), recipeId, materialId: otherMaterialId, plannedQuantity: 12 }),
+      /recipe materials must belong/i,
+    );
+    await assert.rejects(
+      db.insert(schema.productionBatchMaterial).values({ id: randomUUID(), batchId, recipeId, recipeMaterialId, materialId: otherMaterialId, plannedQuantity: 12, actualQuantity: 12 }),
+      /production material evidence must match/i,
+    );
 
     await assert.rejects(
       client.unsafe('UPDATE public.manufacturing_material SET confidential_name = $1 WHERE id = $2', ['rewritten name', materialId]),
@@ -88,6 +110,9 @@ test('confidential manufacturing migration is repeatable and preserves private r
       await db.delete(schema.manufacturingMaterial).where(eq(schema.manufacturingMaterial.id, materialId));
       await db.delete(schema.product).where(eq(schema.product.id, productId));
       await db.delete(schema.user).where(eq(schema.user.id, manufacturerId));
+      await db.delete(schema.manufacturingMaterial).where(eq(schema.manufacturingMaterial.id, otherMaterialId));
+      await db.delete(schema.product).where(eq(schema.product.id, otherProductId));
+      await db.delete(schema.user).where(eq(schema.user.id, otherManufacturerId));
       await client.unsafe('ALTER TABLE public.manufacturing_material ENABLE TRIGGER USER');
       await client.unsafe('ALTER TABLE public.manufacturing_recipe ENABLE TRIGGER USER');
       await client.unsafe('ALTER TABLE public.manufacturing_recipe_material ENABLE TRIGGER USER');

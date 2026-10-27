@@ -4,7 +4,7 @@ import { listProductionComplianceRecords } from '@/lib/production-service';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 export default async function AdminProductionPage() {
-  await requireRRAPermission('stock.read');
+  await requireRRAPermission('traceability.read');
   const batches = await listProductionComplianceRecords();
   return <div className="space-y-5">
     <div><h1 className="text-2xl font-bold">Production monitoring</h1><p className="text-sm text-muted-foreground">Review declared output and protected material usage evidence. Ingredient names require separate audited access.</p></div>
