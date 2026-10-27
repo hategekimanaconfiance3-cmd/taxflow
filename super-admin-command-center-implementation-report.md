@@ -44,3 +44,10 @@ Implemented on the isolated branch `codex/super-admin-command-center`, based on 
 - The page currently surfaces stored unresolved findings, transaction-value ranking, recorded stock movements, and declared production. It does not compute new stock/production/sales mismatch signals, a full manufacturer-to-retailer flow, or all ranking/filter dimensions requested.
 - The transaction chart is based on recorded transaction row counts. Existing aggregate totals by status remain visible in the dashboard's status summary; physical movement and tax liability are not inferred.
 - Manual role-account testing, database-backed tests, visual browser inspection, and live service-health verification remain necessary before declaring full acceptance.
+
+## Follow-up: dashboard runtime error investigation
+
+- The command center and the existing findings/search workflows query the Drizzle `ai_finding` table, but the branch's SQL migration directory did not contain a migration creating that table. If the deployed database was provisioned from tracked migrations rather than a schema push, this leaves both dashboard data and command search failing at runtime.
+- Added `db/migrations/taxflow/0019_ai_finding.sql`, an additive, transaction-wrapped, idempotent table/index creation matching `db/schema.ts`. Existing records are not modified.
+- Added server-side PostgreSQL error-code logging to the command-center actions while retaining generic user-facing error messages.
+- `pnpm typecheck` passed after this follow-up. The production database was not queried or changed here. Apply the new migration to the TaxFlow Neon database to activate the fix; until then, the deployed page can continue to show the unavailable state if `ai_finding` is absent. The exact production-side missing-table condition could not be confirmed without database access.

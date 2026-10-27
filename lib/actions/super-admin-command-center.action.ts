@@ -122,9 +122,18 @@ export async function getSuperAdminCommandCenter(input: unknown) {
       },
     };
   } catch (error) {
-    console.error("Super Admin command center query failed", { errorName: error instanceof Error ? error.name : typeof error });
+    logCommandCenterFailure("Super Admin command center query failed", error);
     throw new Error("Command center data is temporarily unavailable. Please retry in a moment.");
   }
+}
+
+function logCommandCenterFailure(operation: string, error: unknown) {
+  const candidate = error && typeof error === "object" ? error as { code?: unknown; cause?: { code?: unknown } } : null;
+  const code = candidate?.code ?? candidate?.cause?.code;
+  console.error(operation, {
+    errorName: error instanceof Error ? error.name : typeof error,
+    databaseCode: typeof code === "string" ? code : undefined,
+  });
 }
 
 const commandQuerySchema = z.string().trim().min(2).max(100);
@@ -156,7 +165,7 @@ export async function searchSuperAdminCommand(input: unknown) {
       ...cases.map((row) => ({ id: row.id, title: row.title, detail: (row.business ?? "Business") + " · " + row.status, kind: "Investigation", href: "/admin/cases" })),
     ];
   } catch (error) {
-    console.error("Super Admin command search failed", { errorName: error instanceof Error ? error.name : typeof error });
+    logCommandCenterFailure("Super Admin command search failed", error);
     throw new Error("Command search is temporarily unavailable.");
   }
 }
