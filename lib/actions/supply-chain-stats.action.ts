@@ -42,7 +42,7 @@ export interface SupplyChainData {
  * Compute supply chain overview stats.
  */
 export async function getSupplyChainStats(): Promise<SupplyChainData> {
-    await requireRRASession("audit_officer", "stock_officer", "reporting_officer", "audit_investigation_officer", "product_traceability_officer", "director_executive", "data_ai_analyst");
+    await requireRRASession("super_admin", "audit_officer", "stock_officer", "reporting_officer", "audit_investigation_officer", "product_traceability_officer", "director_executive", "data_ai_analyst");
 
     try {
         const today = new Date();

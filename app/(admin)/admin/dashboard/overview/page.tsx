@@ -52,13 +52,14 @@ export default async function AdminOverviewPage() {
     });
   }
 
-  const completionRate =
-    stats.revenue.vatOutput > 0
-      ? Math.round((stats.revenue.taxPaymentsTotal / stats.revenue.vatOutput) * 100)
-      : 0;
+  // Calculate net VAT due (output - input). If net > 0, calculate payment coverage.
+  const netVatDue = Math.max(0, stats.revenue.vatOutput - stats.revenue.vatInput);
+  const completionRate = netVatDue > 0
+    ? Math.min(Math.round((stats.revenue.taxPaymentsTotal / netVatDue) * 100), 999)
+    : stats.revenue.taxPaymentsTotal > 0 ? 100 : 0;
 
   const cleared = Number(stats.traders.byClearance?.['approved'] ?? 0);
-  const flagged = Number(stats.traders.byClearance?.['flagged'] ?? 0);
+  const flagged = Number(stats.traders.byClearance?.['under_review'] ?? 0);
   const suspended = Number(stats.traders.suspended ?? 0);
 
   return (
@@ -80,7 +81,7 @@ export default async function AdminOverviewPage() {
       {/* KPI cards */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <KpiCardSparkline
-          title="VAT Generated (Output)"
+          title="Recorded Output VAT"
           value={formatRWF(stats.revenue.vatOutput)}
           description="Total output VAT recorded"
           trend={stats.trends.vatGenerated}
@@ -89,9 +90,9 @@ export default async function AdminOverviewPage() {
           sparkColor="#10b981"
         />
         <KpiCardSparkline
-          title="VAT Collected"
+          title="Confirmed Tax Payments"
           value={formatRWF(stats.revenue.taxPaymentsTotal)}
-          description={`${stats.revenue.taxPaymentsCount} payment${stats.revenue.taxPaymentsCount !== 1 ? 's' : ''} received`}
+          description={`${stats.revenue.taxPaymentsCount} confirmed payment${stats.revenue.taxPaymentsCount !== 1 ? 's' : ''} · ${stats.revenue.vatInput > 0 ? `Input: ${formatRWF(stats.revenue.vatInput)}` : 'No input VAT recorded'}`}
           trend={stats.trends.vatCollected}
           icon={<TrendingUp className="h-4 w-4" />}
           sparkKey="vatCollected"

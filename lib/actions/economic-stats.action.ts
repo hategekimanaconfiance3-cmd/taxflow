@@ -41,7 +41,7 @@ export interface EconomicStatsData {
  * Compute national economic intelligence metrics.
  */
 export async function getEconomicStats(): Promise<EconomicStatsData> {
-    await requireRRASession("reporting_officer", "director_executive", "data_ai_analyst");
+    await requireRRASession("super_admin", "reporting_officer", "director_executive", "data_ai_analyst");
 
     try {
         const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);

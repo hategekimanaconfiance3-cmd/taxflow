@@ -44,7 +44,7 @@ export type DataQualityMetrics = {
 // ---------------------------------------------------------------------------
 
 export async function getDataQualityMetrics(): Promise<DataQualityMetrics> {
-    await requireRRASession("compliance_officer", "audit_officer", "data_ai_analyst");
+    await requireRRASession("super_admin", "compliance_officer", "audit_officer", "data_ai_analyst");
 
     // ── Trader Completeness ────────────────────────────────────────────
     const traders = await db

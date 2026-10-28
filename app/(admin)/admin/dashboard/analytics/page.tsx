@@ -6,7 +6,7 @@ import { SupplyChainSummary } from '@/components/admin/analytics/supply-chain-su
 import { EconomicSummary } from '@/components/admin/analytics/economic-summary';
 
 export default async function AdminAnalyticsPage() {
-  await requireRRASession("reporting_officer", "director_executive", "data_ai_analyst");
+  await requireRRASession("super_admin", "reporting_officer", "director_executive", "data_ai_analyst");
 
   return (
     <div className="space-y-6">

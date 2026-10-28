@@ -1,4 +1,4 @@
-import {
+﻿import {
     LayoutDashboard,
     Users,
     ArrowLeftRight,
@@ -31,6 +31,11 @@ import {
     Cpu,
     Brain,
     Layers,
+    ShieldAlert,
+    UserCog,
+    Lock,
+    Server,
+    Eye,
 } from "lucide-react";
 import type { RRARole } from "@/lib/auth-guard";
 
@@ -171,6 +176,7 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 href: "/admin/transactions",
                 icon: ArrowLeftRight,
                 allowedRoles: [
+                    "super_admin",
                     "compliance_officer",
                     "audit_officer",
                 ],
@@ -235,6 +241,7 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 href: "/admin/tax",
                 icon: Receipt,
                 allowedRoles: [
+                    "super_admin",
                     "compliance_officer",
                     "reporting_officer",
                     "payments_reconciliation_officer",
@@ -245,6 +252,7 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 href: "/admin/payments",
                 icon: CreditCard,
                 allowedRoles: [
+                    "super_admin",
                     "compliance_officer",
                     "audit_officer",
                     "reporting_officer",
@@ -309,6 +317,7 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 href: "/admin/disputes",
                 icon: Scale,
                 allowedRoles: [
+                    "super_admin",
                     "compliance_officer",
                     "audit_officer",
                     "data_ai_analyst",
@@ -319,6 +328,7 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 href: "/admin/intelligence",
                 icon: Brain,
                 allowedRoles: [
+                    "super_admin",
                     "compliance_officer",
                     "audit_officer",
                     "data_ai_analyst",
@@ -355,6 +365,7 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 href: "/admin/anomalies",
                 icon: Activity,
                 allowedRoles: [
+                    "super_admin",
                     "compliance_officer",
                     "audit_officer",
                     "tax_compliance_officer",
@@ -367,6 +378,7 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 href: "/admin/vat-verification",
                 icon: TrendingUp,
                 allowedRoles: [
+                    "super_admin",
                     "compliance_officer",
                     "audit_officer",
                 ],
@@ -375,7 +387,7 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 label: "Compliance",
                 href: "/admin/compliance",
                 icon: Gavel,
-                allowedRoles: ["compliance_officer", "tax_compliance_officer"],
+                allowedRoles: ["super_admin", "compliance_officer", "tax_compliance_officer"],
             },
             {
                 label: "Compliance Alerts",
@@ -417,7 +429,7 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 label: "Data Exports",
                 href: "/admin/exports",
                 icon: Download,
-                allowedRoles: ["reporting_officer", "director_executive", "data_ai_analyst"],
+                allowedRoles: ["super_admin", "reporting_officer", "director_executive", "data_ai_analyst"],
             },
             {
                 label: "AI Feedback Review",
@@ -442,6 +454,45 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 href: "/admin/settings",
                 icon: Settings,
                 allowedRoles: ["super_admin"],
+            },
+        ],
+    },
+
+    // -- Super Admin Control Plane
+    {
+        label: "Super Admin",
+        items: [
+            {
+                label: "Control Plane",
+                href: "/admin/super",
+                icon: ShieldAlert,
+                allowedRoles: ["super_admin"],
+                children: [
+                    {
+                        label: "Overview",
+                        href: "/admin/super",
+                        icon: Eye,
+                        allowedRoles: ["super_admin"],
+                    },
+                    {
+                        label: "Admin Management",
+                        href: "/admin/super/admins",
+                        icon: UserCog,
+                        allowedRoles: ["super_admin"],
+                    },
+                    {
+                        label: "Security Center",
+                        href: "/admin/super/security",
+                        icon: Lock,
+                        allowedRoles: ["super_admin"],
+                    },
+                    {
+                        label: "System Health",
+                        href: "/admin/super/system",
+                        icon: Server,
+                        allowedRoles: ["super_admin"],
+                    },
+                ],
             },
         ],
     },
