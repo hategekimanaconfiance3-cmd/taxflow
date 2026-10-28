@@ -1,4 +1,4 @@
-import { requireRRASession } from '@/lib/auth-guard';
+﻿import { requireRRASession } from '@/lib/auth-guard';
 import { getDashboardOverview } from '@/lib/actions/admin-dashboard.action';
 import { CommandCenterHero } from '@/components/admin/overview/command-center-hero';
 import { KpiCardSparkline } from '@/components/admin/overview/kpi-card-sparkline';
@@ -69,13 +69,14 @@ export default async function AdminOverviewPage() {
       {/* Priority alerts */}
       {alerts.length > 0 && <PriorityAlerts alerts={alerts} />}
 
-      {/* Live EBM pulse + velocity gauge */}
+      {/* Live transaction flow + today glance */}
       <CommandCenterHero
         userId={user.id}
         todayCount={Number(stats.transactions.today.count) || 0}
         todayValue={Number(stats.transactions.today.value) || 0}
         weekCount={Number(stats.transactions.thisWeek.count) || 0}
         weekValue={Number(stats.transactions.thisWeek.value) || 0}
+        pendingDisputes={stats.disputes.underReview}
       />
 
       {/* KPI cards */}

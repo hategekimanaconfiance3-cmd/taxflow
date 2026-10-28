@@ -9,21 +9,17 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  RadialBarChart,
-  RadialBar,
 } from 'recharts';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useSocket } from '@/lib/socket-client';
 import { formatRWF } from '@/components/dashboard/stat-card/stat-card';
-import { Activity, Zap, Wifi, WifiOff } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { Activity, Wifi, WifiOff, TrendingUp, TrendingDown, Minus, BarChart2 } from 'lucide-react';
 
 type PulsePoint = { minute: string; value: number; count: number };
 
 function buildPulse(raw: PulsePoint[]): PulsePoint[] {
   if (raw.length === 60) return raw;
-  // Ensure we always have 60 points; fill missing minutes with 0
   const now = new Date();
   const map = new Map(raw.map((r) => [r.minute, r]));
   return Array.from({ length: 60 }, (_, i) => {
@@ -33,18 +29,14 @@ function buildPulse(raw: PulsePoint[]): PulsePoint[] {
   });
 }
 
-function velocityColor(pct: number): string {
-  if (pct >= 90) return '#10b981'; // green
-  if (pct >= 50) return '#f59e0b'; // amber
-  return '#ef4444'; // red
-}
-
 interface CommandCenterHeroProps {
   userId: string;
   todayCount: number;
   todayValue: number;
   weekCount: number;
   weekValue: number;
+  pendingDisputes?: number;
+  pendingPayments?: number;
   insight?: string;
 }
 
@@ -54,11 +46,12 @@ export function CommandCenterHero({
   todayValue,
   weekCount,
   weekValue,
+  pendingDisputes = 0,
+  pendingPayments = 0,
   insight,
 }: CommandCenterHeroProps) {
   const [pulse, setPulse] = useState<PulsePoint[]>([]);
   const [loading, setLoading] = useState(true);
-  const [lastPulse, setLastPulse] = useState<number | null>(null);
   const fetchRef = useRef(false);
 
   const fetchPulse = useCallback(async () => {
@@ -67,63 +60,51 @@ export function CommandCenterHero({
       if (!res.ok) return;
       const data: PulsePoint[] = await res.json();
       setPulse(buildPulse(data));
-      setLastPulse(Date.now());
     } finally {
       setLoading(false);
     }
   }, []);
 
-  // Initial fetch
   useEffect(() => {
     if (fetchRef.current) return;
     fetchRef.current = true;
     fetchPulse();
   }, [fetchPulse]);
 
-  // Real-time: on new transaction, append to current minute bucket and refetch
   const { connected } = useSocket(userId, {
     'txn:incoming': () => {
-      // Append a synthetic point to the current minute, then refetch for accuracy
       setPulse((prev) => {
         if (!prev.length) return prev;
         const now = new Date().toTimeString().slice(0, 5);
         const next = [...prev];
         const lastIdx = next.length - 1;
         if (next[lastIdx].minute === now) {
-          next[lastIdx] = {
-            ...next[lastIdx],
-            count: next[lastIdx].count + 1,
-          };
+          next[lastIdx] = { ...next[lastIdx], count: next[lastIdx].count + 1 };
         }
         return next;
       });
-      // Refetch for accurate values
       fetchPulse();
     },
     'txn:confirmed': () => fetchPulse(),
   });
 
-  // Compute velocity: RWF/min based on last 5 minutes vs daily average
-  const last5 = pulse.slice(-5);
-  const last5Value = last5.reduce((s, p) => s + p.value, 0);
-  const velocityNow = last5.length > 0 ? last5Value / last5.length : 0;
-  const noActivityLastHour = pulse.length > 0 && pulse.every((p) => p.value === 0 && p.count === 0);
+  const noActivityLastHour =
+    pulse.length > 0 && pulse.every((p) => p.value === 0 && p.count === 0);
 
-  // Daily average: if today has transactions, compute avg per minute since midnight
-  const minutesSinceMidnight = (() => {
-    const now = new Date();
-    return now.getHours() * 60 + now.getMinutes() || 1;
-  })();
-  const dailyAvgVelocity = todayValue > 0 ? todayValue / minutesSinceMidnight : 0;
-  const velocityPct = dailyAvgVelocity > 0
-    ? Math.min(Math.round((velocityNow / dailyAvgVelocity) * 100), 150)
-    : 0;
-  const gaugeColor = velocityColor(velocityPct);
+  // Today vs week daily average
+  const weekDailyAvg = weekCount > 0 ? weekCount / 7 : 0;
+  const todayVsWeekAvg =
+    weekDailyAvg > 0 ? Math.round((todayCount / weekDailyAvg) * 100) : null;
 
-  const gaugeData = [{ name: 'velocity', value: Math.min(velocityPct, 100), fill: gaugeColor }];
-
-  // Custom tooltip
-  const PulseTooltip = ({ active, payload, label }: { active?: boolean; payload?: { value: number }[]; label?: string }) => {
+  const PulseTooltip = ({
+    active,
+    payload,
+    label,
+  }: {
+    active?: boolean;
+    payload?: { value: number }[];
+    label?: string;
+  }) => {
     if (!active || !payload?.length) return null;
     return (
       <div className="rounded-md border bg-background px-3 py-2 shadow-md text-xs">
@@ -133,9 +114,11 @@ export function CommandCenterHero({
     );
   };
 
+  const pendingTotal = pendingDisputes + pendingPayments;
+
   return (
     <div className="grid gap-4 lg:grid-cols-3">
-      {/* ── Live Transaction Flow — 2/3 width ── */}
+      {/* Live Transaction Flow — 2/3 width */}
       <Card className="lg:col-span-2">
         <CardHeader className="pb-2 pt-3 px-4">
           <div className="flex items-center justify-between">
@@ -215,75 +198,81 @@ export function CommandCenterHero({
         </CardContent>
       </Card>
 
-      {/* ── Collection Velocity Gauge — 1/3 width ── */}
+      {/* Today at a Glance — replaces Collection Velocity */}
       <Card>
-        <CardHeader className="pb-1 pt-3 px-4">
+        <CardHeader className="pb-2 pt-3 px-4">
           <CardTitle className="text-sm font-medium flex items-center gap-2">
-            <Zap className="h-4 w-4 text-amber-500" />
-            Collection Velocity
+            <BarChart2 className="h-4 w-4 text-blue-500" />
+            Today at a Glance
           </CardTitle>
-          <p className="text-[10px] text-muted-foreground mt-0.5">RWF / minute vs daily avg</p>
+          <p className="text-[10px] text-muted-foreground mt-0.5">
+            {new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' })}
+          </p>
         </CardHeader>
-        <CardContent className="flex flex-col items-center justify-center pb-3 pt-1">
-          {/* Radial gauge */}
-          <div className="relative">
-            <ResponsiveContainer width={160} height={120}>
-              <RadialBarChart
-                innerRadius="55%"
-                outerRadius="85%"
-                data={gaugeData}
-                startAngle={200}
-                endAngle={-20}
-                barSize={14}
-              >
-                <RadialBar
-                  dataKey="value"
-                  cornerRadius={6}
-                  background={{ fill: 'hsl(var(--muted))' }}
-                  isAnimationActive={true}
-                  animationDuration={600}
-                />
-              </RadialBarChart>
-            </ResponsiveContainer>
-            {/* Center text */}
-            <div className="absolute inset-0 flex flex-col items-center justify-center">
-              <span
-                className="text-2xl font-bold leading-none"
-                style={{ color: gaugeColor }}
-              >
-                {Math.min(velocityPct, 150)}%
-              </span>
-              <span className="text-[10px] text-muted-foreground mt-0.5">
-                {velocityPct >= 90 ? 'On Track' : velocityPct >= 50 ? 'Below Avg' : 'Low'}
-              </span>
+        <CardContent className="pb-3 pt-0 space-y-3">
+          {/* Today transactions */}
+          <div className="space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">Transactions today</span>
+              {todayVsWeekAvg !== null && (
+                <span className={`text-[10px] font-semibold flex items-center gap-0.5 ${
+                  todayVsWeekAvg >= 100 ? 'text-emerald-600' : todayVsWeekAvg >= 50 ? 'text-amber-600' : 'text-muted-foreground'
+                }`}>
+                  {todayVsWeekAvg >= 100
+                    ? <TrendingUp className="h-2.5 w-2.5" />
+                    : todayVsWeekAvg >= 50
+                    ? <Minus className="h-2.5 w-2.5" />
+                    : <TrendingDown className="h-2.5 w-2.5" />}
+                  {todayVsWeekAvg}% of 7d avg
+                </span>
+              )}
             </div>
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-xl font-bold">{todayCount.toLocaleString()}</span>
+              <span className="text-xs text-muted-foreground">txns</span>
+            </div>
+            <div className="text-xs text-muted-foreground font-mono">{formatRWF(todayValue)} value</div>
           </div>
 
-          {/* Stats below gauge */}
-          <div className="w-full space-y-1.5 mt-1">
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-muted-foreground">Now (5-min avg)</span>
-              <span className={cn('font-mono font-semibold', { 'text-emerald-600': velocityPct >= 90, 'text-amber-600': velocityPct >= 50 && velocityPct < 90, 'text-red-500': velocityPct < 50 })}>
-                {velocityNow === 0 ? '0 RWF/min' : `${formatRWF(Math.round(velocityNow))}/min`}
-              </span>
+          <div className="border-t pt-3 space-y-1">
+            <span className="text-xs text-muted-foreground">This week</span>
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-lg font-semibold">{weekCount.toLocaleString()}</span>
+              <span className="text-xs text-muted-foreground">txns</span>
             </div>
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-muted-foreground">Daily avg (baseline)</span>
-              <span className="font-mono text-muted-foreground">
-                {dailyAvgVelocity === 0 ? 'No data' : `${formatRWF(Math.round(dailyAvgVelocity))}/min`}
-              </span>
-            </div>
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-muted-foreground">vs daily avg</span>
-              <span className={cn('font-mono text-xs font-semibold', { 'text-emerald-600': velocityPct >= 90, 'text-amber-600': velocityPct >= 50 && velocityPct < 90, 'text-red-500': velocityPct < 50 })}>
-                {dailyAvgVelocity === 0 ? 'No baseline' : `${Math.min(velocityPct, 150)}% of daily avg`}
-              </span>
-            </div>
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-muted-foreground">This week</span>
-              <span className="font-mono text-muted-foreground">{weekCount.toLocaleString()} txn</span>
-            </div>
+            <div className="text-xs text-muted-foreground font-mono">{formatRWF(weekValue)} value</div>
           </div>
+
+          {/* Pending actions */}
+          {pendingTotal > 0 && (
+            <div className="border-t pt-3">
+              <span className="text-xs text-muted-foreground">Requires attention</span>
+              <div className="mt-1.5 space-y-1">
+                {pendingDisputes > 0 && (
+                  <div className="flex justify-between text-xs">
+                    <span className="text-amber-700">Disputes</span>
+                    <Badge variant="outline" className="text-[10px] h-4 px-1 border-amber-200 text-amber-700 bg-amber-50/60">
+                      {pendingDisputes}
+                    </Badge>
+                  </div>
+                )}
+                {pendingPayments > 0 && (
+                  <div className="flex justify-between text-xs">
+                    <span className="text-blue-700">Pending payments</span>
+                    <Badge variant="outline" className="text-[10px] h-4 px-1 border-blue-200 text-blue-700 bg-blue-50/60">
+                      {pendingPayments}
+                    </Badge>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {pendingTotal === 0 && todayCount === 0 && (
+            <div className="border-t pt-3 text-center">
+              <p className="text-xs text-muted-foreground">No transactions recorded today</p>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
