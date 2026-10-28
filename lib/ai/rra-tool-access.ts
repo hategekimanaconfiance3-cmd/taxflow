@@ -36,13 +36,13 @@ export function isRRAAIInjectionAttempt(message: string): boolean {
 /** A tool is exposed when any one of its existing RRA permissions is granted. */
 export const RRA_AI_TOOL_PERMISSIONS: Record<RRAAIToolName, readonly RRAPermission[]> = {
   getTaxpayerIntelligence: ['taxpayer.intelligence.search'],
-  lookupTrader: ['taxpayer.intelligence.search'],
+  lookupTrader: ['taxpayer.compliance.read'],
   searchTraders: ['taxpayer.intelligence.search'],
   getTransactions: ['transaction.read'],
   getStockLevels: ['stock.read'],
   getStockMovements: ['stock.read', 'traceability.read'],
   getTaxStatus: ['taxpayer.compliance.read', 'tax.records.read', 'payments.read'],
-  getRiskAssessment: ['ai.findings.read', 'analytics.read'],
+  getRiskAssessment: ['ai.findings.read', 'analytics.read', 'investigation.case.manage'],
   getRevenueForecastTool: ['reports.aggregate.read', 'dashboard.executive.read', 'analytics.read'],
   getSystemStats: ['reports.aggregate.read', 'dashboard.executive.read'],
   getBehavioralAnalysis: ['ai.findings.read', 'analytics.read'],

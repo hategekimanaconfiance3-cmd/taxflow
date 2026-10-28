@@ -22,8 +22,8 @@ import { staffAccountSchema, staffAssignmentRoleSchema, staffRoleSchema, staffRo
 // Role catalogue
 // ---------------------------------------------------------------------------
 
-test("exactly 8 proposed RRA roles are defined in the expected order", () => {
-    assert.equal(RRA_ROLE_OPTIONS.length, 8);
+test("exactly 9 proposed RRA roles are defined in the expected order", () => {
+    assert.equal(RRA_ROLE_OPTIONS.length, 9);
     assert.deepEqual(RRA_ROLE_OPTIONS.map((r) => r.value), [
         "super_admin",
         "director_executive",
@@ -33,6 +33,7 @@ test("exactly 8 proposed RRA roles are defined in the expected order", () => {
         "customs_import_officer",
         "payments_reconciliation_officer",
         "data_ai_analyst",
+        "stock_control_admin",
     ]);
 });
 
@@ -46,6 +47,7 @@ test("all role values (proposed + legacy) are accessible via RRA_ROLE_VALUES", (
         "customs_import_officer",
         "payments_reconciliation_officer",
         "data_ai_analyst",
+        "stock_control_admin",
         "compliance_officer",
         "audit_officer",
         "stock_officer",
@@ -146,6 +148,18 @@ test("data_ai_analyst: analytics, AI findings, data quality, feedback review", (
     assert.ok(hasRRAPermission("data_ai_analyst", "reports.aggregate.read"));
     assert.ok(hasRRAPermission("data_ai_analyst", "ai.assistant.use"));
     assert.ok(hasRRAPermission("data_ai_analyst", "ai.feedback.review"));
+});
+
+test("stock_control_admin receives only sell-through and restock-control permissions", () => {
+    assert.ok(hasRRAPermission("stock_control_admin", "stock.threshold.read"));
+    assert.ok(hasRRAPermission("stock_control_admin", "stock.threshold.manage.scoped"));
+    assert.ok(hasRRAPermission("stock_control_admin", "stock.restock.read"));
+    assert.ok(hasRRAPermission("stock_control_admin", "stock.restock.exception.review"));
+    assert.ok(hasRRAPermission("stock_control_admin", "stock.restock.baseline.attest"));
+    assert.equal(hasRRAPermission("stock_control_admin", "stock.threshold.manage.global"), false);
+    assert.equal(hasRRAPermission("stock_control_admin", "staff.manage"), false);
+    assert.equal(hasRRAPermission("stock_control_admin", "taxpayer.intelligence.search"), false);
+    assert.equal(hasRRAPermission("stock_control_admin", "stock.correction.review"), false);
 });
 
 // ---------------------------------------------------------------------------
@@ -272,7 +286,7 @@ test("direct role match always succeeds regardless of aliases", () => {
 // Staff account creation schema — only proposed roles accepted
 // ---------------------------------------------------------------------------
 
-test("new staff accounts can only be assigned one of the 8 proposed roles", () => {
+test("new staff accounts can only be assigned one of the 9 proposed roles", () => {
     for (const role of RRA_ROLE_OPTIONS) {
         assert.ok(
             staffAssignmentRoleSchema.safeParse(role.value).success,

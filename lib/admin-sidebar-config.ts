@@ -36,6 +36,7 @@
     Lock,
     Server,
     Eye,
+    SlidersHorizontal,
 } from "lucide-react";
 import type { RRARole } from "@/lib/auth-guard";
 
@@ -80,6 +81,7 @@ export const ROLE_LABELS: Record<RRARole, string> = {
     customs_import_officer: "Customs & Import Officer",
     payments_reconciliation_officer: "Tax Payments & Reconciliation Officer",
     data_ai_analyst: "Data & AI Intelligence Analyst",
+    stock_control_admin: "Stock Control Administrator",
     compliance_officer: "Compliance Officer",
     audit_officer: "Audit Officer",
     stock_officer: "Stock Monitoring Officer",
@@ -95,6 +97,7 @@ export const ROLE_COLORS: Record<RRARole, string> = {
     customs_import_officer: "bg-orange-500/10 text-orange-700 border-orange-200",
     payments_reconciliation_officer: "bg-green-500/10 text-green-700 border-green-200",
     data_ai_analyst: "bg-indigo-500/10 text-indigo-700 border-indigo-200",
+    stock_control_admin: "bg-teal-500/10 text-teal-700 border-teal-200",
     super_admin: "bg-rose-500/10 text-rose-600 border-rose-200",
     compliance_officer: "bg-violet-500/10 text-violet-600 border-violet-200",
     audit_officer: "bg-amber-500/10 text-amber-600 border-amber-200",
@@ -220,6 +223,12 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                     "product_traceability_officer",
                     "audit_investigation_officer",
                 ],
+            },
+            {
+                label: "Stock Restock Control",
+                href: "/admin/stock-control",
+                icon: SlidersHorizontal,
+                allowedRoles: ["stock_control_admin", "super_admin"],
             },
             {
                 label: "Taxpayer Discovery",
