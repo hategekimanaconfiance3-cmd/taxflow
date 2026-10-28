@@ -254,6 +254,101 @@ export const stockMovement = pgTable(
   ],
 );
 
+// Effective-dated sell-through policy. Rows are immutable history; a change is
+// represented by inserting a new row rather than rewriting prior decisions.
+export const stockSellThroughThreshold = pgTable(
+  'stock_sell_through_threshold',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    scopeType: text('scope_type').notNull(), // default | category | product
+    scopeKey: text('scope_key').notNull(), // '*' for default, otherwise category code or product ID
+    thresholdPercent: real('threshold_percent').notNull(),
+    effectiveAt: timestamp('effective_at').notNull(),
+    reason: text('reason').notNull(),
+    createdByUserId: text('created_by_user_id').notNull().references(() => user.id),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('stock_sell_through_threshold_scope_effective_idx').on(table.scopeType, table.scopeKey, table.effectiveAt),
+    check('stock_sell_through_threshold_scope_check', sql`${table.scopeType} IN ('default', 'category', 'product')`),
+    check('stock_sell_through_threshold_key_check', sql`(${table.scopeType} = 'default' AND ${table.scopeKey} = '*') OR (${table.scopeType} IN ('category', 'product') AND ${table.scopeKey} <> '*')`),
+    check('stock_sell_through_threshold_percent_check', sql`${table.thresholdPercent} >= 0 AND ${table.thresholdPercent} <= 100`),
+  ],
+);
+
+// A cycle describes the prospective recorded-stock cohort used for one
+// business/product pair. A legacy opening balance starts in review until an
+// authorized officer attests the recorded TaxFlow quantity.
+export const stockSellThroughCycle = pgTable(
+  'stock_sell_through_cycle',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    businessId: text('business_id').notNull().references(() => user.id),
+    productId: text('product_id').notNull().references(() => product.id),
+    baselineQuantity: real('baseline_quantity').notNull(),
+    cycleStartedAt: timestamp('cycle_started_at').notNull(),
+    baselineStatus: text('baseline_status').notNull(), // needs_review | ledger_verified
+    baselineVerifiedByUserId: text('baseline_verified_by_user_id').references(() => user.id),
+    baselineVerifiedAt: timestamp('baseline_verified_at'),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('stock_sell_through_cycle_business_product_uniq').on(table.businessId, table.productId),
+    index('stock_sell_through_cycle_business_idx').on(table.businessId),
+    check('stock_sell_through_cycle_baseline_check', sql`${table.baselineQuantity} >= 0`),
+    check('stock_sell_through_cycle_status_check', sql`${table.baselineStatus} IN ('needs_review', 'ledger_verified')`),
+  ],
+);
+
+// Restock requests record the sell-through decision, not receipt of goods.
+// Exception review is separately mutable and every decision is audit-logged.
+export const stockRestockRequest = pgTable(
+  'stock_restock_request',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    businessId: text('business_id').notNull().references(() => user.id),
+    productId: text('product_id').notNull().references(() => product.id),
+    requestedQuantity: real('requested_quantity').notNull(),
+    requestedByUserId: text('requested_by_user_id').notNull().references(() => user.id),
+    idempotencyKey: text('idempotency_key').notNull(),
+    cycleId: text('cycle_id').notNull().references(() => stockSellThroughCycle.id),
+    cycleStartedAt: timestamp('cycle_started_at').notNull(),
+    thresholdId: text('threshold_id').references(() => stockSellThroughThreshold.id),
+    thresholdPercent: real('threshold_percent'), // immutable decision snapshot; null means no active policy
+    baselineQuantity: real('baseline_quantity').notNull(),
+    cohortQuantity: real('cohort_quantity').notNull(),
+    qualifyingSalesQuantity: real('qualifying_sales_quantity').notNull(),
+    requiredSalesQuantity: real('required_sales_quantity').notNull(),
+    sellThroughPercent: real('sell_through_percent'),
+    eligibilityStatus: text('eligibility_status').notNull(), // eligible | blocked | review_required
+    eligibilityReason: text('eligibility_reason').notNull(),
+    sourceEvidenceRefs: text('source_evidence_refs').notNull(), // bounded JSON refs to movement and accepted-transaction rows used
+    evaluatedAt: timestamp('evaluated_at').defaultNow().notNull(),
+    exceptionReason: text('exception_reason'),
+    exceptionStatus: text('exception_status').notNull().default('none'), // none | pending | approved | rejected
+    reviewedByUserId: text('reviewed_by_user_id').references(() => user.id),
+    reviewedAt: timestamp('reviewed_at'),
+    reviewReason: text('review_reason'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('stock_restock_request_business_idempotency_uniq').on(table.businessId, table.idempotencyKey),
+    index('stock_restock_request_status_created_idx').on(table.eligibilityStatus, table.createdAt),
+    index('stock_restock_request_exception_created_idx').on(table.exceptionStatus, table.createdAt),
+    index('stock_restock_request_business_product_created_idx').on(table.businessId, table.productId, table.createdAt),
+    check('stock_restock_request_quantity_check', sql`${table.requestedQuantity} > 0 AND ${table.requestedQuantity} <= 1000000000`),
+    check('stock_restock_request_owner_check', sql`${table.requestedByUserId} = ${table.businessId}`),
+    check('stock_restock_request_quantities_check', sql`${table.baselineQuantity} >= 0 AND ${table.cohortQuantity} >= 0 AND ${table.qualifyingSalesQuantity} >= 0 AND ${table.requiredSalesQuantity} >= 0`),
+    check('stock_restock_request_eligibility_check', sql`${table.eligibilityStatus} IN ('eligible', 'blocked', 'review_required')`),
+    check('stock_restock_request_exception_check', sql`${table.exceptionStatus} IN ('none', 'pending', 'approved', 'rejected')`),
+    check('stock_restock_request_threshold_check', sql`${table.thresholdPercent} IS NULL OR (${table.thresholdPercent} >= 0 AND ${table.thresholdPercent} <= 100)`),
+    check('stock_restock_request_sell_through_check', sql`${table.sellThroughPercent} IS NULL OR (${table.sellThroughPercent} >= 0 AND ${table.sellThroughPercent} <= 100)`),
+    check('stock_restock_request_exception_reason_check', sql`${table.exceptionStatus} = 'none' OR ${table.exceptionReason} IS NOT NULL`),
+    check('stock_restock_request_review_pair_check', sql`(${table.reviewedByUserId} IS NULL) = (${table.reviewedAt} IS NULL)`),
+  ],
+);
+
 // ---------------------------------------------------------------------------
 // Transactions
 // ---------------------------------------------------------------------------

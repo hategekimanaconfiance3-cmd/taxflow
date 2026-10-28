@@ -18,3 +18,11 @@ test("Anomaly Detection navigation is visible to the same operational roles as i
   assert.equal(getAdminSidebarItems("product_traceability_officer").some((item) => item.href === "/admin/anomalies"), false);
   assert.equal(getAdminSidebarItems("super_admin").some((item) => item.href === "/admin/anomalies"), false);
 });
+
+test("Stock Control Administrators get only their dedicated stock-control navigation", () => {
+  const items = getAdminSidebarItems("stock_control_admin");
+  assert.ok(items.some((item) => item.href === "/admin/stock-control"));
+  assert.equal(items.some((item) => item.href === "/admin/intelligence/unregistered"), false);
+  assert.equal(items.some((item) => item.href === "/admin/settings"), false);
+  assert.equal(items.some((item) => item.href === "/admin/support"), false);
+});

@@ -1,0 +1,13 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1793112790000,
+      "tag": "0019_stock_sell_through_requests",
+      "breakpoints": true
+    }
+  ]
+}

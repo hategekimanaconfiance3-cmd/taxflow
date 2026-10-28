@@ -19,6 +19,7 @@ import {
     Shield,
     Brain,
     UsersRound,
+    ClipboardList,
 } from "lucide-react";
 
 export type TraderRole = "manufacturer" | "wholesaler" | "retailer";
@@ -120,6 +121,12 @@ export const SIDEBAR_GROUPS: SidebarGroup[] = [
                 href: "/dashboard/record-sale",
                 icon: ShoppingBag,
                 roles: ["retailer"],
+            },
+            {
+                label: "Restock Requests",
+                href: "/dashboard/restock",
+                icon: ClipboardList,
+                roles: "all",
             },
             {
                 label: "Imports",
