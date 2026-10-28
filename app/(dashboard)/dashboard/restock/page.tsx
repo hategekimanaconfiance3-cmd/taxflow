@@ -17,6 +17,8 @@ const RESULT_MESSAGES: Record<string, { tone: string; text: string }> = {
   clearance: { tone: "border-red-300 bg-red-50 text-red-800", text: "Your business account must have approved clearance to submit a restock request." },
 };
 
+export const dynamic = "force-dynamic";
+
 function statusLabel(status: string): string {
   return status.replaceAll("_", " ").replace(/\b\w/g, (value) => value.toUpperCase());
 }

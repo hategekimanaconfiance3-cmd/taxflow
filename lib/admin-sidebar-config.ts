@@ -374,7 +374,6 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 href: "/admin/anomalies",
                 icon: Activity,
                 allowedRoles: [
-                    "super_admin",
                     "compliance_officer",
                     "audit_officer",
                     "tax_compliance_officer",
