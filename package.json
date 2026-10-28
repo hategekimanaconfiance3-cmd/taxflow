@@ -44,6 +44,7 @@
     "@react-email/components": "^1.0.10",
     "@socket.io/redis-adapter": "^8.3.0",
     "@tanstack/react-table": "^8.21.3",
+    "@vercel/blob": "^2.3.0",
     "ai": "^6.0.134",
     "better-auth": "^1.5.5",
     "class-variance-authority": "^0.7.1",
@@ -89,4 +90,3 @@
   },
   "packageManager": "pnpm@10.8.1"
 }
-

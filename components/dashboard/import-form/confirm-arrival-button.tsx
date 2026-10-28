@@ -2,6 +2,7 @@
 
 import { useState, useTransition, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { uploadPresigned } from "@vercel/blob/client";
 import { submitImportArrival } from "@/lib/actions/import.action";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -53,8 +54,8 @@ export function SubmitArrivalButton({
             return;
         }
 
-        if (file.size > 10 * 1024 * 1024) {
-            setError("File must be under 10 MB");
+        if (file.size === 0 || file.size > 10 * 1024 * 1024) {
+            setError("File must be between 1 byte and 10 MB");
             return;
         }
 
@@ -64,19 +65,24 @@ export function SubmitArrivalButton({
         // Upload immediately
         setIsUploading(true);
         try {
-            const formData = new FormData();
-            formData.append("file", file);
-            formData.append("declarationId", declarationId);
-
-            const res = await fetch("/api/import-invoice", {
-                method: "POST",
-                body: formData,
+            const filename = `${declarationId}_${crypto.randomUUID()}.pdf`;
+            const pathname = `imports/${filename}`;
+            const blob = await uploadPresigned(pathname, file, {
+                access: "private",
+                contentType: "application/pdf",
+                handleUploadUrl: "/api/import-invoice",
             });
 
-            const data = await res.json();
+            const response = await fetch("/api/import-invoice/verify", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ declarationId, pathname: blob.pathname }),
+            });
+            const data = await response.json().catch(() => null) as { error?: string; url?: string; reference?: string } | null;
 
-            if (!res.ok) {
-                throw new Error(data.error || "Upload failed");
+            if (!response.ok || !data?.url) {
+                const reference = data?.reference ? ` Reference: ${data.reference}` : "";
+                throw new Error(`${data?.error || "Upload verification failed."}${reference}`);
             }
 
             setUploadedUrl(data.url);
