@@ -13,6 +13,7 @@ const RESULT_MESSAGES: Record<string, { tone: string; text: string }> = {
   exception_pending: { tone: "border-blue-300 bg-blue-50 text-blue-900", text: "Your exception request was recorded and is awaiting an authorized officer’s decision." },
   invalid: { tone: "border-red-300 bg-red-50 text-red-800", text: "The request details were invalid. Check the product, quantity, and exception reason." },
   error: { tone: "border-red-300 bg-red-50 text-red-800", text: "TaxFlow could not save the request. No inventory or tax records were changed." },
+  schema: { tone: "border-red-300 bg-red-50 text-red-800", text: "Restock request storage is not available. An administrator must check the database migration. No inventory or tax records were changed." },
   product_not_held: { tone: "border-red-300 bg-red-50 text-red-800", text: "Restock requests are limited to products already recorded in your business stock. No inventory or tax records were changed." },
   clearance: { tone: "border-red-300 bg-red-50 text-red-800", text: "Your business account must have approved clearance to submit a restock request." },
 };
@@ -23,7 +24,7 @@ function statusLabel(status: string): string {
   return status.replaceAll("_", " ").replace(/\b\w/g, (value) => value.toUpperCase());
 }
 
-export default async function RestockRequestsPage({ searchParams }: { searchParams: Promise<{ result?: string }> }) {
+export default async function RestockRequestsPage({ searchParams }: { searchParams: Promise<{ result?: string; reference?: string }> }) {
   const { user, suspended } = await requireApprovedClearance();
   await requireTraderSession();
   const params = await searchParams;
@@ -63,7 +64,10 @@ export default async function RestockRequestsPage({ searchParams }: { searchPara
         <p className="mt-1 text-sm text-muted-foreground">Check recorded sell-through eligibility and record a restock request.</p>
       </header>
 
-      {notice && <div className={`rounded-md border p-3 text-sm ${notice.tone}`} role="status">{notice.text}</div>}
+      {notice && <div className={`rounded-md border p-3 text-sm ${notice.tone}`} role="status">
+        {notice.text}
+        {params.reference && /^[0-9a-f-]{36}$/i.test(params.reference) && <span className="mt-1 block text-xs">Support reference: {params.reference}</span>}
+      </div>}
 
       <section className="rounded-xl border bg-card p-4 shadow-sm sm:p-6">
         <div className="mb-4 flex items-center gap-2">

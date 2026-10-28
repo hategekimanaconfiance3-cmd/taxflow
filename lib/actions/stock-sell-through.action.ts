@@ -1,5 +1,6 @@
 "use server";
 
+import { randomUUID } from "node:crypto";
 import { and, asc, desc, eq, gte, inArray, lte } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -187,6 +188,7 @@ async function evaluateRequest(
 /** Create a restock eligibility request using only the signed-in trader identity. */
 export async function createRestockRequestAction(formData: FormData): Promise<void> {
   const session = await requireTraderSession();
+  const requestId = randomUUID();
   const { suspended, clearanceStatus } = await requireApprovedClearance();
   if (suspended) redirect(`/dashboard/restock?result=clearance&status=${encodeURIComponent(clearanceStatus)}`);
   const rawExceptionReason = field(formData, "exceptionReason").trim();
@@ -198,7 +200,7 @@ export async function createRestockRequestAction(formData: FormData): Promise<vo
   });
   if (!parsed.success) redirect("/dashboard/restock?result=invalid");
 
-  let result: "eligible" | "blocked" | "review_required" | "exception_pending" | "product_not_held" | "invalid" | "error" = "error";
+  let result: "eligible" | "blocked" | "review_required" | "exception_pending" | "product_not_held" | "invalid" | "schema" | "error" = "error";
   try {
     result = await db.transaction(async (tx) => {
       const businessId = session.user.id;
@@ -309,15 +311,61 @@ export async function createRestockRequestAction(formData: FormData): Promise<vo
       return exceptionStatus === "pending" ? "exception_pending" : evaluated.calculation.status;
     });
   } catch (error) {
-    console.error("Restock request could not be evaluated or saved", error);
+    const databaseCode = typeof error === "object" && error !== null && "code" in error
+      ? String(error.code)
+      : undefined;
+    const constraint = typeof error === "object" && error !== null && "constraint" in error
+      ? String(error.constraint)
+      : undefined;
+    console.error("Restock request could not be evaluated or saved", {
+      requestId,
+      userId: session.user.id,
+      errorName: error instanceof Error ? error.name : "UnknownError",
+      databaseCode,
+      constraint,
+    });
     result = error instanceof Error && error.message === "PRODUCT_NOT_HELD" ? "product_not_held"
       : error instanceof Error && error.message === "IDEMPOTENCY_KEY_REUSE" ? "invalid"
-        : "error";
+        : databaseCode === "42P01" || databaseCode === "42703" ? "schema"
+          : "error";
+
+    // Concurrent submissions with the same idempotency key can race when
+    // their product row locks differ. Resolve a unique-key loser from the
+    // already committed request rather than showing a false save failure.
+    if (databaseCode === "23505") {
+      try {
+        const [existing] = await db.select({
+          productId: stockRestockRequest.productId,
+          requestedQuantity: stockRestockRequest.requestedQuantity,
+          exceptionReason: stockRestockRequest.exceptionReason,
+          eligibilityStatus: stockRestockRequest.eligibilityStatus,
+          exceptionStatus: stockRestockRequest.exceptionStatus,
+        }).from(stockRestockRequest).where(and(
+          eq(stockRestockRequest.businessId, session.user.id),
+          eq(stockRestockRequest.idempotencyKey, parsed.data.idempotencyKey),
+        )).limit(1);
+        if (existing) {
+          const sameRequest = existing.productId === parsed.data.productId
+            && existing.requestedQuantity === parsed.data.requestedQuantity
+            && (existing.eligibilityStatus === "eligible" || existing.exceptionReason === (rawExceptionReason || null));
+          result = sameRequest
+            ? existing.exceptionStatus === "pending" ? "exception_pending" : existing.eligibilityStatus as typeof result
+            : "invalid";
+        }
+      } catch (lookupError) {
+        console.error("Restock idempotency recovery lookup failed", {
+          requestId,
+          userId: session.user.id,
+          errorName: lookupError instanceof Error ? lookupError.name : "UnknownError",
+        });
+      }
+    }
   }
 
   revalidatePath("/dashboard/restock");
   revalidatePath("/admin/stock-control");
-  redirect(`/dashboard/restock?result=${result}`);
+  const reference = result === "error" || result === "schema" ? `&reference=${encodeURIComponent(requestId)}` : "";
+  redirect(`/dashboard/restock?result=${result}${reference}`);
 }
 
 /** Add an immutable, prospectively effective threshold revision. */
