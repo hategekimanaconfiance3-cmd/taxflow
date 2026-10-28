@@ -10,7 +10,8 @@ export interface TickerItem {
     id: string;
     type: TickerEventType;
     businessName: string;
-    amount: number;
+    amount: number | null;
+    currency: string;
     status: string;
     createdAt: string;
 }
@@ -29,6 +30,7 @@ export async function GET() {
                 id: transaction.id,
                 businessName: user.businessName,
                 amount: transaction.totalAmount,
+                currency: sql<string>`'RWF'`.as("currency"),
                 status: transaction.status,
                 createdAt: transaction.createdAt,
             })
@@ -40,12 +42,13 @@ export async function GET() {
             db.select({
                 id: importDeclaration.id,
                 businessName: user.businessName,
-                amount: importDeclaration.totalValue,
+                amount: importDeclaration.estimatedValue,
+                currency: importDeclaration.currency,
                 status: importDeclaration.status,
                 createdAt: importDeclaration.createdAt,
             })
             .from(importDeclaration)
-            .innerJoin(user, sql`${user.id} = ${importDeclaration.importerId}`)
+            .innerJoin(user, sql`${user.id} = ${importDeclaration.businessId}`)
             .orderBy(desc(importDeclaration.createdAt))
             .limit(5),
 
@@ -53,6 +56,7 @@ export async function GET() {
                 id: taxPayment.id,
                 businessName: user.businessName,
                 amount: taxPayment.amount,
+                currency: sql<string>`'RWF'`.as("currency"),
                 status: taxPayment.status,
                 createdAt: taxPayment.createdAt,
             })
@@ -63,9 +67,9 @@ export async function GET() {
         ]);
 
         const items: TickerItem[] = [
-            ...txns.map((t) => ({ id: t.id, type: "transaction" as const, businessName: t.businessName ?? "Unknown", amount: t.amount ?? 0, status: t.status ?? "unknown", createdAt: t.createdAt.toISOString() })),
-            ...imports.map((i) => ({ id: i.id, type: "import" as const, businessName: i.businessName ?? "Unknown", amount: i.amount ?? 0, status: i.status ?? "unknown", createdAt: i.createdAt.toISOString() })),
-            ...payments.map((p) => ({ id: p.id, type: "payment" as const, businessName: p.businessName ?? "Unknown", amount: p.amount ?? 0, status: p.status ?? "unknown", createdAt: p.createdAt.toISOString() })),
+            ...txns.map((t) => ({ id: t.id, type: "transaction" as const, businessName: t.businessName ?? "Unknown", amount: t.amount, currency: t.currency, status: t.status ?? "unknown", createdAt: t.createdAt.toISOString() })),
+            ...imports.map((i) => ({ id: i.id, type: "import" as const, businessName: i.businessName ?? "Unknown", amount: i.amount, currency: i.currency ?? "USD", status: i.status ?? "unknown", createdAt: i.createdAt.toISOString() })),
+            ...payments.map((p) => ({ id: p.id, type: "payment" as const, businessName: p.businessName ?? "Unknown", amount: p.amount, currency: p.currency, status: p.status ?? "unknown", createdAt: p.createdAt.toISOString() })),
         ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 20);
 
         return Response.json({ items } satisfies TickerRow);

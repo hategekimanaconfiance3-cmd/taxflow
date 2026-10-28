@@ -80,15 +80,14 @@ export function TransactionAnalytics({ from, to }: { from?: string; to?: string 
 
   if (!data) return null;
 
-  const hasDailyData = (data.dailyTrend?.length ?? 0) > 0;
-  const hasWeekData = data.totalThisWeek > 0;
-  const maxHourCount = Math.max(...(data.peakHours?.map((h) => h.count) ?? [1]), 1);
-  const peakLabel = data.peakHour !== undefined
-    ? `${String(data.peakHour).padStart(2, "0")}:00`
-    : "—";
+  const hasDailyData = data.hourlyBuckets.length > 0;
+  const hasWeekData = data.totalTransactions > 0;
+  const maxHourCount = Math.max(...data.hourlyBuckets.map((h) => h.count), 1);
+  const peakBucket = [...data.hourlyBuckets].sort((a, b) => b.count - a.count)[0];
+  const peakLabel = peakBucket ? `${String(peakBucket.hour).padStart(2, "0")}:00` : "—";
 
   // Thin the x-axis labels when there are many data points
-  const tickInterval = hasDailyData && data.dailyTrend.length > 14 ? Math.ceil(data.dailyTrend.length / 8) - 1 : 0;
+  const tickInterval = 2;
 
   return (
     <Card>
@@ -105,11 +104,11 @@ export function TransactionAnalytics({ from, to }: { from?: string; to?: string 
         {/* ── Daily trend chart — PRIMARY FOCUS ──────────────────── */}
         {hasDailyData ? (
           <div className="space-y-2">
-            <p className="text-xs font-medium text-muted-foreground">Transaction Volume · 30-day trend</p>
+            <p className="text-xs font-medium text-muted-foreground">Transaction volume by hour · last 30 days</p>
             <div className="h-56">
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart
-                  data={data.dailyTrend}
+                  data={data.hourlyBuckets}
                   margin={{ top: 4, right: 16, bottom: 0, left: 16 }}
                 >
                   <defs>
@@ -120,7 +119,7 @@ export function TransactionAnalytics({ from, to }: { from?: string; to?: string 
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
                   <XAxis
-                    dataKey="date"
+                    dataKey="hour"
                     tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
                     axisLine={false}
                     tickLine={false}
@@ -159,13 +158,13 @@ export function TransactionAnalytics({ from, to }: { from?: string; to?: string 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <KpiCard
             label="This Week"
-            value={data.totalThisWeek > 0 ? data.totalThisWeek.toLocaleString() : "—"}
-            sub="transactions"
+            value={data.totalTransactions.toLocaleString()}
+            sub="last 30 days"
           />
           <KpiCard
             label="Daily Average"
-            value={data.avgDailyVolume > 0 ? data.avgDailyVolume.toLocaleString() : "—"}
-            sub="30-day avg"
+            value={(data.totalTransactions / 30).toFixed(1)}
+            sub="daily average"
           />
           <KpiCard
             label="Avg Value"
@@ -175,7 +174,7 @@ export function TransactionAnalytics({ from, to }: { from?: string; to?: string 
           <KpiCard
             label="Peak Hour"
             value={hasWeekData ? peakLabel : "—"}
-            sub={hasWeekData ? `${data.peakHours[data.peakHour ?? 0]?.count ?? 0} txns at peak` : "No data this week"}
+            sub={hasWeekData ? `${peakBucket?.count ?? 0} txns at peak` : "No data in this period"}
           />
         </div>
 
@@ -185,14 +184,14 @@ export function TransactionAnalytics({ from, to }: { from?: string; to?: string 
             <div className="space-y-1.5">
               <p className="text-xs font-medium text-muted-foreground">Peak Activity Hours · last 7 days</p>
               <div className="flex gap-0.5 items-end h-10">
-                {(data.peakHours ?? []).map((bucket) => {
+                {data.hourlyBuckets.map((bucket) => {
                   const heightPct = maxHourCount > 0 ? (bucket.count / maxHourCount) * 100 : 0;
-                  const isPeak = bucket.hour === data.peakHour && bucket.count > 0;
+                  const isPeak = bucket.hour === peakBucket?.hour && bucket.count > 0;
                   return (
                     <div
                       key={bucket.hour}
                       className="flex-1 flex flex-col justify-end group"
-                      title={`${bucket.label}: ${bucket.count} txns`}
+                      title={`${String(bucket.hour).padStart(2, "0")}:00: ${bucket.count} txns`}
                     >
                       <div
                         className={cn(
@@ -215,23 +214,20 @@ export function TransactionAnalytics({ from, to }: { from?: string; to?: string 
             </div>
 
             {/* Top traders */}
-            {data.topActiveTraders.length > 0 && (
+            {data.topTraders.length > 0 && (
               <div className="space-y-1.5">
                 <p className="text-xs font-medium text-muted-foreground">Most Active Traders · last 7 days</p>
-                {data.topActiveTraders.slice(0, 3).map((t, i) => (
+                {data.topTraders.slice(0, 3).map((t, i) => (
                   <div key={i} className="flex items-center justify-between text-xs rounded-lg border px-3 py-2.5">
                     <div className="min-w-0 flex items-center gap-2.5">
                       <span className="text-[10px] font-bold text-muted-foreground/40 tabular-nums w-4">#{i + 1}</span>
                       <div className="min-w-0">
                         <p className="font-medium truncate">{t.businessName}</p>
-                        {t.tinNumber && (
-                          <p className="text-[9px] font-mono text-muted-foreground/60">TIN: {t.tinNumber}</p>
-                        )}
                       </div>
                     </div>
                     <div className="text-right shrink-0 ml-3">
-                      <p className="font-semibold tabular-nums text-blue-600">{t.txnCount} txns</p>
-                      <p className="text-[10px] text-muted-foreground">{formatCompact(t.avgValue)} avg</p>
+                      <p className="font-semibold tabular-nums text-blue-600">{t.txCount} txns</p>
+                      <p className="text-[10px] text-muted-foreground">{formatCompact(t.totalAmount)} total</p>
                     </div>
                   </div>
                 ))}

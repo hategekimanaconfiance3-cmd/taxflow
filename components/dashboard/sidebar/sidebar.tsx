@@ -21,7 +21,8 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Search, LogOut, ChevronDown, ChevronRight, User, HelpCircle } from 'lucide-react';
 import { CommandPalette, type CommandItem } from '@/components/ui/command-palette';
 import { useDashboardLayoutCtx } from '@/components/dashboard/dashboard-layout-client';
-import { translate } from '@/lib/language';
+import { translate, translateWithContext } from '@/lib/language';
+import { NotificationCountBadge } from '@/components/dashboard/notifications/notification-count-badge';
 
 interface DashboardSidebarProps {
   role: TraderRole;
@@ -35,7 +36,7 @@ export function DashboardSidebar({ role, businessName, userName = 'User' }: Dash
   const groups = getSidebarGroups(role);
   const [isSigningOut, setIsSigningOut] = useState(false);
 
-  const { isSidebarCollapsed, sidebarW, expandSidebar, lang } = useDashboardLayoutCtx();
+  const { isSidebarCollapsed, sidebarW, expandSidebar, lang, unreadNotificationCount } = useDashboardLayoutCtx();
 
   const handleSignOut = useCallback(async () => {
     if (isSigningOut) return;
@@ -100,11 +101,16 @@ export function DashboardSidebar({ role, businessName, userName = 'User' }: Dash
             <div className="flex flex-col items-center gap-0.5 px-2 py-1">
               {group.items.map((item) => {
                 const active = isActive(item.href);
+                const translatedLabel = translate(item.label, lang);
+                const notificationLabel = item.href === '/dashboard/notifications' && unreadNotificationCount > 0
+                  ? `${translatedLabel}, ${unreadNotificationCount} unread`
+                  : translatedLabel;
                 return (
                   <Tooltip key={item.href}>
                     <TooltipTrigger asChild>
                       <Link
                         href={item.href}
+                        aria-label={notificationLabel}
                         className={cn(
                           'relative flex h-9 w-9 items-center justify-center rounded-md transition-colors',
                           active
@@ -116,10 +122,15 @@ export function DashboardSidebar({ role, businessName, userName = 'User' }: Dash
                           <span className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-full bg-foreground" />
                         )}
                         <item.icon className="h-[18px] w-[18px] shrink-0" />
+                        {item.href === '/dashboard/notifications' && (
+                          <NotificationCountBadge count={unreadNotificationCount} className="absolute -right-0.5 -top-0.5" />
+                        )}
                       </Link>
                     </TooltipTrigger>
                     <TooltipContent side="right" className="text-xs">
-                      {translate(item.label, lang)}
+                      {item.href === '/dashboard/notifications' && unreadNotificationCount > 0
+                        ? `${translate(item.label, lang)}, ${translateWithContext(`${unreadNotificationCount} unread notification${unreadNotificationCount !== 1 ? 's' : ''}`, lang)}`
+                        : translate(item.label, lang)}
                     </TooltipContent>
                   </Tooltip>
                 );
@@ -230,11 +241,16 @@ export function DashboardSidebar({ role, businessName, userName = 'User' }: Dash
             <div className="px-2 space-y-[2px]">
               {group.items.map((item) => {
                 const active = isActive(item.href);
+                const translatedLabel = translate(item.label, lang);
+                const notificationLabel = item.href === '/dashboard/notifications' && unreadNotificationCount > 0
+                  ? `${translatedLabel}, ${unreadNotificationCount} unread`
+                  : translatedLabel;
                 return (
                   <Tooltip key={item.href}>
                     <TooltipTrigger asChild>
                       <Link
                         href={item.href}
+                        aria-label={notificationLabel}
                         className={cn(
                           'group relative flex items-center gap-2.5 rounded-md px-3 py-[7px] text-[13px] font-medium transition-all duration-150',
                           active
@@ -251,11 +267,14 @@ export function DashboardSidebar({ role, businessName, userName = 'User' }: Dash
                             active ? 'text-foreground' : 'text-muted-foreground/70 group-hover:text-foreground',
                           )}
                         />
-                          {translate(item.label, lang)}
+                        <span>{translatedLabel}</span>
+                        {item.href === '/dashboard/notifications' && (
+                          <NotificationCountBadge count={unreadNotificationCount} className="ml-auto" />
+                        )}
                       </Link>
                     </TooltipTrigger>
                     <TooltipContent side="right" className="text-xs">
-                      {translate(item.label, lang)}
+                      {notificationLabel}
                     </TooltipContent>
                   </Tooltip>
                 );

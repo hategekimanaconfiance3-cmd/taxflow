@@ -1,163 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type {
-  TransactionBehaviorData,
-  HourlyBucket,
-  TopTraderActivity,
-} from "@/app/api/admin/transaction-behavior/route";
+import type { TransactionBehaviorData } from "@/app/api/admin/transaction-behavior/route";
 import { formatCompact } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import {
-  Loader2,
-  Clock,
-  TrendingUp,
-  Users,
-  Activity,
-  Inbox,
-  Zap,
-} from "lucide-react";
-import { cn } from "@/lib/utils";
-
-// ---------------------------------------------------------------------------
-// Transaction Behavior Analytics
-// Peak hours heatmap, KPIs, top trader activity
-// ---------------------------------------------------------------------------
-
-function formatCount(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`;
-  return String(n);
-}
-
-function PeakHoursBar({ buckets, peakHour }: { buckets: HourlyBucket[]; peakHour: number }) {
-  const maxCount = Math.max(...buckets.map((b) => b.count), 1);
-
-  // Group into 6-hour segments for readability
-  const segments = [
-    { label: "00–06", hours: buckets.slice(0, 6) },
-    { label: "06–12", hours: buckets.slice(6, 12) },
-    { label: "12–18", hours: buckets.slice(12, 18) },
-    { label: "18–24", hours: buckets.slice(18, 24) },
-  ];
-
-  return (
-    <div className="space-y-2">
-      <div className="flex gap-1 items-end h-16">
-        {buckets.map((bucket) => {
-          const heightPct = maxCount > 0 ? (bucket.count / maxCount) * 100 : 0;
-          const isPeak = bucket.hour === peakHour && bucket.count > 0;
-          return (
-            <div
-              key={bucket.hour}
-              className="flex-1 flex flex-col justify-end group relative"
-              title={`${bucket.label}: ${bucket.count} txns`}
-            >
-              <div
-                className={cn(
-                  "rounded-sm transition-colors",
-                  isPeak
-                    ? "bg-violet-500"
-                    : bucket.count > 0
-                    ? "bg-violet-200 group-hover:bg-violet-300"
-                    : "bg-muted/50"
-                )}
-                style={{ height: `${Math.max(heightPct, bucket.count > 0 ? 8 : 4)}%` }}
-              />
-            </div>
-          );
-        })}
-      </div>
-      {/* Segment labels */}
-      <div className="flex text-[9px] text-muted-foreground/60 font-mono">
-        {segments.map((seg) => (
-          <span key={seg.label} className="flex-1 text-center">
-            {seg.label}
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function KpiCard({
-  icon: Icon,
-  label,
-  value,
-  sub,
-  highlight,
-}: {
-  icon: React.ElementType;
-  label: string;
-  value: string;
-  sub?: string;
-  highlight?: boolean;
-}) {
-  return (
-    <div
-      className={cn(
-        "rounded-lg border px-3 py-2.5",
-        highlight ? "bg-violet-50/60 border-violet-200" : "bg-muted/20"
-      )}
-    >
-      <div className="flex items-center gap-1.5 mb-1">
-        <Icon className={cn("h-3.5 w-3.5", highlight ? "text-violet-500" : "text-muted-foreground")} />
-        <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">{label}</span>
-      </div>
-      <p className={cn("text-base font-bold leading-none", highlight ? "text-violet-700" : "text-foreground")}>
-        {value}
-      </p>
-      {sub && <p className="text-[10px] text-muted-foreground/70 mt-0.5">{sub}</p>}
-    </div>
-  );
-}
-
-function TopTradersTable({ traders }: { traders: TopTraderActivity[] }) {
-  if (traders.length === 0) {
-    return (
-      <p className="text-xs text-muted-foreground/60 text-center py-3">
-        No trader activity this week
-      </p>
-    );
-  }
-
-  const maxCount = Math.max(...traders.map((t) => t.txnCount), 1);
-
-  return (
-    <div className="space-y-1.5">
-      {traders.map((trader, i) => {
-        const barWidth = (trader.txnCount / maxCount) * 100;
-        return (
-          <div key={i} className="space-y-0.5">
-            <div className="flex items-center justify-between gap-2">
-              <div className="min-w-0">
-                <p className="text-xs font-medium truncate">{trader.businessName}</p>
-                {trader.tinNumber && (
-                  <p className="text-[9px] font-mono text-muted-foreground/60">
-                    TIN: {trader.tinNumber}
-                  </p>
-                )}
-              </div>
-              <div className="text-right shrink-0">
-                <p className="text-xs font-semibold tabular-nums">{trader.txnCount} txns</p>
-                <p className="text-[9px] text-muted-foreground/70 font-mono">
-                  avg {formatCompact(trader.avgValue)}
-                </p>
-              </div>
-            </div>
-            <div className="h-1 rounded-full bg-muted overflow-hidden">
-              <div
-                className="h-full rounded-full bg-violet-400"
-                style={{ width: `${barWidth}%` }}
-              />
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
+import { Activity, Inbox } from "lucide-react";
 
 export function TransactionBehavior() {
   const [data, setData] = useState<TransactionBehaviorData | null>(null);
@@ -165,119 +12,62 @@ export function TransactionBehavior() {
 
   useEffect(() => {
     fetch("/api/admin/transaction-behavior")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setData(d))
+      .then((response) => (response.ok ? response.json() as Promise<TransactionBehaviorData> : null))
+      .then(setData)
       .catch(() => setData(null))
       .finally(() => setLoading(false));
   }, []);
 
-  if (loading) {
-    return (
-      <Card>
-        <CardContent className="flex items-center justify-center py-10">
-          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground mr-2" />
-          <span className="text-sm text-muted-foreground">Loading transaction behavior…</span>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  if (!data) return null;
-
-  const hasActivity = data.totalThisWeek > 0;
-
   return (
     <Card>
-      <CardHeader className="pb-2 pt-3 px-4">
-        <CardTitle className="text-sm font-semibold flex items-center gap-2">
+      <CardHeader className="px-4 pb-2 pt-3">
+        <CardTitle className="flex items-center gap-2 text-sm font-semibold">
           <Activity className="h-4 w-4 text-muted-foreground" />
           Transaction Behavior
-          <Badge variant="secondary" className="text-[9px] h-4 px-1.5 font-normal ml-auto">
-            Last 7 days
-          </Badge>
+          <span className="ml-auto rounded border px-2 py-0.5 text-[9px] font-normal">Last 30 days</span>
         </CardTitle>
       </CardHeader>
-
-      <CardContent className="px-4 pb-4 space-y-4">
-        {/* ── KPI Strip ── */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          <KpiCard
-            icon={Zap}
-            label="Today"
-            value={formatCount(data.totalToday)}
-            sub="transactions"
-            highlight={data.totalToday > data.avgDailyVolume && data.avgDailyVolume > 0}
-          />
-          <KpiCard
-            icon={TrendingUp}
-            label="Daily Avg"
-            value={data.avgDailyVolume > 0 ? formatCount(data.avgDailyVolume) : "—"}
-            sub="7-day average"
-          />
-          <KpiCard
-            icon={Activity}
-            label="Avg Value"
-            value={data.avgTransactionValue > 0 ? formatCompact(data.avgTransactionValue) : "—"}
-            sub="per transaction"
-          />
-          <KpiCard
-            icon={Users}
-            label="Per Trader"
-            value={data.avgTransactionsPerTrader > 0 ? String(data.avgTransactionsPerTrader) : "—"}
-            sub="txns this week"
-          />
-        </div>
-
-        {!hasActivity ? (
-          <div className="flex flex-col items-center justify-center py-6 gap-1 border rounded-lg bg-muted/20">
-            <Inbox className="h-6 w-6 text-muted-foreground/40 mb-1" />
-            <p className="text-xs font-medium text-muted-foreground">No transaction activity this week</p>
-            <p className="text-[10px] text-muted-foreground/60">
-              Peak hours and trader stats will appear once data is recorded
-            </p>
-          </div>
-        ) : (
-          <>
-            {/* ── Peak Hours ── */}
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
-                  <Clock className="h-3.5 w-3.5 text-muted-foreground" />
-                  <span className="text-xs font-medium">Peak Activity Hours</span>
+      <CardContent className="space-y-4 px-4 pb-4">
+        {loading ? <p className="text-sm text-muted-foreground">Loading transaction behavior…</p>
+          : !data ? <p className="text-sm text-muted-foreground">Transaction behavior is unavailable.</p>
+            : data.totalTransactions === 0 ? (
+              <div className="flex flex-col items-center gap-1 rounded-lg border bg-muted/20 py-6">
+                <Inbox className="mb-1 h-6 w-6 text-muted-foreground/40" />
+                <p className="text-xs font-medium text-muted-foreground">No transaction activity in the last 30 days</p>
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  <Metric label="Transactions" value={data.totalTransactions.toLocaleString()} />
+                  <Metric label="Total value" value={`${formatCompact(data.totalAmount)} RWF`} />
+                  <Metric label="Average value" value={`${formatCompact(data.avgTransactionValue)} RWF`} />
                 </div>
-                <span className="text-[10px] text-muted-foreground/70 font-mono">
-                  Peak:{" "}
-                  <span className="text-violet-600 font-semibold">
-                    {String(data.peakHour).padStart(2, "0")}:00
-                  </span>
-                  {" "}· {data.peakHours[data.peakHour]?.count ?? 0} txns
-                </span>
-              </div>
-              <PeakHoursBar buckets={data.peakHours} peakHour={data.peakHour} />
-            </div>
-
-            {/* ── Top Traders ── */}
-            <div className="space-y-1.5">
-              <div className="flex items-center gap-1.5">
-                <Users className="h-3.5 w-3.5 text-muted-foreground" />
-                <span className="text-xs font-medium">Most Active Traders</span>
-              </div>
-              <TopTradersTable traders={data.topActiveTraders} />
-            </div>
-          </>
-        )}
-
-        {/* ── Insights ── */}
-        {data.insights.length > 0 && (
-          <div className="space-y-1 pt-1 border-t">
-            {data.insights.map((insight, i) => (
-              <p key={i} className="text-[11px] text-muted-foreground leading-snug">
-                {insight}
-              </p>
-            ))}
-          </div>
-        )}
+                <div className="space-y-2">
+                  <h3 className="text-xs font-medium">Transaction count by hour · last 30 days</h3>
+                  <div className="flex h-16 items-end gap-1" aria-label="Transaction counts by hour">
+                    {data.hourlyBuckets.map((bucket) => {
+                      const maximum = Math.max(...data.hourlyBuckets.map((hour) => hour.count), 1);
+                      const height = bucket.count ? Math.max(8, bucket.count / maximum * 100) : 4;
+                      return <div key={bucket.hour} title={`${String(bucket.hour).padStart(2, "0")}:00 · ${bucket.count} transactions`} className="flex-1 rounded-t-sm bg-violet-400" style={{ height: `${height}%` }} />;
+                    })}
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <h3 className="text-xs font-medium">Most active sellers · last 30 days</h3>
+                  {data.topTraders.map((trader) => (
+                    <div key={trader.businessId} className="flex items-center justify-between gap-3 rounded border px-3 py-2 text-xs">
+                      <span className="truncate font-medium">{trader.businessName}</span>
+                      <span className="shrink-0 text-right">{trader.txCount} transactions · {formatCompact(trader.totalAmount)} RWF</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
       </CardContent>
     </Card>
   );
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return <div className="rounded-lg border bg-muted/20 px-3 py-2.5"><p className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</p><p className="mt-1 text-sm font-bold">{value}</p></div>;
 }

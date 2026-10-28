@@ -18,7 +18,7 @@ import { auth } from "@/lib/auth";
 import db from "@/db/drizzle";
 import { rraStaff, rraStaffRole, auditLog } from "@/db/schema";
 import { eq } from "drizzle-orm";
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { createHash } from "node:crypto";
 import { consumeRateLimit, getRequestIdentity } from "@/lib/rate-limit";
 import { createTraderTools } from "@/lib/ai/tools/trader-tools";
@@ -42,6 +42,7 @@ import {
 import { hasRRAPermission, isRRARole } from "@/lib/rra-rbac";
 import { getRRAAIToolNames, isRRAAIInjectionAttempt, type RRAAIToolName } from "@/lib/ai/rra-tool-access";
 import { getRRASystemPrompt, getTraderSystemPrompt } from "@/lib/ai/system-prompts";
+import { LANG_STORAGE_KEY, normalizeLangCode, type LangCode } from "@/lib/language";
 
 // ---------------------------------------------------------------------------
 // Model setup — Gemini 3.6 Flash is the current supported Flash model.
@@ -216,6 +217,17 @@ export async function POST(request: Request) {
         return new Response("Forbidden", { status: 403 });
     }
 
+    const language = normalizeLangCode((await cookies()).get(LANG_STORAGE_KEY)?.value) ?? "en";
+    const responseLanguageInstruction: Record<LangCode, string> = {
+        en: "Respond in English by default.",
+        rw: "Respond in clear, natural Kinyarwanda by default.",
+        fr: "Répondez en français clair et professionnel par défaut.",
+    };
+    const languageInstruction = [
+        "RESPONSE LANGUAGE: " + responseLanguageInstruction[language],
+        "If the user explicitly requests another response language, follow that request for this answer. Keep evidence, figures, severity, confidence, identifiers, API values, and official decision labels unchanged. Do not translate database values or identifiers when they must remain exact.",
+    ].join(" ");
+
     // ── 3. Parse request body ────────────────────────────────────────────────
     let body: unknown;
     try {
@@ -303,8 +315,9 @@ export async function POST(request: Request) {
         });
         const result = streamText({
             model: MODEL,
-            system: isTrader ? getTraderSystemPrompt() : [
+            system: isTrader ? [getTraderSystemPrompt(), languageInstruction].join("\n\n") : [
                 getRRASystemPrompt(),
+                languageInstruction,
                 "\nVERIFIED OFFICER CONTEXT (server supplied):",
                 `Roles: ${staffRoles.join(", ") || staffClearance}.`,
                 `Department: ${staffDepartment ?? "not recorded"}.`,

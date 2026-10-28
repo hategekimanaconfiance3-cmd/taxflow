@@ -1,14 +1,14 @@
-export type LangCode = 'en' | 'kiny' | 'fr';
+export type LangCode = 'en' | 'rw' | 'fr';
 
 export const LANG_STORAGE_KEY = 'taxflow-language';
 export const LANGS = [
   { code: 'en', label: 'EN', full: 'English' },
-  { code: 'kiny', label: 'KINY', full: 'Kinyarwanda' },
+  { code: 'rw', label: 'RW', full: 'Kinyarwanda' },
   { code: 'fr', label: 'FR', full: 'Français' },
 ] as const;
 
 const translations: Record<Exclude<LangCode, 'en'>, Record<string, string>> = {
-  kiny: {
+  rw: {
     Language: 'Ururimi', Dashboard: 'Imbonerahamwe', Inventory: 'Ibarura ry’ibicuruzwa',
     Transactions: 'Ihererekanya', Pending: 'Ibitegereje', 'Sales History': 'Amateka y’igurisha',
     Notifications: 'Ubutumwa', 'AI Assistant': 'Umufasha wa AI', 'Tax Intelligence': 'Amakuru y’imisoro',
@@ -174,7 +174,7 @@ const translations: Record<Exclude<LangCode, 'en'>, Record<string, string>> = {
   },
 };
 
-Object.assign(translations.kiny, {
+Object.assign(translations.rw, {
   'Download PDF': 'Kuramo PDF', 'Generating…': 'Birimo gutegurwa…', 'Tax & VAT Overview': 'Incamake y’imisoro na TVA',
   'My Import Declarations': 'Amatangazo yanjye y’ibitumizwa mu mahanga',
   'Track arrival details, supporting invoices, and RRA review updates.': 'Kurikirana amakuru y’ibyageze, inyemezabuguzi n’ivugurura ry’isuzuma rya RRA.',
@@ -197,7 +197,7 @@ Object.assign(translations.fr, {
 });
 
 // Coverage for common page headings, form controls, validation states, and admin workflows.
-Object.assign(translations.kiny, {
+Object.assign(translations.rw, {
   'New Ticket': 'Ubusabe bushya', 'All Transactions': 'Ihererekanya ryose', 'Direction': 'Icyerekezo',
   'Counterparty': 'Uwo bikorerwa', 'Tax & VAT Overview': 'Incamake y’imisoro na TVA',
   'Payments made vs net VAT due': 'Ubwishyu bwakozwe n’umusoro wa TVA usigaye',
@@ -550,7 +550,7 @@ Object.assign(translations.fr, {
   'The page you are looking for does not exist or has been moved.': 'La page recherchée n’existe pas ou a été déplacée.',
 });
 
-Object.assign(translations.kiny, {
+Object.assign(translations.rw, {
   'AI batch processing is available via the': 'Gutunganya amakuru menshi hakoreshejwe AI biboneka kuri',
   'Generated from up to 250 recent transactions and stock rows.': 'Byakozwe hashingiwe ku hererekanya n’inyandiko z’ububiko 250 ziheruka.',
   'If top 5 gap traders partially paid (40%)': 'Iyo abacuruzi 5 bafite ikinyuranyo kinini bishyuye igice (40%)',
@@ -675,7 +675,7 @@ Object.assign(translations.fr, {
   '↑ Flagged': '↑ Signalé', '↓ Too low': '↓ Trop bas', '⚠ Negative': '⚠ Négatif', '✓ Taxpayer registered successfully': '✓ Contribuable enregistré avec succès',
 });
 
-Object.assign(translations.kiny, {
+Object.assign(translations.rw, {
   All: 'Byose', Accepted: 'Byemewe', 'AI Compute': 'Ibarura rya AI', 'AI Reasoning': 'Imitekerereze ya AI',
   'AI: No market data yet': 'AI: Nta makuru y’isoko araboneka', 'Add a progress note or close the audit.': 'Ongeraho inyandiko y’aho igeze cyangwa ufunge igenzura.',
   'All TIN registry entries are registered on TaxFlow — or insufficient permissions.': 'Abari mu gitabo cya TIN bose banditswe muri TaxFlow — cyangwa nta burenganzira buhagije.',
@@ -797,7 +797,7 @@ Object.assign(translations.fr, {
   'Pending review': 'En attente d’examen', 'Pending verification': 'En attente de vérification',
 });
 
-Object.assign(translations.kiny, {
+Object.assign(translations.rw, {
   'AI Audit Recommendations': 'Ibyifuzo by’igenzura bya AI', 'AI Batch Processing Tools': 'Ibikoresho bya AI byo gutunganya byinshi',
   'AI Decision Panel': 'Akanama k’ibyemezo ka AI', 'AI Findings': 'Ibyagaragajwe na AI',
   'AI Insights Feed': 'Amakuru atangwa na AI', 'AI Revenue Forecast': 'Iteganyamari rya AI',
@@ -896,7 +896,7 @@ Object.assign(translations.fr, {
   'You have': 'Vous avez', 'Verified data': 'Données vérifiées', 'Your own business data': 'Vos propres données commerciales',
 });
 
-Object.assign(translations.kiny, {
+Object.assign(translations.rw, {
   'Super Admin': 'Umuyobozi mukuru', 'Compliance Officer': 'Umukozi ushinzwe iyubahiriza',
   'Audit Officer': 'Umukozi w’igenzura', 'Reporting Officer': 'Umukozi wa raporo',
   'Stock Officer': 'Umukozi ushinzwe ububiko', 'Correction Officer': 'Umukozi ukosora amakuru',
@@ -971,7 +971,7 @@ Object.assign(translations.fr, {
 });
 
 // Common table, action, and workflow labels used across both portals.
-Object.assign(translations.kiny, {
+Object.assign(translations.rw, {
   'Actions': 'Ibikorwa', 'Account': 'Konti', 'Administration': 'Ubuyobozi', 'Analytics': 'Isesengura',
   'Amount': 'Amafaranga', 'Audit': 'Igenzura', 'Business': 'Ubucuruzi', 'Buyer': 'Umuguzi',
   'Cancel': 'Hagarika', 'Category': 'Icyiciro', 'Channel': 'Umuyoboro', 'Clear': 'Siba',
@@ -1042,7 +1042,7 @@ Object.assign(translations.fr, {
   'AI chat widget': 'Widget de discussion IA', 'in the bottom-right corner. Use natural language to run risk analyses, generate reports, and query trader data.': 'dans le coin inférieur droit. Utilisez le langage naturel pour analyser les risques, générer des rapports et interroger les données des commerçants.',
 });
 
-Object.assign(translations.kiny, {
+Object.assign(translations.rw, {
   'The AI assistant could not respond. Please try again in a moment.': 'Umufasha wa AI ntiyashoboye gusubiza. Ongera ugerageze nyuma y’akanya.',
   'The AI assistant could not complete this request. Please try again.': 'Umufasha wa AI ntiyashoboye kurangiza iki cyifuzo. Ongera ugerageze.',
   'The AI assistant is not configured. Please contact your administrator.': 'Umufasha wa AI ntiyashyizweho neza. Baza umuyobozi wa sisitemu.',
@@ -1054,7 +1054,7 @@ Object.assign(translations.fr, {
   'The AI assistant is not configured. Please contact your administrator.': 'L’assistant IA n’est pas configuré. Veuillez contacter votre administrateur.',
 });
 
-Object.assign(translations.kiny, {
+Object.assign(translations.rw, {
   'Trader Self-Service Lookup': 'Gushakisha amakuru y’umucuruzi',
   'Find a caller by TIN and review the information assigned to your RRA role.': 'Shakisha umuhamagaye ukoresheje TIN urebe amakuru yemerewe inshingano yawe muri RRA.',
   'Trader lookup by TIN': 'Gushakisha umucuruzi ukoresheje TIN',
@@ -1100,7 +1100,7 @@ Object.assign(translations.fr, {
   'No disputes filed by this trader.': 'Aucun litige déposé par ce commerçant.', 'Expected': 'Prévu', 'Arrived': 'Arrivé',
 });
 
-Object.assign(translations.kiny, {
+Object.assign(translations.rw, {
   'Staff role assignments': 'Inshingano z’umukozi', 'Manage roles': 'Gucunga inshingano',
   'Role assignments': 'Inshingano zahawe umukozi',
   'Select the predefined permission bundles this worker needs. Super Admin must be assigned alone.': 'Hitamo inshingano zisanzwe uyu mukozi akeneye. Super Admin agomba guhabwa inshingano imwe gusa.',
@@ -1126,13 +1126,122 @@ Object.assign(translations.fr, {
   'Tax and VAT summaries, payment aggregates, reports, and approved data exports.': 'Résumés fiscaux et TVA, agrégats de paiements, rapports et exports autorisés.',
 });
 
+// Shared terminology and high-frequency workflows used across trader, public,
+// RRA, and Super Admin screens. Keep codes and stored business values in English.
+Object.assign(translations.rw, {
+  'Taxpayer': 'Usoreshwa', 'Tax declaration': 'Itangazo ry’umusoro', 'Tax assessment': 'Isuzuma ry’umusoro',
+  Invoice: 'Inyemezabuguzi', 'Production batch': 'Icyiciro cy’umusaruro', Audit: 'Igenzura',
+  'Restock Requests': 'Ubusabe bwo kongera ububiko', 'Check eligibility': 'Reba niba wujuje ibisabwa',
+  'Check and submit restock request': 'Reba ibisabwa maze wohereze ubusabe', Product: 'Igicuruzwa',
+  'Requested quantity': 'Umubare usabwa', 'Exception reason (optional)': 'Impamvu yihariye (si ngombwa)',
+  'If the threshold is not met, explain why an exception should be reviewed.': 'Niba igipimo kitagezweho, sobanura impamvu yihariye igomba gusuzumwa.',
+  'Your recent requests': 'Ubusabe bwawe buheruka', 'You have not submitted a restock request.': 'Nta busabe bwo kongera ububiko uratanga.',
+  'No TaxFlow products are available yet.': 'Nta bicuruzwa bya TaxFlow biraboneka.', 'Submitting…': 'Birimo koherezwa…',
+  'TaxFlow could not save the request. No inventory or tax records were changed.': 'TaxFlow ntiyabashije kubika ubusabe. Nta makuru y’ububiko cyangwa y’imisoro yahinduwe.',
+  'Restock request storage is not available. An administrator must check the database migration. No inventory or tax records were changed.': 'Ububiko bw’ubusabe bwo kongera ibicuruzwa ntibuboneka. Umuyobozi agomba kugenzura ivugururwa rya database. Nta makuru y’ububiko cyangwa y’imisoro yahinduwe.',
+  'The request details were invalid. Check the product, quantity, and exception reason.': 'Ibisobanuro by’ubusabe si byo. Reba igicuruzwa, umubare n’impamvu yihariye.',
+  'Your business account must have approved clearance to submit a restock request.': 'Konti y’ubucuruzi igomba kuba yemewe mbere yo gutanga ubusabe bwo kongera ububiko.',
+  'The recorded sales are below the active threshold, so this request did not pass the eligibility check.': 'Ibyagurishijwe byanditswe biri munsi y’igipimo gisabwa, bityo ubu busabe ntibwujuje ibisabwa.',
+  'The request passed the active recorded sell-through check. This result does not create a supplier order, goods receipt, inventory movement, or VAT posting.': 'Ubusabe bwageze ku gipimo cy’igurisha cyanditswe. Ibi ntibikora komande ku mutanga ibicuruzwa, inyandiko yo kwakira ibicuruzwa, ihinduka ry’ububiko cyangwa inyandiko ya TVA.',
+  'Your exception request was recorded and is awaiting an authorized officer’s decision.': 'Ubusabe bwawe bwihariye bwanditswe kandi butegereje icyemezo cy’umukozi ubifitiye ububasha.',
+  'The check uses TaxFlow’s recorded stock ledger. A successful request only records eligibility; it does not create an order, receipt, stock movement, or VAT posting. Requests are available only for products already recorded in your business stock. Production, imports, and accepted B2B receipts continue through their existing workflows.': 'Igenzura rikoresha inyandiko z’ububiko za TaxFlow. Ubusabe bwemewe bwandika gusa ko wujuje ibisabwa; ntibukora komande, inyandiko yo kwakira ibicuruzwa, ihinduka ry’ububiko cyangwa inyandiko ya TVA. Ushobora gusaba ibicuruzwa byamaze kwandikwa mu bubiko bw’ubucuruzi bwawe gusa. Umusaruro, ibitumizwa n’ibicuruzwa byakiriwe mu bucuruzi hagati y’ibigo bikomeza inzira zisanzwe.',
+  'Sign in to your account': 'Injira muri konti yawe', 'Create your account': 'Fungura konti yawe',
+  'Reset password': 'Ongera ushyireho ijambobanga', 'Forgot your password?': 'Wibagiwe ijambobanga?',
+  'Send reset link': 'Ohereza umurongo wo gusubizaho ijambobanga', 'New password': 'Ijambobanga rishya',
+  'Confirm password': 'Emeza ijambobanga', 'Email address': 'Aderesi ya imeri',
+  'Enter your email address': 'Andika aderesi ya imeri yawe', 'Enter your password': 'Andika ijambobanga ryawe',
+  'Create account': 'Fungura konti', 'Already have an account?': 'Usanzwe ufite konti?',
+  'Don’t have an account?': 'Nta konti uragira?', 'Continue': 'Komeza', 'Go back': 'Subira inyuma',
+  'Choose a language': 'Hitamo ururimi', 'Kinyarwanda': 'Ikinyarwanda', English: 'Icyongereza',
+  'French': 'Igifaransa', 'No unread notifications': 'Nta butumwa budasomwe',
+  'Mark as read': 'Shyira mu byasomwe', 'Mark all as read': 'Shyira byose mu byasomwe',
+  'Clear notifications': 'Siba imenyesha', 'View notifications': 'Reba imenyesha',
+  'Ask about your business': 'Baza ku bucuruzi bwawe',
+  'Get advice on sales, profit, stock, operations, and TaxFlow': 'Bona inama ku igurisha, inyungu, ububiko, ibikorwa na TaxFlow',
+  'Show my recent sales': 'Nyereka ibyagurishijwe vuba', 'Show my recent purchases': 'Nyereka ibyo naguze vuba',
+  'How can I improve my profit?': 'Nakora iki ngo nongere inyungu?', "What's my current stock?": 'Ububiko bwanjye bugeze he?',
+  "What's my current inventory?": 'Ububiko bwanjye bugeze he?', 'What is my tax status?': 'Imiterere y’imisoro yanjye imeze ite?',
+  'How do I sell to a wholesaler?': 'Nagurisha nte umucuruzi ucuruza byinshi?', 'How much VAT do I owe?': 'Ngomba kwishyura TVA ingana iki?',
+  'How do I confirm a transaction?': 'Nemeza nte ihererekanya?', 'Ask about your taxes & business': 'Baza ku misoro n’ubucuruzi bwawe',
+  'AI responses are informational and read-only. Verify important information before acting.': 'Ibisubizo bya AI ni amakuru gusa kandi ntibihindura inyandiko. Banza ugenzure amakuru y’ingenzi mbere yo kugira icyo ukora.',
+  'AI findings are advisory. An authorized RRA employee must review evidence and make any official decision.': 'Ibyo AI igaragaza ni inama gusa. Umukozi wa RRA ubifitiye ububasha agomba gusuzuma ibimenyetso no gufata icyemezo cyemewe.',
+  'Ask an RRA or business question': 'Baza ikibazo cya RRA cyangwa icy’ubucuruzi',
+  'Enter a TIN or ask about records, evidence, risks, and workflows. Official decisions stay with authorized staff.': 'Andika TIN cyangwa ubaze ku nyandiko, ibimenyetso, ibyago n’inzira z’akazi. Ibyemezo byemewe bifatwa n’abakozi babifitiye ububasha.',
+  'The AI assistant could not respond. Please try again in a moment.': 'Umufasha wa AI ntiyashoboye gusubiza. Ongera ugerageze nyuma gato.',
+  'Ask about your business…': 'Baza ku bucuruzi bwawe…', 'Ask a question…': 'Baza ikibazo…',
+  'I couldn’t produce a written answer. Please ask what you want to know about the TIN or record, or try your question again.': 'Ntabwo nabashije gutanga igisubizo cyanditse. Baza icyo ushaka kumenya kuri TIN cyangwa inyandiko, cyangwa wongere ugerageze.',
+  'I couldn’t complete that answer. Please try again or clear this chat and resend your question.': 'Ntabwo nabashije kurangiza igisubizo. Ongera ugerageze cyangwa usibe ikiganiro wongere wohereze ikibazo.',
+  'The AI assistant could not complete this request. Please try again.': 'Umufasha wa AI ntiyashoboye kurangiza ubu busabe. Ongera ugerageze.',
+  'Show system-wide statistics': 'Nyereka imibare rusange ya sisitemu', 'Trace the supply chain for Rice': 'Kurikirana urunana rw’ibicuruzwa rw’umuceri',
+  'Show pending transaction confirmations': 'Nyereka ihererekanya ritegereje kwemezwa', 'Generate revenue forecast for 6 months': 'Kora iteganyamari ry’amezi 6',
+  'This field is required.': 'Iki gice kigomba kuzuzwa.', 'Please enter a valid email address.': 'Andika aderesi ya imeri yemewe.',
+  'Passwords do not match.': 'Amagambo y’ibanga ntahura.', 'An unexpected error occurred. Please try again.': 'Habaye ikosa ritari ryitezwe. Ongera ugerageze.',
+});
+
+Object.assign(translations.fr, {
+  'Taxpayer': 'Contribuable', 'Tax declaration': 'Déclaration fiscale', 'Tax assessment': 'Évaluation fiscale',
+  Invoice: 'Facture', 'Production batch': 'Lot de production', Audit: 'Audit',
+  'Restock Requests': 'Demandes de réapprovisionnement', 'Check eligibility': 'Vérifier l’éligibilité',
+  'Check and submit restock request': 'Vérifier et envoyer la demande', Product: 'Produit',
+  'Requested quantity': 'Quantité demandée', 'Exception reason (optional)': 'Motif de dérogation (facultatif)',
+  'If the threshold is not met, explain why an exception should be reviewed.': 'Si le seuil n’est pas atteint, expliquez pourquoi une dérogation devrait être examinée.',
+  'Your recent requests': 'Vos demandes récentes', 'You have not submitted a restock request.': 'Vous n’avez envoyé aucune demande de réapprovisionnement.',
+  'No TaxFlow products are available yet.': 'Aucun produit TaxFlow n’est disponible pour le moment.', 'Submitting…': 'Envoi en cours…',
+  'TaxFlow could not save the request. No inventory or tax records were changed.': 'TaxFlow n’a pas pu enregistrer la demande. Aucun stock ni dossier fiscal n’a été modifié.',
+  'Restock request storage is not available. An administrator must check the database migration. No inventory or tax records were changed.': 'Le stockage des demandes de réapprovisionnement est indisponible. Un administrateur doit vérifier la migration de la base de données. Aucun stock ni dossier fiscal n’a été modifié.',
+  'The request details were invalid. Check the product, quantity, and exception reason.': 'Les informations de la demande sont invalides. Vérifiez le produit, la quantité et le motif de dérogation.',
+  'Your business account must have approved clearance to submit a restock request.': 'Le compte de votre entreprise doit être agréé pour envoyer une demande de réapprovisionnement.',
+  'The recorded sales are below the active threshold, so this request did not pass the eligibility check.': 'Les ventes enregistrées sont inférieures au seuil en vigueur ; la demande n’est donc pas admissible.',
+  'The request passed the active recorded sell-through check. This result does not create a supplier order, goods receipt, inventory movement, or VAT posting.': 'La demande satisfait au seuil de ventes enregistrées. Ce résultat ne crée ni commande fournisseur, ni réception de marchandises, ni mouvement de stock, ni écriture de TVA.',
+  'Your exception request was recorded and is awaiting an authorized officer’s decision.': 'Votre demande de dérogation a été enregistrée et attend la décision d’un agent habilité.',
+  'The check uses TaxFlow’s recorded stock ledger. A successful request only records eligibility; it does not create an order, receipt, stock movement, or VAT posting. Requests are available only for products already recorded in your business stock. Production, imports, and accepted B2B receipts continue through their existing workflows.': 'La vérification utilise le registre de stock de TaxFlow. Une demande admissible enregistre uniquement l’éligibilité : elle ne crée ni commande, ni réception, ni mouvement de stock, ni écriture de TVA. Seuls les produits déjà inscrits dans le stock de votre entreprise peuvent faire l’objet d’une demande. La production, les importations et les réceptions B2B acceptées suivent leurs procédures habituelles.',
+  'Sign in to your account': 'Connectez-vous à votre compte', 'Create your account': 'Créer votre compte',
+  'Reset password': 'Réinitialiser le mot de passe', 'Forgot your password?': 'Mot de passe oublié ?',
+  'Send reset link': 'Envoyer le lien de réinitialisation', 'New password': 'Nouveau mot de passe',
+  'Confirm password': 'Confirmer le mot de passe', 'Email address': 'Adresse e-mail',
+  'Enter your email address': 'Saisissez votre adresse e-mail', 'Enter your password': 'Saisissez votre mot de passe',
+  'Create account': 'Créer un compte', 'Already have an account?': 'Vous avez déjà un compte ?',
+  'Don’t have an account?': 'Vous n’avez pas de compte ?', Continue: 'Continuer', 'Go back': 'Retour',
+  'Choose a language': 'Choisir une langue', Kinyarwanda: 'Kinyarwanda', English: 'Anglais', French: 'Français',
+  'No unread notifications': 'Aucune notification non lue', 'Mark as read': 'Marquer comme lu',
+  'Mark all as read': 'Tout marquer comme lu', 'Clear notifications': 'Effacer les notifications',
+  'View notifications': 'Voir les notifications', 'This field is required.': 'Ce champ est obligatoire.',
+  'Ask about your business': 'Poser une question sur votre entreprise',
+  'Get advice on sales, profit, stock, operations, and TaxFlow': 'Obtenez des conseils sur les ventes, les bénéfices, le stock, les opérations et TaxFlow',
+  'Show my recent sales': 'Afficher mes ventes récentes', 'Show my recent purchases': 'Afficher mes achats récents',
+  'How can I improve my profit?': 'Comment améliorer mes bénéfices ?', "What's my current stock?": 'Quel est mon stock actuel ?',
+  "What's my current inventory?": 'Quel est mon stock actuel ?', 'What is my tax status?': 'Quelle est ma situation fiscale ?',
+  'How do I sell to a wholesaler?': 'Comment vendre à un grossiste ?', 'How much VAT do I owe?': 'Quel montant de TVA dois-je ?',
+  'How do I confirm a transaction?': 'Comment confirmer une transaction ?', 'Ask about your taxes & business': 'Poser une question sur vos impôts et votre entreprise',
+  'AI responses are informational and read-only. Verify important information before acting.': 'Les réponses de l’IA sont informatives et en lecture seule. Vérifiez les informations importantes avant d’agir.',
+  'AI findings are advisory. An authorized RRA employee must review evidence and make any official decision.': 'Les constats de l’IA sont consultatifs. Un agent RRA habilité doit examiner les preuves et prendre toute décision officielle.',
+  'Ask an RRA or business question': 'Poser une question sur la RRA ou une entreprise',
+  'Enter a TIN or ask about records, evidence, risks, and workflows. Official decisions stay with authorized staff.': 'Saisissez un TIN ou posez une question sur les dossiers, les preuves, les risques et les procédures. Les décisions officielles relèvent du personnel habilité.',
+  'The AI assistant could not respond. Please try again in a moment.': 'L’assistant IA n’a pas pu répondre. Veuillez réessayer dans un instant.',
+  'Ask about your business…': 'Posez une question sur votre entreprise…', 'Ask a question…': 'Poser une question…',
+  'I couldn’t produce a written answer. Please ask what you want to know about the TIN or record, or try your question again.': 'Je n’ai pas pu rédiger de réponse. Précisez votre question sur le TIN ou le dossier, ou réessayez.',
+  'I couldn’t complete that answer. Please try again or clear this chat and resend your question.': 'Je n’ai pas pu terminer la réponse. Réessayez ou effacez cette conversation avant de renvoyer votre question.',
+  'The AI assistant could not complete this request. Please try again.': 'L’assistant IA n’a pas pu traiter cette demande. Veuillez réessayer.',
+  'Show system-wide statistics': 'Afficher les statistiques générales du système', 'Trace the supply chain for Rice': 'Tracer la chaîne d’approvisionnement du riz',
+  'Show pending transaction confirmations': 'Afficher les confirmations de transactions en attente', 'Generate revenue forecast for 6 months': 'Prévoir les recettes sur 6 mois',
+  'Please enter a valid email address.': 'Veuillez saisir une adresse e-mail valide.',
+  'Passwords do not match.': 'Les mots de passe ne correspondent pas.',
+  'An unexpected error occurred. Please try again.': 'Une erreur inattendue est survenue. Veuillez réessayer.',
+});
+
 export function translate(text: string | undefined, language: LangCode): string {
   if (!text || language === 'en') return text ?? '';
   return translations[language][text] ?? text;
 }
 
 export function isLangCode(value: string | null): value is LangCode {
-  return value === 'en' || value === 'kiny' || value === 'fr';
+  return value === 'en' || value === 'rw' || value === 'fr';
+}
+
+/** Reads both the current locale code and the legacy stored `kiny` value. */
+export function normalizeLangCode(value: string | null | undefined): LangCode | null {
+  if (value === 'kiny') return 'rw';
+  return isLangCode(value ?? null) ? value as LangCode : null;
 }
 
 export function translateWithContext(text: string, language: LangCode): string {
@@ -1142,6 +1251,6 @@ export function translateWithContext(text: string, language: LangCode): string {
   if (exact !== trimmed) return text.replace(trimmed, exact);
   const unread = text.match(/^(\d+) unread notification(s?)$/);
   if (unread && language === 'fr') return `${unread[1]} notification${unread[1] === '1' ? '' : 's'} non lue${unread[1] === '1' ? '' : 's'}`;
-  if (unread && language === 'kiny') return `Ubutumwa ${unread[1]} budasomwe`;
+  if (unread && language === 'rw') return `Ubutumwa ${unread[1]} budasomwe`;
   return text;
 }
