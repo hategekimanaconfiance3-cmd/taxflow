@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, type ReactNode } from 'react';
-import { isLangCode, LANG_STORAGE_KEY, translateWithContext, type LangCode } from '@/lib/language';
+import { LANG_STORAGE_KEY, normalizeLangCode, translateWithContext, type LangCode } from '@/lib/language';
 
 const ATTRIBUTES_TO_TRANSLATE = ['placeholder', 'title', 'aria-label'] as const;
 type TranslationState = { source: string; translated: string };
@@ -55,8 +55,8 @@ export function LanguageRuntime({ children }: { children: ReactNode }) {
     };
 
     const applyLanguage = (value: string | null) => {
-      language = isLangCode(value) ? value : 'en';
-      document.documentElement.lang = language === 'kiny' ? 'rw' : language;
+      language = normalizeLangCode(value) ?? 'en';
+      document.documentElement.lang = language;
       translateTree(document.body);
     };
 

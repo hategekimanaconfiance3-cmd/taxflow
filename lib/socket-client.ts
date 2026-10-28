@@ -71,17 +71,21 @@ export function useSocket(
 
         // Subscribe to events
         const eventNames = Object.keys(eventsRef.current || {});
+        const handlers = new Map<string, (data: unknown) => void>();
         for (const event of eventNames) {
-            socket.on(event, (data: unknown) => {
+            const handler = (data: unknown) => {
                 eventsRef.current?.[event]?.(data);
-            });
+            };
+            handlers.set(event, handler);
+            socket.on(event, handler);
         }
 
         return () => {
             socket.off("connect", onConnect);
             socket.off("disconnect", onDisconnect);
             for (const event of eventNames) {
-                socket.off(event);
+                const handler = handlers.get(event);
+                if (handler) socket.off(event, handler);
             }
         };
     }, [userId]);

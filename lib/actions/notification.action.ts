@@ -4,6 +4,7 @@ import db from "@/db/drizzle";
 import { notification } from "@/db/schema";
 import { requireTraderSession } from "@/lib/auth-guard";
 import { eq, desc, and, sql } from "drizzle-orm";
+import { emitToUser } from "@/lib/realtime";
 
 // ---------------------------------------------------------------------------
 // Get notifications for current user
@@ -43,7 +44,7 @@ export async function getUnreadCount(): Promise<number> {
 
 export async function markNotificationRead(id: string) {
     const session = await requireTraderSession();
-    await db
+    const updated = await db
         .update(notification)
         .set({ read: true })
         .where(
@@ -51,7 +52,12 @@ export async function markNotificationRead(id: string) {
                 eq(notification.id, id),
                 eq(notification.userId, session.user.id),
             ),
-        );
+        )
+        .returning({ id: notification.id });
+
+    if (updated.length > 0) {
+        emitToUser(session.user.id, "notification:count-refresh", {});
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -60,7 +66,7 @@ export async function markNotificationRead(id: string) {
 
 export async function markAllNotificationsRead() {
     const session = await requireTraderSession();
-    await db
+    const updated = await db
         .update(notification)
         .set({ read: true })
         .where(
@@ -68,5 +74,10 @@ export async function markAllNotificationsRead() {
                 eq(notification.userId, session.user.id),
                 eq(notification.read, false),
             ),
-        );
+        )
+        .returning({ id: notification.id });
+
+    if (updated.length > 0) {
+        emitToUser(session.user.id, "notification:count-refresh", {});
+    }
 }

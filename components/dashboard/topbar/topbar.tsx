@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback } from "react";
 import { cn } from "@/lib/utils";
 import { authClient } from "@/lib/auth-client";
 import {
@@ -26,10 +26,10 @@ import {
     TooltipProvider,
     TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Menu, Bell, LogOut, Brain } from "lucide-react";
+import { Menu, Bell, LogOut } from "lucide-react";
 import { useSocketContext } from "@/components/providers/socket-provider";
-import { useSocket } from "@/lib/socket-client";
 import { translate, translateWithContext } from '@/lib/language';
+import { NotificationCountBadge } from "@/components/dashboard/notifications/notification-count-badge";
 import {
     useDashboardLayoutCtx,
     LangSelector,
@@ -38,48 +38,33 @@ import {
 interface DashboardTopbarProps {
     role: TraderRole;
     businessName: string;
-    userId: string;
 }
 
 // ---------------------------------------------------------------------------
-// Notification Bell — fetches unread count, updates on socket events
+// Notification Bell — displays the authenticated trader's shared unread count
 // ---------------------------------------------------------------------------
-function NotificationBell({ userId }: { userId: string }) {
-    const [count, setCount] = useState(0);
-    const { lang } = useDashboardLayoutCtx();
-
-    const fetchCount = useCallback(() => {
-        fetch("/api/notification-count")
-            .then((r) => (r.ok ? r.json() : { count: 0 }))
-            .then((d) => setCount(d.count ?? 0))
-            .catch(() => {});
-    }, []);
-
-    useEffect(() => {
-        fetchCount();
-    }, [fetchCount]);
-
-    // Increment badge on live notification events
-    useSocket(userId, {
-        notification: () => setCount((c) => c + 1),
-    });
+function NotificationBell() {
+    const { lang, unreadNotificationCount } = useDashboardLayoutCtx();
+    const accessibleLabel = unreadNotificationCount > 0
+        ? translateWithContext(`${unreadNotificationCount} unread notification${unreadNotificationCount !== 1 ? "s" : ""}`, lang)
+        : translate("Notifications", lang);
 
     return (
         <Tooltip>
             <TooltipTrigger asChild>
                 <Link
                     href="/dashboard/notifications"
+                    aria-label={accessibleLabel}
+                    title={accessibleLabel}
                     className="relative flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
                 >
                     <Bell className="h-4 w-4" />
-                    {count > 0 && (
-                        <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-blue-500 ring-2 ring-background" />
-                    )}
+                    <NotificationCountBadge count={unreadNotificationCount} className="absolute -right-0.5 -top-0.5" />
                 </Link>
             </TooltipTrigger>
             <TooltipContent side="bottom">
-                {count > 0
-                    ? translateWithContext(`${count} unread notification${count !== 1 ? "s" : ""}`, lang)
+                {unreadNotificationCount > 0
+                    ? translateWithContext(`${unreadNotificationCount} unread notification${unreadNotificationCount !== 1 ? "s" : ""}`, lang)
                     : translate("Notifications", lang)}
             </TooltipContent>
         </Tooltip>
@@ -92,14 +77,13 @@ function NotificationBell({ userId }: { userId: string }) {
 export function DashboardTopbar({
     role,
     businessName,
-    userId,
 }: DashboardTopbarProps) {
     const pathname = usePathname();
     const groups = getSidebarGroups(role);
     const [isSigningOut, setIsSigningOut] = useState(false);
     const [isMobileNavigationOpen, setIsMobileNavigationOpen] = useState(false);
 
-    const { isAiOpen, openAI, lang, setLang } = useDashboardLayoutCtx();
+    const { lang, setLang, unreadNotificationCount } = useDashboardLayoutCtx();
 
     const handleSignOut = useCallback(async () => {
         if (isSigningOut) return;
@@ -187,11 +171,16 @@ export function DashboardTopbar({
                                     <div className="px-2 space-y-[2px]">
                                         {group.items.map((item) => {
                                             const active = isActive(item.href);
+                                            const translatedLabel = translate(item.label, lang);
+                                            const notificationLabel = item.href === "/dashboard/notifications" && unreadNotificationCount > 0
+                                                ? `${translatedLabel}, ${unreadNotificationCount} unread`
+                                                : translatedLabel;
                                             return (
                                                 <Link
                                                     key={item.href}
                                                     href={item.href}
                                                     onClick={() => setIsMobileNavigationOpen(false)}
+                                                    aria-label={notificationLabel}
                                                     className={cn(
                                                         "relative flex items-center gap-2.5 rounded-md px-3 py-[7px] text-[13px] font-medium transition-colors",
                                                         active
@@ -204,6 +193,9 @@ export function DashboardTopbar({
                                                     )}
                                                     <item.icon className="h-4 w-4 shrink-0" />
                                                     {translate(item.label, lang)}
+                                                    {item.href === "/dashboard/notifications" && (
+                                                        <NotificationCountBadge count={unreadNotificationCount} className="ml-auto" />
+                                                    )}
                                                 </Link>
                                             );
                                         })}
@@ -246,25 +238,12 @@ export function DashboardTopbar({
                     />
 
                     {/* Notification Bell */}
-                    <NotificationBell userId={userId} />
+                    <NotificationBell />
 
                     <Separator orientation="vertical" className="h-5 mx-1 opacity-60" />
 
                     {/* Language Selector */}
                     <LangSelector value={lang} onChange={setLang} />
-
-                    {/* Ask AI button — hidden while panel is open */}
-                    {!isAiOpen && (
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={openAI}
-                            className="h-9 gap-1 px-2 text-xs font-medium sm:h-8 sm:gap-1.5 sm:px-3"
-                        >
-                            <Brain className="h-3.5 w-3.5" />
-                            <span className="sm:hidden">AI</span><span className="hidden sm:inline">Ask AI</span>
-                        </Button>
-                    )}
 
                 </div>
             </header>

@@ -425,13 +425,8 @@ function TicketDetailPanel({
                                     variant="outline"
                                     className="h-7 text-xs text-violet-700 border-violet-200 hover:bg-violet-50"
                                     onClick={handleImproveWithAI}
-                                    disabled={aiState === "loading"}
                                 >
-                                    {aiState === "loading" ? (
-                                        <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                                    ) : (
-                                        <RefreshCw className="h-3 w-3 mr-1" />
-                                    )}
+                                    <RefreshCw className="h-3 w-3 mr-1" />
                                     Try Again
                                 </Button>
                                 <Button

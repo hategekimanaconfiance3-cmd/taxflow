@@ -29,9 +29,9 @@ interface TooltipArgs {
 
 function AnomalyTooltip({ active, payload, label }: TooltipArgs) {
   if (!active || !payload?.length) return null;
-  const pricing = payload.find(p => p.name === "pricingAnomalies")?.value ?? 0;
-  const compliance = payload.find(p => p.name === "complianceFlags")?.value ?? 0;
-  const gaps = payload.find(p => p.name === "transactionGaps")?.value ?? 0;
+  const pricing = payload.find(p => p.name === "suspiciousCount")?.value ?? 0;
+  const compliance = payload.find(p => p.name === "auditCount")?.value ?? 0;
+  const gaps = 0;
   const total = (pricing as number) + (compliance as number) + (gaps as number);
   return (
     <div className="rounded-lg border bg-background shadow-lg px-3 py-2.5 text-xs space-y-1 min-w-[160px]">
@@ -85,13 +85,14 @@ export function AnomalyTimeline() {
 
   if (!data) return null;
 
-  const TrendIcon = data.trend === "increasing" ? TrendingUp : data.trend === "decreasing" ? TrendingDown : Minus;
-  const trendColor = data.trend === "increasing" ? "text-red-600" : data.trend === "decreasing" ? "text-emerald-600" : "text-muted-foreground";
-  const trendLabel = data.trend === "increasing" ? "Anomalies increasing" : data.trend === "decreasing" ? "Anomalies decreasing" : "Stable";
+  const TrendIcon = data.trend === "up" ? TrendingUp : data.trend === "down" ? TrendingDown : Minus;
+  const trendColor = data.trend === "up" ? "text-red-600" : data.trend === "down" ? "text-emerald-600" : "text-muted-foreground";
+  const trendLabel = data.trend === "up" ? "Recorded events increasing" : data.trend === "down" ? "Recorded events decreasing" : "Stable";
 
   const chartData = data.timeline;
 
   const avg = data.totalAnomalies > 0 ? data.totalAnomalies / data.timeline.length : 0;
+  const peakPoint = [...data.timeline].sort((a, b) => b.anomalyCount - a.anomalyCount)[0];
 
   return (
     <Card>
@@ -106,9 +107,9 @@ export function AnomalyTimeline() {
               <TrendIcon className="h-3.5 w-3.5" />
               {trendLabel}
             </div>
-            {data.peakDate && (
+            {peakPoint && (
               <Badge variant="secondary" className="bg-red-100 text-red-700 text-[10px]">
-                Peak: {data.peakDate} ({data.peakTotal})
+                Peak: {peakPoint.date} ({peakPoint.anomalyCount})
               </Badge>
             )}
           </div>
@@ -124,8 +125,8 @@ export function AnomalyTimeline() {
           </div>
           <div className="rounded-lg border px-3 py-2 text-center">
             <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Peak day</p>
-            <p className="text-sm font-bold mt-0.5">{data.peakDate ?? "—"}</p>
-            {data.peakTotal > 0 && <p className="text-[9px] text-red-600 font-mono">{data.peakTotal} events</p>}
+            <p className="text-sm font-bold mt-0.5">{peakPoint?.date ?? "—"}</p>
+            {(peakPoint?.anomalyCount ?? 0) > 0 && <p className="text-[9px] text-red-600 font-mono">{peakPoint?.anomalyCount} events</p>}
           </div>
           <div className="rounded-lg border px-3 py-2 text-center">
             <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Daily avg</p>
@@ -224,9 +225,8 @@ export function AnomalyTimeline() {
                     />
                   )}
                   <Tooltip content={<AnomalyTooltip />} cursor={{ stroke: "hsl(var(--border))", strokeWidth: 1 }} />
-                  <Area type="monotone" dataKey="complianceFlags" stackId="1" stroke="#ef4444" strokeWidth={1.5} fill="url(#complianceGrad)" name="complianceFlags" />
-                  <Area type="monotone" dataKey="pricingAnomalies" stackId="1" stroke="#f59e0b" strokeWidth={1.5} fill="url(#pricingGrad)" name="pricingAnomalies" />
-                  <Area type="monotone" dataKey="transactionGaps" stackId="1" stroke="#60a5fa" strokeWidth={1} fill="url(#gapsGrad)" name="transactionGaps" />
+                  <Area type="monotone" dataKey="auditCount" stackId="1" stroke="#ef4444" strokeWidth={1.5} fill="url(#complianceGrad)" name="auditCount" />
+                  <Area type="monotone" dataKey="suspiciousCount" stackId="1" stroke="#f59e0b" strokeWidth={1.5} fill="url(#pricingGrad)" name="suspiciousCount" />
                 </AreaChart>
               </ResponsiveContainer>
             </div>

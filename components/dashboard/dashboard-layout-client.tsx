@@ -14,6 +14,7 @@ import { cn } from '@/lib/utils';
 import type { TraderRole } from '@/lib/sidebar-config';
 import { LANGS, translate, type LangCode } from '@/lib/language';
 import { useLanguagePreference } from '@/lib/use-language';
+import { useSocket } from '@/lib/socket-client';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -55,6 +56,7 @@ interface DashboardLayoutContextValue {
   isAiOpen: boolean;
   lang: LangCode;
   sidebarW: number;
+  unreadNotificationCount: number;
   openAI: () => void;
   closeAI: () => void;
   expandSidebar: () => void;
@@ -304,7 +306,44 @@ export function DashboardLayoutClient({
 }: DashboardLayoutClientProps) {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isAiOpen, setIsAiOpen] = useState(false);
+  const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
   const [lang, setLang] = useLanguagePreference();
+
+  const refreshUnreadNotificationCount = useCallback(async () => {
+    try {
+      const response = await fetch('/api/notification-count', { cache: 'no-store' });
+      if (!response.ok) return;
+
+      const result = await response.json() as { count?: unknown };
+      if (typeof result.count === 'number' && Number.isSafeInteger(result.count) && result.count >= 0) {
+        setUnreadNotificationCount(result.count);
+      }
+    } catch {
+      // Keep the last known count if the count endpoint is temporarily unavailable.
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshUnreadNotificationCount();
+
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') void refreshUnreadNotificationCount();
+    };
+    const interval = window.setInterval(() => void refreshUnreadNotificationCount(), 30_000);
+    window.addEventListener('focus', refreshWhenVisible);
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refreshWhenVisible);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+    };
+  }, [refreshUnreadNotificationCount]);
+
+  useSocket(userId, {
+    notification: () => void refreshUnreadNotificationCount(),
+    'notification:count-refresh': () => void refreshUnreadNotificationCount(),
+  });
 
   const openAI = useCallback(() => {
     setIsAiOpen(true);
@@ -341,7 +380,17 @@ export function DashboardLayoutClient({
 
   return (
     <DashboardLayoutContext.Provider
-      value={{ isSidebarCollapsed, isAiOpen, lang, sidebarW, openAI, closeAI, expandSidebar, setLang }}
+      value={{
+        isSidebarCollapsed,
+        isAiOpen,
+        lang,
+        sidebarW,
+        unreadNotificationCount,
+        openAI,
+        closeAI,
+        expandSidebar,
+        setLang,
+      }}
     >
       <DashboardSidebar role={role} businessName={businessName} userName={userName} />
 
@@ -352,7 +401,7 @@ export function DashboardLayoutClient({
           '--ai-panel-width': isAiOpen ? `${AI_PANEL_W}px` : '0px',
         } as React.CSSProperties}
       >
-        <DashboardTopbar role={role} businessName={businessName} userId={userId} />
+        <DashboardTopbar role={role} businessName={businessName} />
         <main className="min-w-0 flex-1">
           <div className="min-w-0 p-3 sm:p-4 lg:p-6">{children}</div>
         </main>

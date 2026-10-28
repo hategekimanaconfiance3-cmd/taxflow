@@ -93,7 +93,9 @@ export function VatPerformance({ from, to }: { from?: string; to?: string } = {}
   if (!data) return null;
 
   const hasData = data.monthly.length > 0;
-  const avg = data.avgMonthlyVat;
+  const avg = data.monthly.length > 0 ? data.totalOutput / data.monthly.length : 0;
+  const peakMonth = [...data.monthly].sort((a, b) => b.outputVat - a.outputVat)[0]?.month;
+  const currentMonth = data.monthly.at(-1);
 
   return (
     <Card>
@@ -104,11 +106,11 @@ export function VatPerformance({ from, to }: { from?: string; to?: string } = {}
               <BarChart3 className="h-4 w-4 text-muted-foreground" />
               Revenue & Tax Performance
             </CardTitle>
-            <p className="text-xs text-muted-foreground mt-0.5">VAT collected over time · 12-month rolling</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Output VAT and confirmed payments over the recorded six-month period</p>
           </div>
-          {data.peakMonth && (
+          {peakMonth && (
             <span className="text-[10px] text-muted-foreground border rounded px-2 py-0.5">
-              Peak: {data.peakMonth}
+              Peak: {peakMonth}
             </span>
           )}
         </div>
@@ -117,23 +119,19 @@ export function VatPerformance({ from, to }: { from?: string; to?: string } = {}
         {/* Metric strip */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <MetricCard
-            label="Total VAT Collected"
-            value={formatCompact(data.totalVatCollected)}
-            sub="Last 12 months"
-            change={data.pctChange}
-            positive={(data.pctChange ?? 0) >= 0}
+            label="Total Output VAT"
+            value={formatCompact(data.totalOutput)}
+            sub="Recorded period"
           />
           <MetricCard
             label="This Month"
-            value={data.currentMonthVat > 0 ? formatCompact(data.currentMonthVat) : "—"}
-            sub={data.currentMonthVat > 0 ? "Current period" : "No VAT recorded yet (current period)"}
-            change={data.currentMonthVat > 0 ? data.currentMonthChange : null}
-            positive={(data.currentMonthChange ?? 0) >= 0}
+            value={currentMonth?.outputVat ? formatCompact(currentMonth.outputVat) : "—"}
+            sub={currentMonth ? currentMonth.month : "No VAT recorded in this period"}
           />
           <MetricCard
             label="Monthly Average"
-            value={formatCompact(data.avgMonthlyVat)}
-            sub="12-month average"
+            value={formatCompact(avg)}
+            sub="Average output VAT per recorded month"
           />
         </div>
 
@@ -188,7 +186,7 @@ export function VatPerformance({ from, to }: { from?: string; to?: string } = {}
                 <Tooltip content={<VatTooltip />} cursor={{ stroke: "hsl(var(--border))", strokeWidth: 1 }} />
                 <Area
                   type="monotone"
-                  dataKey="vatCollected"
+                  dataKey="outputVat"
                   stroke="#10b981"
                   strokeWidth={2.5}
                   fill="url(#vatGradient)"
