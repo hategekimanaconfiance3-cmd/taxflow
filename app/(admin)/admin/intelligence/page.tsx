@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { IntelligenceActionButtons } from '@/components/admin/intelligence-action-buttons';
+import { hasRRAPermission } from '@/lib/rra-rbac';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -75,6 +76,7 @@ const TYPE_LABELS: Record<string, string> = {
   supply_chain_gap:      'Supply Chain Gap',
   data_quality:          'Data Quality',
   risk_score:            'Risk Score',
+  production_discrepancy: 'Production History Signal',
 };
 
 // ---------------------------------------------------------------------------
@@ -316,6 +318,7 @@ export default async function IntelligenceHubPage({
           <IntelligenceActionButtons
             canRunReconciliation={['stock_officer', 'compliance_officer', 'audit_officer', 'product_traceability_officer', 'tax_compliance_officer', 'audit_investigation_officer'].includes(staff.clearanceLevel)}
             canRunDataQuality={['compliance_officer', 'audit_officer', 'tax_compliance_officer', 'audit_investigation_officer', 'data_ai_analyst'].includes(staff.clearanceLevel)}
+            canRunProductionHistory={staff.clearanceRoles.some((role) => role !== 'super_admin' && hasRRAPermission(role, 'production.formula.read'))}
           />
 
           {/* Pure link cards */}

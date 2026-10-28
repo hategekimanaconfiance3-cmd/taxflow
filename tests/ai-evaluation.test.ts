@@ -67,7 +67,9 @@ test("a shared TIN question receives different authorized tools for three RRA ro
   assert.ok(!complianceTools.includes("getStockLevels"));
   assert.ok(auditTools.includes("getTransactions"));
   assert.ok(auditTools.includes("traceProductJourney"));
+  assert.ok(auditTools.includes("getProductionHistoryAnalysisTool"));
   assert.ok(!complianceTools.includes("traceProductJourney"));
+  assert.ok(!stockTools.includes("getProductionHistoryAnalysisTool"));
 });
 
 test("assistant tools are derived only from permissions already defined in RRA RBAC", () => {
@@ -80,6 +82,7 @@ test("assistant tools are derived only from permissions already defined in RRA R
   }
   assert.deepEqual(getRRAAIToolNames("correction_officer"), []);
   assert.deepEqual(getRRAAIToolNames("super_admin"), []);
+  assert.ok(!getRRAAIToolNames(["super_admin"]).includes("getProductionHistoryAnalysisTool"));
   assert.ok(getRRAAIToolNames(["super_admin", "product_traceability_officer"]).includes("getStockLevels"));
 });
 

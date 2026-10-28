@@ -1,4 +1,5 @@
 import { requireRRASession } from '@/lib/auth-guard';
+import { hasRRAPermission } from '@/lib/rra-rbac';
 import { getFindings } from '@/lib/actions/ai-finding.action';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -12,6 +13,7 @@ import {
 } from '@/components/ui/table';
 import { FileSearch, Info } from 'lucide-react';
 import Link from 'next/link';
+import { FindingReviewControls } from '@/components/admin/finding-review-controls';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -55,6 +57,7 @@ const TYPE_LABELS: Record<string, string> = {
   supply_chain_gap:    'Supply Chain Gap',
   data_quality:        'Data Quality',
   risk_score:          'Risk Score',
+  production_discrepancy: 'Production History Signal',
 };
 
 // ---------------------------------------------------------------------------
@@ -72,7 +75,9 @@ export default async function FindingsPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer", "data_ai_analyst");
+  const { staff } = await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer", "data_ai_analyst");
+  const canReviewProductionFinding = staff.clearanceRoles.some((role) => role !== "super_admin" && hasRRAPermission(role, "production.formula.read"));
+  const canReviewFinding = staff.clearanceRoles.some((role) => ["compliance_officer", "audit_officer", "audit_investigation_officer"].includes(role));
   const params = await searchParams;
 
   let findings: Awaited<ReturnType<typeof getFindings>> = [];
@@ -80,7 +85,7 @@ export default async function FindingsPage({
     findings = await getFindings({
       reviewStatus: params.status as 'open' | 'under_review' | 'resolved' | 'dismissed' | undefined,
       severity:     params.severity as 'critical' | 'high' | 'medium' | 'low' | 'info' | undefined,
-      findingType:  params.type as 'stock_discrepancy' | 'underreporting' | 'price_anomaly' | 'tax_gap' | 'duplicate_transaction' | 'supply_chain_gap' | 'data_quality' | 'risk_score' | undefined,
+      findingType:  params.type as 'stock_discrepancy' | 'underreporting' | 'price_anomaly' | 'tax_gap' | 'duplicate_transaction' | 'supply_chain_gap' | 'data_quality' | 'risk_score' | 'production_discrepancy' | undefined,
       limit:        100,
     });
   } catch {
@@ -157,12 +162,13 @@ export default async function FindingsPage({
                 <TableHead>Status</TableHead>
                 <TableHead>Date</TableHead>
                 <TableHead>Details</TableHead>
+                <TableHead>Human review</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {findings.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={9} className="py-12 text-center text-muted-foreground text-sm">
+                  <TableCell colSpan={10} className="py-12 text-center text-muted-foreground text-sm">
                     <div className="flex flex-col items-center gap-2">
                       <Info className="h-8 w-8 text-muted-foreground/40" />
                       <p>No findings found. The AI findings engine may not have run yet.</p>
@@ -213,6 +219,9 @@ export default async function FindingsPage({
                     >
                       View →
                     </Link>
+                  </TableCell>
+                  <TableCell>
+                    <FindingReviewControls findingId={f.id} status={f.reviewStatus} canReview={canReviewFinding && (f.findingType !== 'production_discrepancy' || canReviewProductionFinding)} />
                   </TableCell>
                 </TableRow>
               ))}

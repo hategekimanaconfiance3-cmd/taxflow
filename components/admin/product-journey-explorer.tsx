@@ -89,6 +89,37 @@ interface AuthorizedFormula {
     materials: Array<{ materialCode: string; materialName: string; unit: string; recipeQuantity: number; plannedQuantity: number | null; actualQuantity: number | null }>;
 }
 
+interface ProductionHistoryAnalysisResult {
+    found: boolean;
+    manufacturer: string;
+    period: { type: string; batchReference?: string; lookbackDays?: number };
+    ruleVersion: string;
+    baselineMinimumBatches: number;
+    interpretation: string;
+    batches: Array<{
+        batchReference: string;
+        product: string;
+        status: string | null;
+        signalCount: number;
+        repeatedAcrossSelectedBatches: boolean | null;
+        baselineSource: string;
+        dataLimitations: string[];
+        metrics: Array<{
+            code: string;
+            label: string;
+            unit: string;
+            expectedRatio: number | null;
+            observedRatio: number | null;
+            deviationPercent: number | null;
+            thresholdPercent: number;
+            baselineBatchCount: number;
+            confidence: "high" | "medium" | "low";
+            signal: "unusual" | "within_baseline" | "insufficient_history" | "missing_evidence";
+            evidenceBatchReferences: string[];
+        }>;
+    }>;
+}
+
 export function ProductJourneyExplorer({ canReadProductionFormula }: { canReadProductionFormula: boolean }) {
     const [query, setQuery] = useState("");
     const [status, setStatus] = useState("all");
@@ -102,15 +133,20 @@ export function ProductJourneyExplorer({ canReadProductionFormula }: { canReadPr
     const [view, setView] = useState<"tree" | "table">("tree");
     const [expanded, setExpanded] = useState<Set<string>>(new Set());
     const [formula, setFormula] = useState<AuthorizedFormula | null>(null);
+    const [historyAnalysis, setHistoryAnalysis] = useState<ProductionHistoryAnalysisResult | null>(null);
     const [formulaReason, setFormulaReason] = useState<"production_discrepancy" | "regulatory_review" | "investigation_case">("production_discrepancy");
     const [caseReference, setCaseReference] = useState("");
     const [formulaLoading, setFormulaLoading] = useState(false);
+    const [historyLoading, setHistoryLoading] = useState(false);
+    const [historyError, setHistoryError] = useState<string | null>(null);
     const [formulaError, setFormulaError] = useState<string | null>(null);
 
     function selectRecord(record: JourneyRecord | SourceRecord) {
         setSelected(record);
         setFormula(null);
         setFormulaError(null);
+        setHistoryAnalysis(null);
+        setHistoryError(null);
         setCaseReference("");
     }
 
@@ -139,6 +175,30 @@ export function ProductJourneyExplorer({ canReadProductionFormula }: { canReadPr
             setFormulaError("Unable to retrieve formula evidence. Retry or contact support.");
         } finally {
             setFormulaLoading(false);
+        }
+    }
+
+    async function compareProductionHistory(): Promise<void> {
+        if (!selected || !("kind" in selected) || selected.kind !== "production_batch") return;
+        setHistoryLoading(true);
+        setHistoryError(null);
+        setHistoryAnalysis(null);
+        try {
+            const response = await fetch("/api/admin/production/history", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ batchId: selected.id }),
+            });
+            const result = await response.json() as { analysis?: ProductionHistoryAnalysisResult; error?: string };
+            if (!response.ok || !result.analysis) {
+                setHistoryError(result.error ?? "Historical production evidence could not be loaded.");
+                return;
+            }
+            setHistoryAnalysis(result.analysis);
+        } catch {
+            setHistoryError("Unable to compare historical production records. Retry or contact support.");
+        } finally {
+            setHistoryLoading(false);
         }
     }
 
@@ -242,6 +302,22 @@ export function ProductJourneyExplorer({ canReadProductionFormula }: { canReadPr
                                 <p className="text-xs">Planned output: {formula.plannedOutputQuantity?.toLocaleString() ?? "not recorded"} · Actual output: {formula.outputQuantity.toLocaleString()}</p>
                                 {formula.materials.length ? formula.materials.map((material) => <div key={material.materialCode} className="rounded border bg-background p-2 text-xs"><p className="font-medium">{material.materialName} <span className="font-mono text-muted-foreground">({material.materialCode})</span></p><p>Recipe: {material.recipeQuantity.toLocaleString()} {material.unit} per {formula.recipe.outputQuantity?.toLocaleString() ?? "unknown"} output · Planned for batch: {material.plannedQuantity?.toLocaleString() ?? "not recorded"} {material.unit} · Actual: {material.actualQuantity?.toLocaleString() ?? "not recorded"} {material.unit}</p></div>) : <p className="text-xs text-muted-foreground">This recipe version has no material lines.</p>}
                             </div>}
+                            <div className="space-y-2 border-t border-amber-300 pt-2">
+                                <div><h4 className="font-medium">Historical production comparison</h4><p className="text-xs text-muted-foreground">Baseline uses only earlier batches of this exact recipe version marked independently supported and within tolerance.</p></div>
+                                <Button type="button" size="sm" variant="outline" disabled={historyLoading} onClick={() => void compareProductionHistory()}>{historyLoading && <Loader2 className="animate-spin" data-icon="inline-start" />}Compare historical batches</Button>
+                                {historyError && <p role="alert" className="text-xs text-destructive">{historyError}</p>}
+                                {historyAnalysis && historyAnalysis.batches.map((batch) => <div key={batch.batchReference} className="space-y-2 rounded-md border bg-background p-2">
+                                    <p className="text-xs font-medium">{batch.product} · {batch.batchReference} · {batch.signalCount ? `${batch.signalCount} review signal(s)` : "No unusual deviation against available baseline"}</p>
+                                    <p className="text-[11px] text-muted-foreground">Rules {historyAnalysis.ruleVersion} · Baseline: {batch.baselineSource}. Signals are not proof of wrongdoing.</p>
+                                    {batch.metrics.map((metric) => <div key={metric.code} className="rounded border p-2 text-xs">
+                                        <p className="font-medium">{metric.label}: {metric.signal.replaceAll("_", " ")} · {metric.confidence} confidence</p>
+                                        <p>Baseline ratio: {metric.expectedRatio === null ? "insufficient history" : `${(metric.expectedRatio * 100).toFixed(2)}%`} · Observed ratio: {metric.observedRatio === null ? "not recorded" : `${(metric.observedRatio * 100).toFixed(2)}%`} · Deviation: {metric.deviationPercent === null ? "unavailable" : `${metric.deviationPercent.toFixed(2)}%`} · Review threshold: {metric.thresholdPercent.toFixed(2)}% · Verified samples: {metric.baselineBatchCount}</p>
+                                        {metric.evidenceBatchReferences.length > 0 && <p className="text-muted-foreground">Compared batches: {metric.evidenceBatchReferences.join(", ")}</p>}
+                                    </div>)}
+                                    {batch.dataLimitations.map((limitation) => <p key={limitation} className="text-xs text-amber-800">Data limitation: {limitation}</p>)}
+                                </div>)}
+                                {historyAnalysis && <p className="text-xs text-muted-foreground">{historyAnalysis.interpretation}</p>}
+                            </div>
                         </section>}
                         <Button asChild variant="outline" size="sm"><Link href={selected.recordUrl}>Open source record <ExternalLink data-icon="inline-end" /></Link></Button>
                     </>}

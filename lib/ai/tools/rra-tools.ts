@@ -16,6 +16,7 @@ import { getRevenueForecast } from "@/lib/ai/revenue-forecast";
 import { analyzeMerchantBehavior } from "@/lib/ai/behavioral-analysis";
 import { searchProductJourney } from "@/lib/actions/product-journey.action";
 import { getTaxpayerIntelligenceForAI } from "@/lib/actions/admin-tin-lookup.action";
+import { getProductionHistoryAnalysis } from "@/lib/ai/production-history-service";
 
 // ---------------------------------------------------------------------------
 // AI Tools — Database query tools for the RRA Intelligence Agent.
@@ -721,4 +722,18 @@ export const getImportDeclarations = tool({
             .limit(20);
         return { count: rows.length, declarations: rows, readOnly: true };
     },
+});
+
+/** Historical recipe-scoped manufacturing comparisons for the explicitly authorized formula roles. */
+export const getProductionHistoryAnalysisTool = tool({
+    description: "Analyze a manufacturer's recipe-linked production against earlier batches for the exact same recipe version. This tool is available only to roles with production.formula.read and may return confidential ingredient names and quantities. Use a manufacturer's TIN, optionally a specific batch reference or product name, and a bounded recent window. Baselines include only earlier batches already marked independently_supported and within_tolerance; unverified or flagged records are never used to train the baseline. Treat signals as human-review leads, not proof of wrongdoing. State the sample size, exact recipe version, rule version, limitations, and evidence batch references.",
+    inputSchema: z.object({
+        tin: z.string().trim().min(5).max(32).regex(/^[A-Za-z0-9-]+$/).describe("Manufacturer TIN"),
+        batchReference: z.string().trim().min(1).max(128).optional().describe("Optional exact production batch reference"),
+        productName: z.string().trim().min(2).max(160).optional().describe("Optional manufacturer product name filter"),
+        lookbackDays: z.union([z.literal(30), z.literal(90), z.literal(180), z.literal(365)]).default(90)
+            .describe("Recent candidate-batch window, default 90 days; verified baseline batches are selected separately"),
+    }),
+    execute: async ({ tin, batchReference, productName, lookbackDays }) =>
+        getProductionHistoryAnalysis({ tin, batchReference, productName, lookbackDays }),
 });

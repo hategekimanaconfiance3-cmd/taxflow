@@ -15,6 +15,7 @@ export const RRA_AI_TOOL_NAMES = [
   'traceSupplyChain',
   'traceProductJourney',
   'getImportDeclarations',
+  'getProductionHistoryAnalysisTool',
 ] as const;
 
 export type RRAAIToolName = (typeof RRA_AI_TOOL_NAMES)[number];
@@ -49,6 +50,7 @@ export const RRA_AI_TOOL_PERMISSIONS: Record<RRAAIToolName, readonly RRAPermissi
   traceSupplyChain: ['supply_chain.summary.read', 'traceability.read'],
   traceProductJourney: ['traceability.read'],
   getImportDeclarations: ['imports.read', 'imports.review'],
+  getProductionHistoryAnalysisTool: ['production.formula.read'],
 };
 
 /** Resolve assistant tools from the authenticated employee's verified roles. */

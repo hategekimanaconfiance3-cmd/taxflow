@@ -37,6 +37,7 @@ import {
     traceSupplyChain,
     traceProductJourney,
     getImportDeclarations,
+    getProductionHistoryAnalysisTool,
 } from "@/lib/ai/tools/rra-tools";
 import { hasRRAPermission, isRRARole } from "@/lib/rra-rbac";
 import { getRRAAIToolNames, isRRAAIInjectionAttempt, type RRAAIToolName } from "@/lib/ai/rra-tool-access";
@@ -251,7 +252,7 @@ export async function POST(request: Request) {
     const rraToolRegistry = {
         getTaxpayerIntelligence, lookupTrader, searchTraders, getTransactions, getStockLevels, getStockMovements, getTaxStatus,
         getRiskAssessment, getRevenueForecastTool, getSystemStats, getBehavioralAnalysis,
-        traceSupplyChain, traceProductJourney, getImportDeclarations,
+        traceSupplyChain, traceProductJourney, getImportDeclarations, getProductionHistoryAnalysisTool,
     } satisfies Record<RRAAIToolName, ToolSet[RRAAIToolName]>;
     const allowedRraTools = getRRAAIToolNames(staffRoles);
     const rraReadTools: ToolSet = isRRAStaff
@@ -335,6 +336,7 @@ export async function POST(request: Request) {
                     traceSupplyChain: "supply_chain",
                     traceProductJourney: "product_journey",
                     getImportDeclarations: "imports",
+                    getProductionHistoryAnalysisTool: "production_history_confidential",
                 };
                 const modulesAccessed = [...new Set(usedTools
                     .filter((toolName): toolName is RRAAIToolName => toolName in moduleByTool)

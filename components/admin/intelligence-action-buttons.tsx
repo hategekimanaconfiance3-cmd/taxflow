@@ -3,8 +3,8 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent } from '@/components/ui/card';
-import { ScanSearch, Database, Loader2, CheckCircle2, XCircle } from 'lucide-react';
-import { runReconciliationScan } from '@/lib/actions/ai-finding.action';
+import { ScanSearch, Database, Activity, Loader2, CheckCircle2, XCircle } from 'lucide-react';
+import { runProductionHistoryScan, runReconciliationScan } from '@/lib/actions/ai-finding.action';
 import { getDataQualityMetrics } from '@/lib/actions/admin-data-quality.action';
 
 // ---------------------------------------------------------------------------
@@ -85,9 +85,11 @@ function ActionCard({ icon, iconBg, title, description, onAction }: ActionCardPr
 export function IntelligenceActionButtons({
   canRunReconciliation,
   canRunDataQuality,
+  canRunProductionHistory,
 }: {
   canRunReconciliation: boolean;
   canRunDataQuality: boolean;
+  canRunProductionHistory: boolean;
 }) {
   const router = useRouter();
   return (
@@ -112,6 +114,18 @@ export function IntelligenceActionButtons({
         onAction={async () => {
           // getDataQualityMetrics is a server action — calling it validates & returns data
           await getDataQualityMetrics();
+        }}
+      />}
+      {canRunProductionHistory && <ActionCard
+        icon={<Activity className="h-4 w-4 text-amber-600" />}
+        iconBg="bg-amber-500/10"
+        title="Scan Production History"
+        description="Compare up to 25 recent recipe-linked batches with earlier independently supported batches of the same recipe version."
+        onAction={async () => {
+          const result = await runProductionHistoryScan();
+          if (!result.success) throw new Error(result.error ?? 'Production history scan failed');
+          router.refresh();
+          return `Analyzed ${result.scanned} recent batches; ${result.created} new review finding(s) added.`;
         }}
       />}
     </>
