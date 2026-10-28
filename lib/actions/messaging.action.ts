@@ -305,6 +305,7 @@ export async function createTaxpayerConversation(input: unknown): Promise<{ succ
       await tx.insert(supportTicketMessage).values({
         id: crypto.randomUUID(),
         ticketId: created.id,
+        authorId: session.user.id,
         senderUserId: session.user.id,
         senderType: 'taxpayer',
         body,
@@ -436,6 +437,7 @@ export async function startStaffConversation(input: unknown): Promise<{ success:
       if (!created) throw new Error('Conversation could not be created.');
       await tx.insert(supportTicketMessage).values({
         id: crypto.randomUUID(), ticketId: created.id, senderUserId: session.user.id,
+        authorId: session.user.id,
         senderType: 'staff', body, clientMessageId, createdAt: created.createdAt,
       });
       await tx.insert(supportTicketParticipant).values([
@@ -499,6 +501,7 @@ export async function startStaffTaxpayerConversation(input: unknown): Promise<{ 
       if (!created) throw new Error('Conversation could not be created.');
       await tx.insert(supportTicketMessage).values({
         id: crypto.randomUUID(), ticketId: created.id, senderUserId: session.user.id,
+        authorId: session.user.id,
         senderType: 'staff', body: parsed.data.body, clientMessageId: parsed.data.clientMessageId,
         createdAt: created.createdAt,
       });
@@ -814,6 +817,7 @@ export async function replyToConversation(input: unknown): Promise<{ success: tr
       const createdAt = new Date();
       await tx.insert(supportTicketMessage).values({
         id: crypto.randomUUID(), ticketId: ticket.id, senderUserId: actorId,
+        authorId: actorId,
         senderType: actorType, body: parsed.data.body, clientMessageId: parsed.data.clientMessageId, createdAt,
       });
       const status = staff

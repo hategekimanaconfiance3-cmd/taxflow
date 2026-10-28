@@ -1040,6 +1040,8 @@ export const supportTicketMessage = pgTable(
   {
     id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
     ticketId: text('ticket_id').notNull().references(() => supportTicket.id, { onDelete: 'cascade' }),
+      // Kept as a compatibility alias for older deployed messaging code.
+      authorId: text('author_id').references(() => user.id),
     senderUserId: text('sender_user_id').notNull().references(() => user.id),
     senderType: text('sender_type').notNull(), // taxpayer | staff
     body: text('body').notNull(),
