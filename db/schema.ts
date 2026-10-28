@@ -1061,6 +1061,10 @@ export const productionBatch = pgTable(
     declaredQuantity: real('declared_quantity').notNull(),
     unitPrice: integer('unit_price').notNull().default(0),
     vatRateBasisPoints: integer('vat_rate_basis_points').notNull().default(0),
+    recipeVersionId: text('recipe_version_id'),
+    plannedOutputQuantity: real('planned_output_quantity'),
+    productionValidationStatus: text('production_validation_status').notNull().default('not_applicable'),
+    recipeInputHash: text('recipe_input_hash'),
     idempotencyKey: text('idempotency_key'),
     openingStock: real('opening_stock').default(0),
     approvedLosses: real('approved_losses').default(0),
@@ -1080,6 +1084,78 @@ export const productionBatch = pgTable(
     index('prod_batch_status_idx').on(table.status),
     uniqueIndex('prod_batch_ref_uniq').on(table.batchReference),
     uniqueIndex('prod_batch_idempotency_key_uniq').on(table.idempotencyKey),
+  ],
+);
+
+// Confidential manufacturer recipe data is stored outside the general
+// production batch read model. Recipe versions and their lines are immutable.
+export const productionMaterial = pgTable(
+  'production_material',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    materialCode: text('material_code').notNull(),
+    confidentialName: text('confidential_name').notNull(),
+    unit: text('unit').notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('production_material_manufacturer_code_uniq').on(table.manufacturerId, table.materialCode),
+    uniqueIndex('production_material_manufacturer_name_uniq').on(table.manufacturerId, sql`lower(${table.confidentialName})`),
+    index('production_material_manufacturer_idx').on(table.manufacturerId),
+  ],
+);
+
+export const productionRecipe = pgTable(
+  'production_recipe',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    productId: text('product_id').notNull().references(() => product.id),
+    recipeCode: text('recipe_code').notNull(),
+    version: integer('version').notNull(),
+    outputQuantity: real('output_quantity').notNull(),
+    yieldToleranceBasisPoints: integer('yield_tolerance_basis_points').notNull().default(0),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    createdByUserId: text('created_by_user_id').notNull().references(() => user.id),
+  },
+  (table) => [
+    uniqueIndex('production_recipe_manufacturer_product_version_uniq').on(table.manufacturerId, table.productId, table.version),
+    uniqueIndex('production_recipe_manufacturer_code_version_uniq').on(table.manufacturerId, table.recipeCode, table.version),
+    index('production_recipe_manufacturer_product_idx').on(table.manufacturerId, table.productId),
+  ],
+);
+
+export const productionRecipeMaterial = pgTable(
+  'production_recipe_material',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    recipeVersionId: text('recipe_version_id').notNull().references(() => productionRecipe.id),
+    materialId: text('material_id').notNull().references(() => productionMaterial.id),
+    quantity: real('quantity').notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('production_recipe_material_recipe_material_uniq').on(table.recipeVersionId, table.materialId),
+    index('production_recipe_material_recipe_idx').on(table.recipeVersionId),
+  ],
+);
+
+export const productionBatchMaterialUsage = pgTable(
+  'production_batch_material_usage',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    productionBatchId: text('production_batch_id').notNull().references(() => productionBatch.id),
+    recipeMaterialId: text('recipe_material_id').notNull().references(() => productionRecipeMaterial.id),
+    materialId: text('material_id').notNull().references(() => productionMaterial.id),
+    plannedQuantity: real('planned_quantity').notNull(),
+    actualQuantity: real('actual_quantity').notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('production_batch_material_usage_batch_line_uniq').on(table.productionBatchId, table.recipeMaterialId),
+    index('production_batch_material_usage_batch_idx').on(table.productionBatchId),
+    index('production_batch_material_usage_material_idx').on(table.materialId),
   ],
 );
 
@@ -1260,6 +1336,31 @@ export const productionBatchRelations = relations(productionBatch, ({ one }) => 
     fields: [productionBatch.productId],
     references: [product.id],
   }),
+  recipeVersion: one(productionRecipe, {
+    fields: [productionBatch.recipeVersionId],
+    references: [productionRecipe.id],
+  }),
+}));
+
+export const productionMaterialRelations = relations(productionMaterial, ({ one }) => ({
+  manufacturer: one(user, { fields: [productionMaterial.manufacturerId], references: [user.id] }),
+}));
+
+export const productionRecipeRelations = relations(productionRecipe, ({ one, many }) => ({
+  manufacturer: one(user, { fields: [productionRecipe.manufacturerId], references: [user.id] }),
+  product: one(product, { fields: [productionRecipe.productId], references: [product.id] }),
+  materials: many(productionRecipeMaterial),
+}));
+
+export const productionRecipeMaterialRelations = relations(productionRecipeMaterial, ({ one }) => ({
+  recipe: one(productionRecipe, { fields: [productionRecipeMaterial.recipeVersionId], references: [productionRecipe.id] }),
+  material: one(productionMaterial, { fields: [productionRecipeMaterial.materialId], references: [productionMaterial.id] }),
+}));
+
+export const productionBatchMaterialUsageRelations = relations(productionBatchMaterialUsage, ({ one }) => ({
+  batch: one(productionBatch, { fields: [productionBatchMaterialUsage.productionBatchId], references: [productionBatch.id] }),
+  recipeMaterial: one(productionRecipeMaterial, { fields: [productionBatchMaterialUsage.recipeMaterialId], references: [productionRecipeMaterial.id] }),
+  material: one(productionMaterial, { fields: [productionBatchMaterialUsage.materialId], references: [productionMaterial.id] }),
 }));
 
 export const stockAdjustmentRelations = relations(stockAdjustment, ({ one }) => ({

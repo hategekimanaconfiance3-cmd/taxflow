@@ -61,7 +61,7 @@ type LookupData = {
   cases?: Array<{ title: string; status: string; priority: string; createdAt: Date; updatedAt: Date }>;
   stock?: Array<{ productName: string; unit: string; quantity: number; price: number | null; source: string | null }>;
   stockMovements?: Array<{ productName: string; movementType: string; quantityDelta: number; quantityBefore: number; quantityAfter: number; sourceType: string | null; reason: string | null; createdAt: Date }>;
-  production?: Array<{ batchReference: string; productName: string; quantity: number; status: string | null; periodStart: Date; periodEnd: Date; createdAt: Date }>;
+  production?: Array<{ batchReference: string; productName: string; quantity: number; status: string | null; productionValidationStatus: string; periodStart: Date; periodEnd: Date; createdAt: Date }>;
   corrections?: Array<{ productName: string; movementType: string; quantityDelta: number; reason: string | null; createdAt: Date }>;
   auditHistory?: Array<{ action: string; targetType: string | null; createdAt: Date }>;
 };
@@ -173,6 +173,7 @@ async function buildLookup(tin: string, staffRoles: RRARole[], staffRecordId: st
       productName: product.name,
       quantity: productionBatch.declaredQuantity,
       status: productionBatch.status,
+      productionValidationStatus: productionBatch.productionValidationStatus,
       periodStart: productionBatch.periodStart,
       periodEnd: productionBatch.periodEnd,
       createdAt: productionBatch.createdAt,
