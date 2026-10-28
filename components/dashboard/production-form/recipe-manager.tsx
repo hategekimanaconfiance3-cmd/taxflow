@@ -44,9 +44,10 @@ export function RecipeManager({ products }: { products: ProductOption[] }) {
           headers: { "content-type": "application/json" },
           body: JSON.stringify(parsed.data),
         });
-        const result = await response.json() as { recipe?: { version: number }; error?: string };
+        const result = await response.json() as { recipe?: { version: number }; error?: string; requestId?: string };
         if (!response.ok || !result.recipe) {
-          setMessage({ text: result.error ?? "Unable to save this recipe version.", error: true });
+          const requestReference = result.requestId ? ` Reference: ${result.requestId}` : "";
+          setMessage({ text: `${result.error ?? "Unable to save this recipe version."}${requestReference}`, error: true });
           return;
         }
         setMessage({ text: `Recipe version ${result.recipe.version} saved. Previous versions remain unchanged.`, error: false });

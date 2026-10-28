@@ -55,11 +55,23 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (!result.ok) return json({ error: 'Unable to create this recipe version.' }, 400, requestId);
     return json({ recipe: result.recipe }, 201, requestId);
   } catch (error) {
+    const databaseCode = typeof error === 'object' && error !== null && 'code' in error
+      ? String(error.code)
+      : undefined;
+    const constraint = typeof error === 'object' && error !== null && 'constraint' in error
+      ? String(error.constraint)
+      : undefined;
     console.error('[production-recipes:create]', {
       requestId,
       errorName: error instanceof Error ? error.name : 'UnknownError',
-      errorCode: typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : undefined,
+      errorCode: databaseCode,
+      constraint,
     });
-    return json({ error: 'Unable to create this recipe version.', requestId }, 500, requestId);
+    const errorMessage = databaseCode === '42P01' || databaseCode === '42703'
+      ? 'Recipe storage is not fully available. Contact an administrator and provide the reference below.'
+      : databaseCode === '23505'
+        ? 'A recipe version conflict occurred. Refresh the page and try again.'
+        : 'Unable to create this recipe version. Contact support with the reference below.';
+    return json({ error: errorMessage, requestId }, 500, requestId);
   }
 }
