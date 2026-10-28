@@ -20,7 +20,6 @@ import { consumeRateLimit, getRequestIdentity } from '@/lib/rate-limit';
 import { emitToUsers } from '@/lib/realtime';
 import {
   DEFAULT_MESSAGING_ROUTES,
-  MESSAGE_CATEGORIES,
   canRoleHandleCategory,
   classifyMessage,
   isMessageCategory,
@@ -1157,6 +1156,3 @@ export async function getRRAStaffRecipientsForCase(ticketId: string): Promise<Ar
       && (!ticket.routingDepartment || member.department?.trim().toLocaleLowerCase() === ticket.routingDepartment.toLocaleLowerCase()))
     .map(({ userId, name, staffId, department }) => ({ userId, name, staffId, department }));
 }
-
-
-export { MESSAGE_CATEGORIES };
