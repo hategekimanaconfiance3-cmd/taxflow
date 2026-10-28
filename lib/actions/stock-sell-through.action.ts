@@ -34,6 +34,31 @@ import {
 
 const MAX_EVIDENCE_ROWS = 500;
 
+type DatabaseErrorDetails = {
+  code?: string;
+  constraint?: string;
+  table?: string;
+  column?: string;
+};
+
+/** Drizzle may wrap postgres-js errors in `cause`; inspect that chain without logging SQL or values. */
+function databaseErrorDetails(error: unknown): DatabaseErrorDetails {
+  const details: DatabaseErrorDetails = {};
+  const seen = new Set<object>();
+  let current: unknown = error;
+
+  for (let depth = 0; depth < 5 && typeof current === "object" && current !== null && !seen.has(current); depth += 1) {
+    seen.add(current);
+    const record = current as Record<string, unknown>;
+    for (const key of ["code", "constraint", "table", "column"] as const) {
+      if (!details[key] && typeof record[key] === "string") details[key] = record[key];
+    }
+    current = record.cause;
+  }
+
+  return details;
+}
+
 function field(formData: FormData, name: string): string {
   const value = formData.get(name);
   return typeof value === "string" ? value : "";
@@ -311,18 +336,15 @@ export async function createRestockRequestAction(formData: FormData): Promise<vo
       return exceptionStatus === "pending" ? "exception_pending" : evaluated.calculation.status;
     });
   } catch (error) {
-    const databaseCode = typeof error === "object" && error !== null && "code" in error
-      ? String(error.code)
-      : undefined;
-    const constraint = typeof error === "object" && error !== null && "constraint" in error
-      ? String(error.constraint)
-      : undefined;
+    const { code: databaseCode, constraint, table, column } = databaseErrorDetails(error);
     console.error("Restock request could not be evaluated or saved", {
       requestId,
       userId: session.user.id,
       errorName: error instanceof Error ? error.name : "UnknownError",
       databaseCode,
       constraint,
+      table,
+      column,
     });
     result = error instanceof Error && error.message === "PRODUCT_NOT_HELD" ? "product_not_held"
       : error instanceof Error && error.message === "IDEMPOTENCY_KEY_REUSE" ? "invalid"
