@@ -1,4 +1,4 @@
-﻿import {
+import {
     LayoutDashboard,
     Users,
     ArrowLeftRight,
@@ -130,11 +130,11 @@ const ALL: RRARole[] = [
 const TAXPAYER_SEARCH_ROLES = ALL.filter((role) => role !== "super_admin");
 
 // ---------------------------------------------------------------------------
-// Navigation groups — ordered by operational priority
+// Navigation groups � ordered by operational priority
 // ---------------------------------------------------------------------------
 
 export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
-    // ── Overview ────────────────────────────────────────────
+    // -- Overview --------------------------------------------
     {
         items: [
             {
@@ -164,7 +164,7 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
             },
         ],
     },
-    // ── Trade Operations ────────────────────────────────────
+    // -- Trade Operations ------------------------------------
     {
         label: "Trade Operations",
         items: [
@@ -241,7 +241,7 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
             },
         ],
     },
-    // ── Tax & Revenue ───────────────────────────────────────
+    // -- Tax & Revenue ---------------------------------------
     {
         label: "Tax & Revenue",
         items: [
@@ -317,7 +317,7 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
             },
         ],
     },
-    // ── Enforcement ─────────────────────────────────────────
+    // -- Enforcement -----------------------------------------
     {
         label: "Enforcement",
         items: [
@@ -417,7 +417,7 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
             },
         ],
     },
-    // ── Super Admin Control Plane / Administration ───────────
+    // -- Super Admin Control Plane / Administration -----------
     {
         label: "Administration",
         items: [
@@ -498,6 +498,18 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                         label: "System Health",
                         href: "/admin/super/system",
                         icon: Server,
+                        allowedRoles: ["super_admin"],
+                    },
+                    {
+                        label: "Top Taxpayers",
+                        href: "/admin/super/taxpayers",
+                        icon: TrendingUp,
+                        allowedRoles: ["super_admin"],
+                    },
+                    {
+                        label: "Audit Explorer",
+                        href: "/admin/super/audit",
+                        icon: Eye,
                         allowedRoles: ["super_admin"],
                     },
                 ],
