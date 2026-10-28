@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -55,7 +55,9 @@ const CATEGORY_LABELS = {
   action: 'Actions',
 };
 
-export function SuperAdminSearch() {
+interface SuperAdminSearchProps { size?: 'sm' | 'lg'; }
+
+export function SuperAdminSearch({ size = 'sm' }: SuperAdminSearchProps) {
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState(0);
@@ -137,20 +139,21 @@ export function SuperAdminSearch() {
 
   let flatIndex = 0;
 
+  const isLarge = size === 'lg';
+
   return (
-    <div ref={containerRef} className="relative w-full max-w-md">
+    <div ref={containerRef} className="relative w-full">
       {/* Search input */}
       <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+        <Search className={`absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none ${isLarge ? 'h-4 w-4' : 'h-3.5 w-3.5'}`} />
         <input
           ref={inputRef}
           type="text"
           value={query}
           onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
           onFocus={() => setOpen(true)}
-          placeholder="Search SA pages, audit filters… (Ctrl+K)"
-          className="w-full h-8 pl-8 pr-10 text-sm bg-muted/50 border border-border rounded-md placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-rose-400 focus:border-rose-400 focus:bg-background transition-colors"
-        />
+          placeholder={isLarge ? "Search pages, audit filters, staff actions… (Ctrl+K)" : "Search SA pages, audit filters… (Ctrl+K)"}
+          className={`w-full pr-10 bg-muted/50 border border-border rounded-md placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-rose-400 focus:border-rose-400 focus:bg-background transition-colors ${isLarge ? 'h-11 pl-10 text-sm' : 'h-8 pl-8 text-sm'}`}
         <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-0.5">
           <kbd className="hidden sm:inline-flex h-4 items-center gap-0.5 rounded border border-border bg-muted px-1 font-mono text-[9px] text-muted-foreground">
             <span>⌃</span><span>K</span>

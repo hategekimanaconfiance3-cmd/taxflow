@@ -1,4 +1,4 @@
-import { requireRRASession } from '@/lib/auth-guard';
+﻿import { requireRRASession } from '@/lib/auth-guard';
 import db from '@/db/drizzle';
 import { user, vatRecord, taxPayment, auditLog, rraStaff, rraStaffRole } from '@/db/schema';
 import { sql, desc, gte } from 'drizzle-orm';
@@ -10,6 +10,7 @@ import {
   Scale, CheckCircle2,
 } from 'lucide-react';
 import Link from 'next/link';
+import { SuperAdminSearch } from '@/components/admin/super/super-admin-search';
 
 function fmt(n: number) {
   if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)}B RWF`;
@@ -146,6 +147,11 @@ export default async function SuperAdminOverviewPage() {
         <Badge variant="outline" className="border-rose-200 text-rose-700 bg-rose-50/60 text-xs">
           SUPER ADMIN
         </Badge>
+      </div>
+
+      {/* Prominent Search Bar */}
+      <div className="w-full max-w-2xl">
+        <SuperAdminSearch size="lg" />
       </div>
 
       {/* Platform KPI Row */}
