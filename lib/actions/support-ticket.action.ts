@@ -4,7 +4,7 @@ import { eq, desc, and } from "drizzle-orm";
 import db from "@/db/drizzle";
 import { supportTicket, user } from "@/db/schema";
 import { requireTraderSession } from "@/lib/auth-guard";
-import { logAudit } from "@/lib/audit";
+import { createTaxpayerConversation } from "@/lib/actions/messaging.action";
 
 // ---------------------------------------------------------------------------
 // Create a support ticket (trader-facing)
@@ -15,40 +15,22 @@ export async function createTicket(data: {
     subject: string;
     description: string;
 }): Promise<{ success: true; id: string }> {
-    const session = await requireTraderSession();
-
-    const categories = ["general", "tax_query", "account_issue", "system_bug", "other"];
-    if (!categories.includes(data.category)) throw new Error("Choose a valid ticket category.");
-
-    const subject = data.subject?.trim();
-    const description = data.description?.trim();
-    if (!subject) throw new Error("Subject is required.");
-    if (subject.length > 200) throw new Error("Subject must be 200 characters or fewer.");
-    if (!description) throw new Error("Description is required.");
-    if (description.length > 10_000) throw new Error("Description must be 10,000 characters or fewer.");
-
-    const [ticket] = await db
-        .insert(supportTicket)
-        .values({
-            traderId: session.user.id,
-            category: data.category,
-            subject,
-            description,
-        })
-        .returning({ id: supportTicket.id });
-
-    await logAudit({
-        userId: session.user.id,
-        action: "TICKET_CREATED",
-        targetType: "support_ticket",
-        targetId: ticket.id,
-        metadata: {
-            category: data.category,
-            subject,
-        },
+    await requireTraderSession();
+    const categoryMap = {
+        general: 'general',
+        tax_query: 'tax_declaration',
+        account_issue: 'account_access',
+        system_bug: 'account_access',
+        other: 'general',
+    } as const;
+    const category = categoryMap[data.category];
+    if (!category) throw new Error('Choose a valid ticket category.');
+    return createTaxpayerConversation({
+        category,
+        subject: data.subject,
+        body: data.description,
+        clientMessageId: crypto.randomUUID(),
     });
-
-    return { success: true, id: ticket.id };
 }
 
 // ---------------------------------------------------------------------------

@@ -1007,9 +1007,12 @@ export const supportTicket = pgTable(
       .primaryKey()
       .$defaultFn(() => crypto.randomUUID()),
     traderId: text('trader_id')
-      .notNull()
       .references(() => user.id),
+    threadType: text('thread_type').notNull().default('taxpayer'), // taxpayer | staff
     category: text('category').notNull().default('general'), // general | tax_query | account_issue | system_bug | other
+    routingCategory: text('routing_category'),
+    routingDepartment: text('routing_department'),
+    routingReason: text('routing_reason'),
     subject: text('subject').notNull(),
     description: text('description').notNull(),
     status: text('status').notNull().default('open'), // open | in_progress | resolved | closed
@@ -1024,6 +1027,52 @@ export const supportTicket = pgTable(
     index('support_ticket_trader_idx').on(t.traderId),
     index('support_ticket_status_idx').on(t.status),
     index('support_ticket_assigned_idx').on(t.assignedToId),
+      index('support_ticket_category_status_idx').on(t.category, t.status, t.updatedAt),
+    index('support_ticket_routing_status_idx').on(t.routingCategory, t.routingDepartment, t.status, t.updatedAt),
+      check('support_ticket_thread_type_check', sql`${t.threadType} IN ('taxpayer', 'staff')`),
+  ],
+);
+
+// Messages are append-only. The legacy support_ticket.description remains the
+// original opening message and is backfilled into this table by migration.
+export const supportTicketMessage = pgTable(
+  'support_ticket_message',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    ticketId: text('ticket_id').notNull().references(() => supportTicket.id, { onDelete: 'cascade' }),
+    senderUserId: text('sender_user_id').notNull().references(() => user.id),
+    senderType: text('sender_type').notNull(), // taxpayer | staff
+    body: text('body').notNull(),
+    clientMessageId: text('client_message_id'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('support_ticket_message_chronology_idx').on(table.ticketId, table.createdAt, table.id),
+    index('support_ticket_message_sender_idx').on(table.senderUserId, table.createdAt),
+      uniqueIndex('support_ticket_message_idempotency_uniq').on(table.senderUserId, table.clientMessageId)
+        .where(sql`${table.clientMessageId} IS NOT NULL`),
+      check('support_ticket_message_sender_type_check', sql`${table.senderType} IN ('taxpayer', 'staff')`),
+  ],
+);
+
+// This table stores participant membership and per-user read/archive state.
+// Queue visibility is decided separately from this row by server-side routing
+// rules; opening an unassigned queue item never grants permanent access.
+export const supportTicketParticipant = pgTable(
+  'support_ticket_participant',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    ticketId: text('ticket_id').notNull().references(() => supportTicket.id, { onDelete: 'cascade' }),
+    userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+    participantType: text('participant_type').notNull(), // taxpayer | staff | queue
+    lastReadAt: timestamp('last_read_at'),
+    archivedAt: timestamp('archived_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('support_ticket_participant_ticket_user_uniq').on(table.ticketId, table.userId),
+    index('support_ticket_participant_user_read_idx').on(table.userId, table.lastReadAt),
+      check('support_ticket_participant_type_check', sql`${table.participantType} IN ('taxpayer', 'staff', 'queue')`),
   ],
 );
 

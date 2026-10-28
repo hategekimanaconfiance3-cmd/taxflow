@@ -57,11 +57,16 @@ function NotificationBell({ userId }: { userId: string }) {
 
     useEffect(() => {
         fetchCount();
+        const interval = window.setInterval(fetchCount, 30_000);
+        window.addEventListener('focus', fetchCount);
+        return () => {
+            window.clearInterval(interval);
+            window.removeEventListener('focus', fetchCount);
+        };
     }, [fetchCount]);
 
-    // Increment badge on live notification events
     useSocket(userId, {
-        notification: () => setCount((c) => c + 1),
+        notification: fetchCount,
     });
 
     return (
@@ -73,8 +78,11 @@ function NotificationBell({ userId }: { userId: string }) {
                 >
                     <Bell className="h-4 w-4" />
                     {count > 0 && (
-                        <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-blue-500 ring-2 ring-background" />
+                        <span aria-hidden="true" className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[9px] font-semibold leading-none text-white ring-2 ring-background">
+                            {count > 99 ? '99+' : count}
+                        </span>
                     )}
+                    <span className="sr-only">{count > 0 ? `${count} unread notifications` : 'No unread notifications'}</span>
                 </Link>
             </TooltipTrigger>
             <TooltipContent side="bottom">

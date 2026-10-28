@@ -22,6 +22,7 @@ import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport } from 'ai';
 import { LANGS, translate, type LangCode } from '@/lib/language';
 import { useLanguagePreference } from '@/lib/use-language';
+import { useSocket } from '@/lib/socket-client';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -79,15 +80,27 @@ function LangSelector({ value, onChange }: { value: LangCode; onChange: (l: Lang
 // ---------------------------------------------------------------------------
 // Notification Bell
 // ---------------------------------------------------------------------------
-function NotificationBell({ href }: { href: string }) {
+function NotificationBell({ href, userId }: { href: string; userId: string }) {
   const [count, setCount] = useState(0);
 
-  useEffect(() => {
+  const fetchCount = useCallback(() => {
     fetch('/api/admin/notification-count')
       .then((r) => r.ok ? r.json() : { count: 0 })
       .then((d) => setCount(d.count ?? 0))
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    fetchCount();
+    const interval = window.setInterval(fetchCount, 30_000);
+    window.addEventListener('focus', fetchCount);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', fetchCount);
+    };
+  }, [fetchCount]);
+
+  useSocket(userId, { notification: fetchCount });
 
   return (
     <Tooltip>
@@ -100,8 +113,11 @@ function NotificationBell({ href }: { href: string }) {
         >
           <Bell className="h-4 w-4" />
           {count > 0 && (
-            <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-blue-500 ring-2 ring-background" />
+            <span aria-hidden="true" className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[9px] font-semibold leading-none text-white ring-2 ring-background">
+              {count > 99 ? '99+' : count}
+            </span>
           )}
+          <span className="sr-only">{count > 0 ? `${count} unread notifications` : 'No unread notifications'}</span>
         </Link>
       </TooltipTrigger>
       <TooltipContent side="bottom">
@@ -263,6 +279,7 @@ function AIPanel({ onClose }: { onClose: () => void }) {
 // AdminShell Props
 // ---------------------------------------------------------------------------
 interface AdminShellProps {
+  userId: string;
   userName: string;
   staffId: string;
   clearanceLevel: string;
@@ -273,7 +290,7 @@ interface AdminShellProps {
 // ---------------------------------------------------------------------------
 // AdminShell
 // ---------------------------------------------------------------------------
-export function AdminShell({ userName, staffId, clearanceLevel, clearanceRoles, children }: AdminShellProps) {
+export function AdminShell({ userId, userName, staffId, clearanceLevel, clearanceRoles, children }: AdminShellProps) {
   const pathname = usePathname();
   const groups = getAdminSidebarGroups(clearanceRoles.length ? clearanceRoles : [clearanceLevel]);
 
@@ -797,7 +814,7 @@ export function AdminShell({ userName, staffId, clearanceLevel, clearanceRoles, 
             {/* Right side controls */}
             <div className="flex items-center gap-1">
               {/* Notification Bell */}
-              <NotificationBell href="/admin/notifications" />
+              <NotificationBell href="/admin/notifications" userId={userId} />
 
               <Separator orientation="vertical" className="h-5 mx-1" />
 
