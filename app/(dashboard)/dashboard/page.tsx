@@ -6,6 +6,7 @@ import { PendingConfirmations } from "@/components/dashboard/pending-table/pendi
 import { ProductionChart } from "@/components/dashboard/production-chart/production-chart";
 import { SalesChart } from "@/components/dashboard/sales-chart/sales-chart";
 import { StockPie } from "@/components/dashboard/stock-pie/stock-pie";
+import { QuickActions } from "@/components/dashboard/quick-actions/quick-actions";
 import { ROLE_LABELS, type TraderRole } from "@/lib/sidebar-config";
 import { AlertTriangle } from "lucide-react";
 
@@ -40,13 +41,16 @@ export default async function DashboardOverview() {
                 </div>
             )}
 
-            {/* Page header */}
-            <div>
-                <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
-                <p className="text-muted-foreground">
-                    Welcome back. Here&apos;s your{" "}
-                    {ROLE_LABELS[role].toLowerCase()} overview.
-                </p>
+            {/* Page header + Quick Actions */}
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                    <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
+                    <p className="text-muted-foreground">
+                        Welcome back. Here&apos;s your{" "}
+                        {ROLE_LABELS[role].toLowerCase()} overview.
+                    </p>
+                </div>
+                <QuickActions role={role} disabled={suspended} />
             </div>
 
             {/* 7 Summary Cards */}
