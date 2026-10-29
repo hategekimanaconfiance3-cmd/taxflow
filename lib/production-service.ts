@@ -3,10 +3,12 @@ import 'server-only';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { createHash, randomUUID } from 'node:crypto';
 import db from '@/db/drizzle';
-import { auditLog, product, productionBatch, productionBatchMaterialUsage, productionMaterial, productionRecipe, productionRecipeMaterial, stock, stockMovement } from '@/db/schema';
+import { auditLog, product, productionBatch, productionBatchMaterialUsage, productionMaterial, productionMaterialPlan, productionMaterialPlanLine, productionRecipe, productionRecipeMaterial, stock, stockMovement } from '@/db/schema';
 import { getSystemConfig } from '@/lib/actions/system-config.action';
 import type { ProductionEntryInput, ProductRegistrationInput, productionRecipeSchema } from '@/lib/validation/production.schema';
 import { assessMaterialVariance, calculatePlannedMaterialQuantity, combineMaterialValidation } from '@/lib/production-confidentiality';
+import { decimalToMicros, quantityToMicros } from '@/lib/material-accounting';
+import { notifyProductionBatchSubmitted } from '@/lib/material-accounting-service';
 
 type ProductionRecipeInput = typeof productionRecipeSchema._output;
 
@@ -272,12 +274,13 @@ export async function recordManufacturerProduction(
       actualMaterials: [...(input.actualMaterials ?? [])]
         .sort((left, right) => left.recipeMaterialId.localeCompare(right.recipeMaterialId)),
       plannedOutputQuantity: input.plannedOutputQuantity,
+      materialPlanId: input.materialPlanId ?? null,
     })).digest('hex')
     : null;
   const now = new Date();
   const batchReference = `TF-BATCH-${now.toISOString().slice(0, 10).replaceAll('-', '')}-${randomUUID().slice(0, 8).toUpperCase()}`;
 
-  return db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx) => {
     const [ownedProduct] = await tx.select({ id: product.id, name: product.name, unit: product.unit })
       .from(product)
       .where(and(eq(product.id, input.productId), eq(product.createdByUserId, manufacturerId)))
@@ -285,6 +288,49 @@ export async function recordManufacturerProduction(
       .limit(1);
 
     if (!ownedProduct) return { ok: false as const, code: 'PRODUCT_NOT_FOUND' as const };
+
+    const [priorBatch] = await tx.select({
+      id: productionBatch.id,
+      batchReference: productionBatch.batchReference,
+      productId: productionBatch.productId,
+      quantity: productionBatch.declaredQuantity,
+      unitPrice: productionBatch.unitPrice,
+      vatRateBasisPoints: productionBatch.vatRateBasisPoints,
+      recipeVersionId: productionBatch.recipeVersionId,
+      recipeInputHash: productionBatch.recipeInputHash,
+      productionValidationStatus: productionBatch.productionValidationStatus,
+      status: productionBatch.status,
+      createdAt: productionBatch.createdAt,
+    }).from(productionBatch)
+      .where(and(eq(productionBatch.manufacturerId, manufacturerId), eq(productionBatch.idempotencyKey, input.idempotencyKey)))
+      .limit(1);
+    if (priorBatch) {
+      if (priorBatch.productId !== input.productId || priorBatch.quantity !== input.quantity
+        || priorBatch.unitPrice !== input.unitPrice || priorBatch.recipeInputHash !== recipeInputHash) {
+        return { ok: false as const, code: 'DUPLICATE_REQUEST' as const };
+      }
+      const replayVatRate = priorBatch.vatRateBasisPoints / 10_000;
+      const replayTotal = Math.round(priorBatch.quantity * priorBatch.unitPrice);
+      return {
+        ok: true as const,
+        replayed: true,
+        record: {
+          id: priorBatch.id,
+          productId: priorBatch.productId,
+          productName: ownedProduct.name,
+          unit: ownedProduct.unit,
+          batchReference: priorBatch.batchReference,
+          quantity: priorBatch.quantity,
+          unitPrice: priorBatch.unitPrice,
+          totalValue: replayTotal,
+          vatRate: replayVatRate,
+          potentialTax: Math.round(replayTotal * replayVatRate),
+          status: priorBatch.status ?? 'recorded',
+          productionValidationStatus: priorBatch.productionValidationStatus,
+          createdAt: priorBatch.createdAt.toISOString(),
+        },
+      };
+    }
 
     let recipeLines: Array<{ id: string; materialId: string; quantity: number }> = [];
     let productionValidationStatus: 'not_applicable' | 'within_tolerance' | 'review_required' = 'not_applicable';
@@ -314,6 +360,27 @@ export async function recordManufacturerProduction(
       if (recipeLines.length === 0 || actualByLine.size !== recipeLines.length
         || recipeLines.some((line) => !actualByLine.has(line.id))) {
         return { ok: false as const, code: 'MATERIAL_USAGE_MISMATCH' as const };
+      }
+
+      if (input.materialPlanId) {
+        const [plan] = await tx.select({
+          id: productionMaterialPlan.id,
+          productId: productionMaterialPlan.productId,
+          recipeVersionId: productionMaterialPlan.recipeVersionId,
+          plannedOutputQuantity: productionMaterialPlan.plannedOutputQuantity,
+          status: productionMaterialPlan.status,
+        }).from(productionMaterialPlan)
+          .where(and(eq(productionMaterialPlan.id, input.materialPlanId), eq(productionMaterialPlan.manufacturerId, manufacturerId)))
+          .for('update').limit(1);
+        if (!plan || plan.status !== 'planned' || plan.productId !== input.productId || plan.recipeVersionId !== recipe.id
+          || decimalToMicros(plan.plannedOutputQuantity) !== quantityToMicros(input.plannedOutputQuantity!)) {
+          return { ok: false as const, code: 'PLAN_NOT_AVAILABLE' as const };
+        }
+        const planLines = await tx.select({ recipeMaterialId: productionMaterialPlanLine.recipeMaterialId })
+          .from(productionMaterialPlanLine).where(eq(productionMaterialPlanLine.planId, plan.id));
+        if (planLines.length !== recipeLines.length || planLines.some((line) => !recipeLines.some((recipeLine) => recipeLine.id === line.recipeMaterialId))) {
+          return { ok: false as const, code: 'PLAN_MISMATCH' as const };
+        }
       }
 
       const materialChecks = recipeLines.map((line) => {
@@ -351,7 +418,9 @@ export async function recordManufacturerProduction(
       productionValidationStatus,
       recipeInputHash,
       idempotencyKey: input.idempotencyKey,
-      status: 'recorded',
+      materialPlanId: input.materialPlanId ?? null,
+      materialReviewStatus: input.recipeVersionId ? 'pending' : 'not_required',
+      status: input.recipeVersionId ? 'held_material_review' : 'recorded',
       periodStart: now,
       periodEnd: now,
       notes: null,
@@ -371,6 +440,8 @@ export async function recordManufacturerProduction(
         recipeVersionId: productionBatch.recipeVersionId,
         recipeInputHash: productionBatch.recipeInputHash,
         productionValidationStatus: productionBatch.productionValidationStatus,
+        status: productionBatch.status,
+        createdAt: productionBatch.createdAt,
       }).from(productionBatch)
         .where(and(
           eq(productionBatch.manufacturerId, manufacturerId),
@@ -396,30 +467,12 @@ export async function recordManufacturerProduction(
           totalValue: Math.round(existing.quantity * existing.unitPrice),
           vatRate: existing.vatRateBasisPoints / 10_000,
           potentialTax: Math.round(Math.round(existing.quantity * existing.unitPrice) * (existing.vatRateBasisPoints / 10_000)),
-          status: 'recorded',
+          status: existing.status ?? 'recorded',
           productionValidationStatus: existing.productionValidationStatus,
-          createdAt: now.toISOString(),
+          createdAt: existing.createdAt.toISOString(),
         },
       };
     }
-
-    const [updatedStock] = await tx.insert(stock).values({
-      businessId: manufacturerId,
-      productId: input.productId,
-      quantity: input.quantity,
-      source: 'manufactured',
-      price: input.unitPrice,
-    }).onConflictDoUpdate({
-      target: [stock.businessId, stock.productId],
-      set: {
-        quantity: sql`${stock.quantity} + ${input.quantity}`,
-        price: input.unitPrice,
-        source: 'manufactured',
-        updatedAt: now,
-      },
-    }).returning({ id: stock.id, quantity: stock.quantity });
-
-    if (!updatedStock) throw new Error('Inventory update returned no row');
 
     if (plannedMaterialUsage.length > 0) {
       await tx.insert(productionBatchMaterialUsage).values(plannedMaterialUsage.map((usage) => ({
@@ -431,29 +484,56 @@ export async function recordManufacturerProduction(
       })));
     }
 
-    const quantityBefore = updatedStock.quantity - input.quantity;
-    const quantityAfter = updatedStock.quantity;
-    await tx.insert(stockMovement).values({
-      businessId: manufacturerId,
-      productId: input.productId,
-      quantityDelta: input.quantity,
-      quantityBefore,
-      quantityAfter,
-      movementType: 'production',
-      sourceType: 'production_batch',
-      sourceId: batch.id,
-      actorUserId: manufacturerId,
-      reason: 'Manufacturer production recorded',
-    });
+    let quantityBefore: number | null = null;
+    let quantityAfter: number | null = null;
+    if (plannedMaterialUsage.length === 0) {
+      const [updatedStock] = await tx.insert(stock).values({
+        businessId: manufacturerId,
+        productId: input.productId,
+        quantity: input.quantity,
+        source: 'manufactured',
+        price: input.unitPrice,
+      }).onConflictDoUpdate({
+        target: [stock.businessId, stock.productId],
+        set: {
+          quantity: sql`${stock.quantity} + ${input.quantity}`,
+          price: input.unitPrice,
+          source: 'manufactured',
+          updatedAt: now,
+        },
+      }).returning({ id: stock.id, quantity: stock.quantity });
+      if (!updatedStock) throw new Error('Inventory update returned no row');
+      quantityBefore = updatedStock.quantity - input.quantity;
+      quantityAfter = updatedStock.quantity;
+      await tx.insert(stockMovement).values({
+        businessId: manufacturerId,
+        productId: input.productId,
+        quantityDelta: input.quantity,
+        quantityBefore,
+        quantityAfter,
+        movementType: 'production',
+        sourceType: 'production_batch',
+        sourceId: batch.id,
+        actorUserId: manufacturerId,
+        reason: 'Manufacturer production recorded',
+      });
+    } else if (input.materialPlanId) {
+      const [claimedPlan] = await tx.update(productionMaterialPlan).set({ status: 'in_progress' })
+        .where(and(eq(productionMaterialPlan.id, input.materialPlanId), eq(productionMaterialPlan.status, 'planned')))
+        .returning({ id: productionMaterialPlan.id });
+      if (!claimedPlan) throw new Error('Production plan was claimed by another batch.');
+    }
 
-    const auditEvents = ['PRODUCTION_CREATED', 'BATCH_CREATED', 'INVENTORY_INCREASED'] as const;
+    const auditEvents = plannedMaterialUsage.length > 0
+      ? ['PRODUCTION_CREATED', 'BATCH_CREATED'] as const
+      : ['PRODUCTION_CREATED', 'BATCH_CREATED', 'INVENTORY_INCREASED'] as const;
     await tx.insert(auditLog).values(auditEvents.map((action) => ({
       userId: manufacturerId,
       action,
       targetType: 'production_batch',
       targetId: batch.id,
-      beforeState: { stockQuantity: quantityBefore },
-      afterState: { stockQuantity: quantityAfter },
+      beforeState: quantityBefore === null ? null : { stockQuantity: quantityBefore },
+      afterState: quantityAfter === null ? { materialReviewStatus: 'pending', finishedGoodsPosted: false } : { stockQuantity: quantityAfter },
       metadata: JSON.stringify({
         productId: input.productId,
         batchId: batch.id,
@@ -484,10 +564,19 @@ export async function recordManufacturerProduction(
         totalValue,
         vatRate,
         potentialTax,
-        status: 'recorded',
+      status: input.recipeVersionId ? 'held_material_review' : 'recorded',
         productionValidationStatus,
         createdAt: now.toISOString(),
       },
     };
   });
+
+  if (result.ok && !result.replayed && input.recipeVersionId) {
+    try {
+      await notifyProductionBatchSubmitted(result.record.id);
+    } catch (error) {
+      console.error('[production:material-review-notification]', { errorName: error instanceof Error ? error.name : 'UnknownError' });
+    }
+  }
+  return result;
 }

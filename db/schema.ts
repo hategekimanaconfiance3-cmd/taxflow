@@ -1,5 +1,5 @@
 import { relations, sql } from 'drizzle-orm';
-import { pgTable, text, timestamp, boolean, integer, real, jsonb, index, uniqueIndex, bigint, check } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, boolean, integer, real, jsonb, index, uniqueIndex, bigint, check, numeric } from 'drizzle-orm/pg-core';
 
 // auth models
 
@@ -716,6 +716,7 @@ export const importDeclaration = pgTable(
     productId: text('product_id')
       .notNull()
       .references(() => product.id),
+    productionMaterialId: text('production_material_id').references(() => productionMaterial.id),
     expectedQuantity: real('expected_quantity').notNull(),
     actualQuantity: real('actual_quantity'), // filled by trader on arrival
     status: text('status').notNull().default('pending'),
@@ -1116,6 +1117,12 @@ export const productionBatch = pgTable(
     plannedOutputQuantity: real('planned_output_quantity'),
     productionValidationStatus: text('production_validation_status').notNull().default('not_applicable'),
     recipeInputHash: text('recipe_input_hash'),
+    materialPlanId: text('material_plan_id').references(() => productionMaterialPlan.id),
+    materialReviewStatus: text('material_review_status').notNull().default('not_required'),
+    materialReviewNote: text('material_review_note'),
+    materialReviewedById: text('material_reviewed_by_id').references(() => user.id),
+    materialReviewedAt: timestamp('material_reviewed_at'),
+    materialPostedAt: timestamp('material_posted_at'),
     idempotencyKey: text('idempotency_key'),
     openingStock: real('opening_stock').default(0),
     approvedLosses: real('approved_losses').default(0),
@@ -1135,6 +1142,7 @@ export const productionBatch = pgTable(
     index('prod_batch_status_idx').on(table.status),
     uniqueIndex('prod_batch_ref_uniq').on(table.batchReference),
     uniqueIndex('prod_batch_idempotency_key_uniq').on(table.idempotencyKey),
+    uniqueIndex('prod_batch_material_plan_uniq').on(table.materialPlanId).where(sql`${table.materialPlanId} IS NOT NULL`),
   ],
 );
 
@@ -1207,6 +1215,107 @@ export const productionBatchMaterialUsage = pgTable(
     uniqueIndex('production_batch_material_usage_batch_line_uniq').on(table.productionBatchId, table.recipeMaterialId),
     index('production_batch_material_usage_batch_idx').on(table.productionBatchId),
     index('production_batch_material_usage_material_idx').on(table.materialId),
+  ],
+);
+
+// Raw-material accounting is intentionally separate from ordinary product stock.
+// Quantities use PostgreSQL numeric strings so ledger arithmetic is exact.
+export const productionMaterialPlan = pgTable(
+  'production_material_plan',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    productId: text('product_id').notNull().references(() => product.id),
+    recipeVersionId: text('recipe_version_id').notNull().references(() => productionRecipe.id),
+    plannedOutputQuantity: numeric('planned_output_quantity', { precision: 24, scale: 6, mode: 'string' }).notNull(),
+    idempotencyKey: text('idempotency_key').notNull(),
+    createdByUserId: text('created_by_user_id').notNull().references(() => user.id),
+    status: text('status').notNull().default('planned'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('production_material_plan_manufacturer_key_uniq').on(table.manufacturerId, table.idempotencyKey),
+    index('production_material_plan_manufacturer_created_idx').on(table.manufacturerId, table.createdAt),
+    check('production_material_plan_output_positive', sql`${table.plannedOutputQuantity} > 0`),
+    check('production_material_plan_status_check', sql`${table.status} IN ('planned', 'in_progress', 'completed', 'cancelled')`),
+  ],
+);
+
+export const productionMaterialPlanLine = pgTable(
+  'production_material_plan_line',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    planId: text('plan_id').notNull().references(() => productionMaterialPlan.id),
+    recipeMaterialId: text('recipe_material_id').notNull().references(() => productionRecipeMaterial.id),
+    materialId: text('material_id').notNull().references(() => productionMaterial.id),
+    plannedQuantity: numeric('planned_quantity', { precision: 24, scale: 6, mode: 'string' }).notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('production_material_plan_line_uniq').on(table.planId, table.recipeMaterialId),
+    index('production_material_plan_line_material_idx').on(table.materialId),
+    check('production_material_plan_line_quantity_positive', sql`${table.plannedQuantity} > 0`),
+  ],
+);
+
+export const productionMaterialReceipt = pgTable(
+  'production_material_receipt',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    materialId: text('material_id').notNull().references(() => productionMaterial.id),
+    origin: text('origin').notNull(),
+    importDeclarationId: text('import_declaration_id').references(() => importDeclaration.id),
+    transactionId: text('transaction_id').references(() => transaction.id),
+    supplierReference: text('supplier_reference'),
+    evidenceReference: text('evidence_reference').notNull(),
+    unit: text('unit').notNull(),
+    quantity: numeric('quantity', { precision: 24, scale: 6, mode: 'string' }).notNull(),
+    status: text('status').notNull().default('pending'),
+    idempotencyKey: text('idempotency_key').notNull(),
+    submittedByUserId: text('submitted_by_user_id').notNull().references(() => user.id),
+    reviewedByUserId: text('reviewed_by_user_id').references(() => user.id),
+    reviewedAt: timestamp('reviewed_at'),
+    reviewNote: text('review_note'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('production_material_receipt_owner_key_uniq').on(table.manufacturerId, table.idempotencyKey),
+    uniqueIndex('production_material_receipt_import_uniq').on(table.importDeclarationId),
+    index('production_material_receipt_status_created_idx').on(table.status, table.createdAt),
+    index('production_material_receipt_manufacturer_created_idx').on(table.manufacturerId, table.createdAt),
+    check('production_material_receipt_origin_check', sql`${table.origin} IN ('import', 'domestic', 'opening_balance')`),
+    check('production_material_receipt_status_check', sql`${table.status} IN ('pending', 'verified', 'rejected')`),
+    check('production_material_receipt_quantity_positive', sql`${table.quantity} > 0`),
+    check('production_material_receipt_source_check', sql`(${table.origin} = 'import' AND ${table.importDeclarationId} IS NOT NULL AND ${table.transactionId} IS NULL) OR (${table.origin} = 'domestic' AND ${table.transactionId} IS NOT NULL AND ${table.importDeclarationId} IS NULL) OR (${table.origin} = 'opening_balance' AND ${table.importDeclarationId} IS NULL AND ${table.transactionId} IS NULL)`),
+  ],
+);
+
+export const productionMaterialMovement = pgTable(
+  'production_material_movement',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    materialId: text('material_id').notNull().references(() => productionMaterial.id),
+    movementType: text('movement_type').notNull(),
+    quantityDelta: numeric('quantity_delta', { precision: 24, scale: 6, mode: 'string' }).notNull(),
+    quantityBefore: numeric('quantity_before', { precision: 24, scale: 6, mode: 'string' }).notNull(),
+    quantityAfter: numeric('quantity_after', { precision: 24, scale: 6, mode: 'string' }).notNull(),
+    receiptId: text('receipt_id').references(() => productionMaterialReceipt.id),
+    productionBatchId: text('production_batch_id').references(() => productionBatch.id),
+    batchUsageId: text('batch_usage_id').references(() => productionBatchMaterialUsage.id),
+    sourceReference: text('source_reference'),
+    actorUserId: text('actor_user_id').notNull().references(() => user.id),
+    reason: text('reason').notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('production_material_movement_receipt_uniq').on(table.receiptId),
+    uniqueIndex('production_material_movement_usage_uniq').on(table.batchUsageId),
+    index('production_material_movement_material_created_idx').on(table.manufacturerId, table.materialId, table.createdAt),
+    check('production_material_movement_type_check', sql`${table.movementType} IN ('receipt', 'consumption', 'adjustment')`),
+    check('production_material_movement_nonzero_check', sql`${table.quantityDelta} <> 0`),
+    check('production_material_movement_balance_check', sql`${table.quantityAfter} = ${table.quantityBefore} + ${table.quantityDelta}`),
   ],
 );
 

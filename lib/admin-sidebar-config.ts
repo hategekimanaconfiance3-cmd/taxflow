@@ -85,6 +85,7 @@ export const ROLE_LABELS: Record<RRARole, string> = {
     stock_officer: "Stock Monitoring Officer",
     correction_officer: "Correction Officer",
     reporting_officer: "Reporting & Analytics Officer",
+    stock_control_admin: "Stock Control Administrator",
 };
 
 export const ROLE_COLORS: Record<RRARole, string> = {
@@ -101,6 +102,7 @@ export const ROLE_COLORS: Record<RRARole, string> = {
     stock_officer: "bg-blue-500/10 text-blue-600 border-blue-200",
     correction_officer: "bg-emerald-500/10 text-emerald-600 border-emerald-200",
     reporting_officer: "bg-cyan-500/10 text-cyan-600 border-cyan-200",
+    stock_control_admin: "bg-emerald-500/10 text-emerald-700 border-emerald-200",
 };
 
 // ---------------------------------------------------------------------------
@@ -190,6 +192,12 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                     "audit_officer",
                     "customs_import_officer",
                 ],
+            },
+            {
+                label: "Manufacturing Material Review",
+                href: "/admin/production/material-accounting",
+                icon: Package,
+                allowedRoles: ["customs_import_officer", "stock_control_admin"],
             },
             {
                 label: "Supply Chain",

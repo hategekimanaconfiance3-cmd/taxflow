@@ -65,6 +65,7 @@ export default async function AdminImportsPage() {
                     actualQuantity={d.actualQuantity ?? d.expectedQuantity}
                     invoiceRef={d.invoiceRef ?? ''}
                     supportingDoc={d.supportingDoc ?? ''}
+                    materialCode={d.materialCode}
                   />
                 </div>
               ))}

@@ -30,7 +30,7 @@ export const RRA_PERMISSIONS = [
     "transaction.read", "audit.trail.read", "traceability.read", "stock.read",
     "imports.read", "imports.review", "payments.read", "payments.reconcile",
     "analytics.read", "ai.findings.read", "data_quality.read", "ai.assistant.use", "ai.feedback.review",
-    "stock.correction.review", "support.manage", "communications.staff.use", "production.formula.read", "stock.threshold.read", "stock.threshold.manage.global",
+    "stock.correction.review", "support.manage", "communications.staff.use", "production.formula.read", "production.material.receipt.review", "production.batch.review", "production.material.adjust", "stock.threshold.read", "stock.threshold.manage.global",
     "stock.threshold.manage.scoped", "stock.restock.read", "stock.restock.exception.review", "stock.restock.baseline.attest",
 ] as const;
 export type RRAPermission = (typeof RRA_PERMISSIONS)[number];
@@ -41,10 +41,10 @@ const PROPOSED_ROLE_PERMISSIONS: Record<RRAProposedRole, readonly RRAPermission[
     tax_compliance_officer: ["taxpayer.intelligence.search", "taxpayer.compliance.read", "tax.records.read", "payments.read", "compliance.followup.manage", "support.manage", "ai.assistant.use", "communications.staff.use"],
     audit_investigation_officer: ["taxpayer.intelligence.search", "investigation.case.manage", "transaction.read", "audit.trail.read", "traceability.read", "production.formula.read", "ai.assistant.use", "communications.staff.use"],
     product_traceability_officer: ["taxpayer.intelligence.search", "traceability.read", "stock.read", "ai.assistant.use", "communications.staff.use"],
-    customs_import_officer: ["taxpayer.intelligence.search", "imports.read", "imports.review", "ai.assistant.use", "communications.staff.use"],
+    customs_import_officer: ["taxpayer.intelligence.search", "imports.read", "imports.review", "production.material.receipt.review", "ai.assistant.use", "communications.staff.use"],
     payments_reconciliation_officer: ["taxpayer.intelligence.search", "tax.records.read", "payments.read", "payments.reconcile", "ai.assistant.use", "communications.staff.use"],
     data_ai_analyst: ["taxpayer.intelligence.search", "analytics.read", "ai.findings.read", "data_quality.read", "reports.aggregate.read", "ai.assistant.use", "ai.feedback.review"],
-    stock_control_admin: ["stock.threshold.read", "stock.threshold.manage.scoped", "stock.restock.read", "stock.restock.exception.review", "stock.restock.baseline.attest"],
+    stock_control_admin: ["stock.threshold.read", "stock.threshold.manage.scoped", "stock.restock.read", "stock.restock.exception.review", "stock.restock.baseline.attest", "production.material.receipt.review", "production.batch.review", "production.material.adjust"],
 };
 
 const LEGACY_ROLE_PERMISSIONS: Record<(typeof LEGACY_RRA_ROLES)[number], readonly RRAPermission[]> = {

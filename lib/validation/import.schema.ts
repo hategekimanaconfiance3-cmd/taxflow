@@ -7,6 +7,7 @@ export const declareImportSchema = z.object({
   // Product IDs are stored as text and production seed data uses stable IDs
   // such as "prod-soap-001", not only UUIDs.
   productId: z.string().trim().min(1).max(128),
+  productionMaterialId: z.string().trim().min(1).max(128).optional(),
   expectedQuantity: positiveQuantity,
   customsRef: z.string().trim().max(200).optional(),
   originCountry: z.string().trim().max(100).optional(),

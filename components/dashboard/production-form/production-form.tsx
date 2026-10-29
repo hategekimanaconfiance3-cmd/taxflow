@@ -36,6 +36,7 @@ interface ProductionFormProps {
         yieldToleranceBasisPoints: number;
         materials: Array<{ recipeMaterialId: string; materialId: string; materialCode: string; name: string; unit: string; quantity: number }>;
     }>;
+    plans: Array<{ id: string; productId: string; productName: string; recipeVersionId: string; plannedOutputQuantity: string; status: string }>;
     vatRate: number;
 }
 
@@ -44,7 +45,7 @@ interface ApiError {
     requestId?: string;
 }
 
-export function ProductionForm({ products, recipes, vatRate }: ProductionFormProps) {
+export function ProductionForm({ products, recipes, plans, vatRate }: ProductionFormProps) {
     const router = useRouter();
     const [isPending, startTransition] = useTransition();
     const [availableProducts, setAvailableProducts] = useState(products);
@@ -54,6 +55,7 @@ export function ProductionForm({ products, recipes, vatRate }: ProductionFormPro
     const [newProductCategory, setNewProductCategory] = useState("");
     const [selectedProductId, setSelectedProductId] = useState("");
     const [selectedRecipeId, setSelectedRecipeId] = useState("");
+    const [selectedPlanId, setSelectedPlanId] = useState("");
     const [actualMaterialQuantities, setActualMaterialQuantities] = useState<Record<string, string>>({});
     const [plannedOutputQuantity, setPlannedOutputQuantity] = useState("");
     const [quantity, setQuantity] = useState("");
@@ -61,6 +63,7 @@ export function ProductionForm({ products, recipes, vatRate }: ProductionFormPro
     const [message, setMessage] = useState<{ text: string; type: "success" | "error" } | null>(null);
     const idempotencyKey = useRef<string | null>(null);
     const selectedRecipe = recipes.find((recipe) => recipe.id === selectedRecipeId && recipe.productId === selectedProductId);
+    const selectedPlan = plans.find((plan) => plan.id === selectedPlanId && plan.status === "planned");
 
     const qty = Number(quantity) || 0;
     const price = Number(unitPrice) || 0;
@@ -120,6 +123,7 @@ export function ProductionForm({ products, recipes, vatRate }: ProductionFormPro
             quantity: qty,
             unitPrice: price,
             idempotencyKey: idempotencyKey.current ?? crypto.randomUUID(),
+            ...(selectedPlan ? { materialPlanId: selectedPlan.id } : {}),
             ...(selectedRecipe ? {
                 recipeVersionId: selectedRecipe.id,
                 plannedOutputQuantity: Number(plannedOutputQuantity),
@@ -150,13 +154,14 @@ export function ProductionForm({ products, recipes, vatRate }: ProductionFormPro
                 }
 
                 setMessage({
-                    text: `Production recorded · ${body.record.batchReference} · ${body.record.quantity.toLocaleString()} ${body.record.unit}${body.record.productionValidationStatus === "review_required" ? " · production check flagged for review" : ""}`,
+                    text: `Production declaration saved · ${body.record.batchReference} · ${body.record.quantity.toLocaleString()} ${body.record.unit}${selectedRecipe ? " · held until authorized material review; finished stock is not yet available" : ""}`,
                     type: "success",
                 });
                 setQuantity("");
                 setUnitPrice("");
                 setSelectedProductId("");
                 setSelectedRecipeId("");
+                setSelectedPlanId("");
                 setActualMaterialQuantities({});
                 setPlannedOutputQuantity("");
                 resetSubmissionKey();
@@ -221,9 +226,33 @@ export function ProductionForm({ products, recipes, vatRate }: ProductionFormPro
 
                 <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
                     <div className="space-y-3">
+                        {plans.some((plan) => plan.status === "planned") && (
+                            <div className="space-y-1.5">
+                                <Label htmlFor="production-material-plan" className="text-xs">Planned run (optional)</Label>
+                                <Select value={selectedPlanId || "none"} onValueChange={(value) => {
+                                    const plan = plans.find((item) => item.id === value && item.status === "planned");
+                                    setSelectedPlanId(plan?.id ?? "");
+                                    if (plan) {
+                                        setSelectedProductId(plan.productId);
+                                        setSelectedRecipeId(plan.recipeVersionId);
+                                        setPlannedOutputQuantity(plan.plannedOutputQuantity);
+                                    }
+                                    setActualMaterialQuantities({});
+                                    resetSubmissionKey();
+                                }}>
+                                    <SelectTrigger id="production-material-plan"><SelectValue placeholder="Record against a plan" /></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="none">No plan selected</SelectItem>
+                                        {plans.filter((plan) => plan.status === "planned").map((plan) => (
+                                            <SelectItem key={plan.id} value={plan.id}>{plan.productName} · planned {plan.plannedOutputQuantity}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        )}
                         <div className="space-y-1.5">
                             <Label className="text-xs">Product Name</Label>
-                            <Select value={selectedProductId} onValueChange={(value) => { setSelectedProductId(value); setSelectedRecipeId(""); setActualMaterialQuantities({}); setPlannedOutputQuantity(""); resetSubmissionKey(); }}>
+                            <Select value={selectedProductId} onValueChange={(value) => { setSelectedProductId(value); setSelectedRecipeId(""); setSelectedPlanId(""); setActualMaterialQuantities({}); setPlannedOutputQuantity(""); resetSubmissionKey(); }}>
                                 <SelectTrigger><SelectValue placeholder="Select your registered product" /></SelectTrigger>
                                 <SelectContent>
                                     {availableProducts.map((product) => (
@@ -260,7 +289,7 @@ export function ProductionForm({ products, recipes, vatRate }: ProductionFormPro
                     <div className="space-y-3 rounded-lg border border-dashed p-4">
                         <div className="space-y-1.5">
                             <Label>Confidential production recipe (optional)</Label>
-                            <Select value={selectedRecipeId || "none"} onValueChange={(value) => { setSelectedRecipeId(value === "none" ? "" : value); setActualMaterialQuantities({}); setPlannedOutputQuantity(""); resetSubmissionKey(); }}>
+                            <Select value={selectedRecipeId || "none"} onValueChange={(value) => { setSelectedRecipeId(value === "none" ? "" : value); setSelectedPlanId(""); setActualMaterialQuantities({}); setPlannedOutputQuantity(""); resetSubmissionKey(); }}>
                                 <SelectTrigger><SelectValue placeholder="Record without a recipe" /></SelectTrigger>
                                 <SelectContent>
                                     <SelectItem value="none">No recipe evidence</SelectItem>
@@ -275,7 +304,7 @@ export function ProductionForm({ products, recipes, vatRate }: ProductionFormPro
                                 <p className="text-xs text-muted-foreground">Record the planned and actual output, then actual material usage. TaxFlow compares these values with the selected immutable recipe version and records a review signal without copying formula details into the audit log.</p>
                                 <div className="max-w-sm space-y-1.5">
                                     <Label htmlFor="planned-output-quantity">Planned finished output ({selectedRecipe.productUnit})</Label>
-                                    <Input id="planned-output-quantity" type="number" min="0.0001" step="any" value={plannedOutputQuantity} onChange={(event) => { setPlannedOutputQuantity(event.target.value); resetSubmissionKey(); }} />
+                                    <Input id="planned-output-quantity" type="number" min="0.0001" step="any" value={plannedOutputQuantity} disabled={Boolean(selectedPlan)} onChange={(event) => { setPlannedOutputQuantity(event.target.value); resetSubmissionKey(); }} />
                                 </div>
                                 {selectedRecipe.materials.map((material) => {
                                     const planned = Number(plannedOutputQuantity) > 0 ? Number(plannedOutputQuantity) * material.quantity / selectedRecipe.outputQuantity : 0;

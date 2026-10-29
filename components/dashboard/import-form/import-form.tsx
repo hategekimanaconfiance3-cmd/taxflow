@@ -18,12 +18,14 @@ import { Loader2, Ship, CheckCircle } from "lucide-react";
 
 interface ImportFormProps {
     products: { id: string; name: string; unit: string }[];
+    materials: { id: string; materialCode: string; name: string; unit: string }[];
 }
 
-export function ImportForm({ products }: ImportFormProps) {
+export function ImportForm({ products, materials }: ImportFormProps) {
     const router = useRouter();
     const [isPending, startTransition] = useTransition();
     const [productId, setProductId] = useState("");
+    const [productionMaterialId, setProductionMaterialId] = useState("");
     const [expectedQuantity, setExpectedQuantity] = useState("");
     const [customsRef, setCustomsRef] = useState("");
     const [originCountry, setOriginCountry] = useState("");
@@ -33,7 +35,7 @@ export function ImportForm({ products }: ImportFormProps) {
     } | null>(null);
 
     function handleSubmit() {
-        const qty = parseInt(expectedQuantity) || 0;
+        const qty = Number(expectedQuantity) || 0;
         if (!productId || qty <= 0) return;
 
         startTransition(async () => {
@@ -41,6 +43,7 @@ export function ImportForm({ products }: ImportFormProps) {
                 setMessage(null);
                 await declareImport({
                     productId,
+                    productionMaterialId: productionMaterialId || undefined,
                     expectedQuantity: qty,
                     customsRef: customsRef.trim() || undefined,
                     originCountry: originCountry.trim() || undefined,
@@ -50,6 +53,7 @@ export function ImportForm({ products }: ImportFormProps) {
                     type: "success",
                 });
                 setProductId("");
+                setProductionMaterialId("");
                 setExpectedQuantity("");
                 setCustomsRef("");
                 setOriginCountry("");
@@ -88,7 +92,7 @@ export function ImportForm({ products }: ImportFormProps) {
 
                 <div className="grid gap-4 sm:grid-cols-2">
                     <div className="space-y-2">
-                        <Label>Product</Label>
+                        <Label>Customs product classification</Label>
                         <Select
                             value={productId}
                             onValueChange={setProductId}
@@ -117,6 +121,7 @@ export function ImportForm({ products }: ImportFormProps) {
                                 setExpectedQuantity(e.target.value)
                             }
                             min={1}
+                            step="any"
                             className="font-mono"
                         />
                     </div>
@@ -153,13 +158,29 @@ export function ImportForm({ products }: ImportFormProps) {
                     </div>
                 </div>
 
+                {materials.length > 0 && (
+                    <div className="space-y-2 rounded-md border border-dashed p-3">
+                        <Label>Confidential manufacturing material (optional)</Label>
+                        <Select value={productionMaterialId || "none"} onValueChange={(value) => setProductionMaterialId(value === "none" ? "" : value)}>
+                            <SelectTrigger><SelectValue placeholder="Ordinary product import" /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="none">Ordinary product import</SelectItem>
+                                {materials.map((material) => (
+                                    <SelectItem key={material.id} value={material.id}>{material.name} · {material.materialCode} ({material.unit})</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                        {productionMaterialId && <p className="text-xs text-muted-foreground">RRA inspection will post the verified quantity to your confidential material ledger and will not add it to ordinary product inventory. The customs product unit must match the material unit.</p>}
+                    </div>
+                )}
+
                 <Button
                     onClick={handleSubmit}
                     disabled={
                         isPending ||
                         !productId ||
                         !expectedQuantity ||
-                        parseInt(expectedQuantity) <= 0
+                        Number(expectedQuantity) <= 0
                     }
                     className="w-full sm:w-auto gap-2"
                 >
