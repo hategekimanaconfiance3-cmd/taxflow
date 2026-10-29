@@ -17,7 +17,7 @@ describe('confidential material fixed-point arithmetic', () => {
 
   it('scales recipe consumption with deterministic half-up rounding', () => {
     assert.equal(microsToDecimal(multiplyQuantities(BigInt(3_000_000), BigInt(250_000), BigInt(1_000_000))), '0.75');
-    assert.equal(microsToDecimal(multiplyQuantities(BigInt(1_000_000), BigInt(1), BigInt(3_000_000))), '0.000001');
+    assert.equal(microsToDecimal(multiplyQuantities(BigInt(1), BigInt(1), BigInt(2))), '0.000001');
   });
 
   it('matches only identical units after trimming and case normalization', () => {

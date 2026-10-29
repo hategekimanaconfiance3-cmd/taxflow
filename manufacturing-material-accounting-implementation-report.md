@@ -14,22 +14,7 @@
 
 Migration: `db/migrations/taxflow/0023_manufacturing_material_accounting.sql`.
 
-It has **not** been applied to any database, and no deployment, commit, or push was performed. Apply only to a disposable database for validation first. Production migration requires explicit authorization. Do not create historical material balances or material movements for legacy batches; opening balances must be entered with evidence and independent review.
-
-## Validation actually performed
-
-- Direct `tsc --noEmit` execution completed and reported existing project errors in unrelated analytics, messaging, and AI files. A filtered rerun showed no diagnostics in the new/changed manufacturing material files.
-- `pnpm typecheck` could not start because Windows denied pnpm's shared store lock. An access request was declined; it was not retried.
-- Focused lint passed with zero errors; it reported only the two pre-existing unused sidebar imports. Focused automated tests were not run because this checkout has no installed Vitest binary.
-- Production build compiled the app but failed during static page generation because the local `.env.local` contains redacted `[SENSITIVE]` auth URL placeholders. This is an environment/configuration failure; no Vercel build or deployment was run.
-
-## Remaining limitations
-
-- Database-backed concurrency, rollback, permissions, receipt evidence, and migration behavior still need verification against a disposable PostgreSQL database.
-- Domestic evidence currently requires transaction/product units to match the material unit exactly after case/whitespace normalization; conversion mappings are not implemented.
-- This implementation does not assert the legal correctness of existing VAT timing. Existing VAT behavior is preserved; held recipe batches defer stock availability but do not create tax records in the review/release path.
-- Reviewer notifications use existing notification records; delivery/real-time behavior depends on existing notification infrastructure.
-- Review/release requires `stock_control_admin`; receipt verification allows `stock_control_admin` and `customs_import_officer`, as explicitly scoped in RBAC.
+Migration and validation used only the local disposable PostgreSQL database `taxflow_manufacturing_test`. No production credentials or data were used. No deployment, commit, or push was performed. Do not create historical material balances or movements for legacy batches; opening balances must be entered with evidence and independent review.
 
 ## Phase 2 validation and remediation (2026-10-29)
 
@@ -45,18 +30,21 @@ It has **not** been applied to any database, and no deployment, commit, or push 
 
 ### Checks actually run
 
-- Focused ESLint on the changed production routes, material service, arithmetic helper, and new tests: **passed with no output**.
-- Focused test command `& .\node_modules\.bin\tsx.cmd --test tests/material-accounting.test.ts tests/manufacturing-material-accounting-postgres.test.ts`: **could not start**. Node 24 failed inside tsx with `uv_os_get_passwd returned ENOMEM`; no test assertions ran.
-- `& .\node_modules\.bin\tsc.cmd --noEmit`: **failed with 156 TypeScript diagnostic lines across the repository**. A filtered rerun showed no diagnostics in the changed manufacturing service/routes/test files. Reported errors include unrelated admin analytics/API, messaging, AI, and language files; this is not a clean project typecheck.
-- `& .\node_modules\.bin\next.ps1 build`: compilation succeeded, but static generation failed at `/admin-login` because local `.env.local` contains the literal redacted Better Auth URL placeholder `[SENSITIVE]`. Next skipped type validation during this build.
-- `git diff --check`: **passed** (Git printed only line-ending normalization warnings).
-- No `TEST_DATABASE_URL`, `DATABASE_URL`, or `POSTGRES_URL` is present in this environment; `psql`, `postgres`, and `docker` are unavailable on `PATH`. The migration and database-backed test therefore were **not executed**. An opt-in disposable-PostgreSQL integration test was added to check rerun behavior, numeric precision, foreign keys, workflow constraints, immutable triggers, indexes, and unchanged product/stock/transaction row counts inside a rolled-back transaction.
+- Existing-database upgrade: bootstrapped the empty disposable database to the supported pre-0023 schema, then ran `drizzle-kit migrate`; the migration chain completed and recorded the four journal entries through 0023. Re-running migrate succeeded without adding entries.
+- PostgreSQL integration test `tests/manufacturing-material-accounting-postgres.test.ts`: **passed** against the disposable database. It reapplies 0023 twice in a transaction, checks precision, constraints, indexes, foreign keys, immutable triggers and unchanged product/stock/transaction row counts, then verifies rollback.
+- Fixed-point unit tests `tests/material-accounting.test.ts`: **passed**. Corrected an invalid rounding fixture: one-third of one micro-unit rounds to zero; the half-up boundary is one-half micro-unit.
+- Focused ESLint across the material service, relevant production/RRA routes and both tests: **passed with no output**.
+- Clean migration-chain attempt against a separate disposable empty database: **failed** after beginning the first migration. The journal starts at 0019 and does not contain the earlier schema migrations; therefore the repository's migration chain alone is not a clean-database bootstrap. No production database was involved. The failure's precise SQL statement was not recovered from the CLI output, so it must not be characterized more specifically.
+- A full TypeScript check previously reported 156 diagnostics across unrelated admin analytics/API, messaging, AI, and language files. A filtered rerun found no diagnostics in the manufacturing service/routes/tests. This is not a clean repository typecheck.
+- Production build compiled the app but failed during static page generation at `/admin-login` because `.env.local` contains the redacted `[SENSITIVE]` Better Auth URL placeholder. Next skipped type validation. No deployment was run.
+- `git diff --check`: **passed** (line-ending normalization warnings only).
 
 ### Not validated / production blockers
 
-- No migration application against either a clean disposable installation or a disposable existing-database upgrade was possible. The migration's PostgreSQL syntax, actual catalog shape, rerun behavior, and tracking integration remain unverified in a live PostgreSQL engine.
-- Receipt source matching/quantity ceilings, independent reviewer enforcement, ledger immutability, opening-balance evidence, insufficient-stock release rejection, all-or-nothing release rollback, concurrent release safety, duplicate retries, correction history, cross-company isolation, and permission-denial behavior still require database-backed service/API tests.
+- A clean-install procedure is still a blocker: the checked-in migration journal starts at 0019. Establish and document the supported baseline/bootstrap procedure, then test a clean database through that procedure before production approval.
+- The PostgreSQL test verifies migration schema/idempotency/rollback behavior, but does not exercise end-to-end service actions for import/receipt quantities, independent approvals, opening-balance evidence, held/released batch inventory, rollback midway through release, concurrent releases, duplicate retries, corrections, company isolation, or permission denials. Add database-backed lifecycle/API tests for these requirements.
+- Review found role checks on the new route handlers and no other imports of the mutation functions outside the routes. It did not prove role denial for every route through authenticated integration tests. Confidentiality was inspected in the relevant server queries, not tested end-to-end across logs/exports/ordinary product views.
 - VAT timing remains a separate unresolved policy review. This validation made no tax-policy change and does not establish legal correctness.
 - Historical stock/batch data was not modified, fabricated, or backfilled. No production migration, deployment, commit, or push was performed.
 
-This work is **not production-ready** until disposable PostgreSQL migration and lifecycle/concurrency tests, authorization/confidentiality regressions, and existing VAT/retail/B2B/inventory regression tests pass, and the repository-level TypeScript/build failures are resolved or isolated.
+This work is **not production-ready** until the clean-install bootstrap is validated, lifecycle/concurrency and authorization/confidentiality database-backed tests pass, relevant VAT/retail/B2B/inventory regression tests pass, and repository-level TypeScript/build failures are resolved or isolated. Existing exact-unit matching remains intentionally strict: values must match after trim/case normalization and incompatible units are rejected; no conversions are guessed. VAT timing remains unresolved policy review; existing VAT behavior was preserved and no tax treatment was invented.
