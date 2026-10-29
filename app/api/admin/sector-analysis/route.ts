@@ -1,5 +1,4 @@
-import { auth } from "@/lib/auth";
-import { headers } from "next/headers";
+import { requireAnyRRAPermission } from "@/lib/auth-guard";
 import db from "@/db/drizzle";
 import { user, vatRecord, taxPayment } from "@/db/schema";
 import { sql, eq } from "drizzle-orm";
@@ -18,8 +17,7 @@ export interface SectorAnalysisData {
 }
 
 export async function GET() {
-    const session = await auth.api.getSession({ headers: await headers() });
-    if (!session?.user) return new Response("Unauthorized", { status: 401 });
+    await requireAnyRRAPermission("analytics.read", "reports.aggregate.read");
 
     try {
         const roles = ["manufacturer", "wholesaler", "retailer"] as const;

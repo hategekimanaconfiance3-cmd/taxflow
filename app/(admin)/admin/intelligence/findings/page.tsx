@@ -1,4 +1,4 @@
-import { requireRRASession } from '@/lib/auth-guard';
+import { requireAnyRRAPermission } from '@/lib/auth-guard';
 import { hasRRAPermission } from '@/lib/rra-rbac';
 import { getFindings } from '@/lib/actions/ai-finding.action';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -75,9 +75,9 @@ export default async function FindingsPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  const { staff } = await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer", "data_ai_analyst");
+  const { staff } = await requireAnyRRAPermission("ai.findings.read", "investigation.case.manage", "compliance.followup.manage");
   const canReviewProductionFinding = staff.clearanceRoles.some((role) => role !== "super_admin" && hasRRAPermission(role, "production.formula.read"));
-  const canReviewFinding = staff.clearanceRoles.some((role) => ["compliance_officer", "audit_officer", "audit_investigation_officer"].includes(role));
+  const canReviewFinding = staff.clearanceRoles.some((role) => hasRRAPermission(role, "compliance.followup.manage") || hasRRAPermission(role, "investigation.case.manage"));
   const params = await searchParams;
 
   let findings: Awaited<ReturnType<typeof getFindings>> = [];

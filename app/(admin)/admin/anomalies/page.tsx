@@ -1,4 +1,4 @@
-import { requireRRASession } from '@/lib/auth-guard';
+import { requireRRAPermission } from '@/lib/auth-guard';
 import { detectAnomalies } from '@/lib/actions/admin-anomaly.action';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -6,7 +6,7 @@ import { AlertTriangle, AlertCircle, ShieldAlert } from 'lucide-react';
 import { formatRWF } from '@/components/dashboard/stat-card/stat-card';
 
 export default async function AdminAnomaliesPage() {
-  await requireRRASession("compliance_officer", "audit_officer", "audit_investigation_officer", "data_ai_analyst");
+  await requireRRAPermission("transaction.read");
 
   let anomalies: Awaited<ReturnType<typeof detectAnomalies>> = [];
   let loadFailed = false;

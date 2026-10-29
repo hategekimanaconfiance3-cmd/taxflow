@@ -12,14 +12,47 @@ import {
     taxPayment,
     product,
 } from "@/db/schema";
-import { requireRRASession } from "@/lib/auth-guard";
+import { requireRRAPermission, requireRRASession } from "@/lib/auth-guard";
+import { hasRRAPermission } from "@/lib/rra-rbac";
+import { z } from "zod";
 
 // ---------------------------------------------------------------------------
 // Dashboard overview — single aggregated call
 // ---------------------------------------------------------------------------
 
 export async function getDashboardOverview(from?: Date, to?: Date) {
-    await requireRRASession("super_admin", "compliance_officer", "audit_officer", "reporting_officer", "director_executive", "tax_compliance_officer", "audit_investigation_officer", "data_ai_analyst", "payments_reconciliation_officer", "product_traceability_officer", "customs_import_officer");
+    const { staff } = await requireRRAPermission("dashboard.executive.read");
+    const fullDashboardPermissions = [
+        "taxpayer.intelligence.search",
+        "transaction.read",
+        "imports.read",
+        "payments.read",
+        "audit.trail.read",
+        "investigation.case.manage",
+    ] as const;
+    const hasFullDashboardPermissions = fullDashboardPermissions.every((permission) =>
+        staff.clearanceRoles.some((role) => hasRRAPermission(role, permission)),
+    );
+
+    if (!hasFullDashboardPermissions) {
+        const txnDateFilter = from && to ? and(gte(transaction.createdAt, from), lte(transaction.createdAt, to)) : from ? gte(transaction.createdAt, from) : to ? lte(transaction.createdAt, to) : undefined;
+        const vatDateFilter = from && to ? and(gte(vatRecord.createdAt, from), lte(vatRecord.createdAt, to)) : from ? gte(vatRecord.createdAt, from) : to ? lte(vatRecord.createdAt, to) : undefined;
+        const payDateFilter = from && to ? and(gte(taxPayment.createdAt, from), lte(taxPayment.createdAt, to)) : from ? gte(taxPayment.createdAt, from) : to ? lte(taxPayment.createdAt, to) : undefined;
+        const [traders, transactions, vat, payments] = await Promise.all([
+            db.select({ count: sql<number>`COUNT(*)::int`.as("count") }).from(user).where(sql`${user.role} IN ('manufacturer', 'wholesaler', 'retailer')`),
+            db.select({ count: sql<number>`COUNT(*)::int`.as("count"), totalValue: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)::float8`.as("total_value") }).from(transaction).where(txnDateFilter),
+            db.select({ vatType: vatRecord.vatType, total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`.as("total") }).from(vatRecord).where(vatDateFilter).groupBy(vatRecord.vatType),
+            db.select({ total: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)::float8`.as("total") }).from(taxPayment).where(payDateFilter ? and(eq(taxPayment.status, "confirmed"), payDateFilter) : eq(taxPayment.status, "confirmed")),
+        ]);
+        return {
+            view: "aggregate" as const,
+            traderCount: Number(traders[0]?.count ?? 0),
+            transactionCount: Number(transactions[0]?.count ?? 0),
+            transactionValue: Number(transactions[0]?.totalValue ?? 0),
+            vatOutput: Number(vat.find((row) => row.vatType === "output")?.total ?? 0),
+            taxPaymentsTotal: Number(payments[0]?.total ?? 0),
+        };
+    }
 
     // Build date filter conditions for each table
     const txnDateFilter = from && to ? and(gte(transaction.createdAt, from), lte(transaction.createdAt, to)) : from ? gte(transaction.createdAt, from) : to ? lte(transaction.createdAt, to) : undefined;
@@ -334,6 +367,7 @@ export async function getDashboardOverview(from?: Date, to?: Date) {
     }
 
     return {
+        view: "full" as const,
         // Trader stats
         traders: {
             total: totalTraders[0]?.count ?? 0,
@@ -408,17 +442,26 @@ export async function getDashboardOverview(from?: Date, to?: Date) {
 // ---------------------------------------------------------------------------
 
 export async function adminGlobalSearch(query: string) {
-    await requireRRASession("super_admin", "compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
+    const { staff } = await requireRRASession();
 
     if (!query?.trim() || query.trim().length < 2) {
         return { traders: [], transactions: [], imports: [], disputes: [] };
     }
 
-    const q = `%${query.trim()}%`;
+    const parsedQuery = z.string().trim().min(2).max(200).safeParse(query);
+    if (!parsedQuery.success) {
+        return { traders: [], transactions: [], imports: [], disputes: [] };
+    }
+
+    const q = `%${parsedQuery.data}%`;
+    const canSearchTraders = staff.clearanceRoles.some((role) => hasRRAPermission(role, "taxpayer.intelligence.search"));
+    const canReadTransactions = staff.clearanceRoles.some((role) => hasRRAPermission(role, "transaction.read"));
+    const canReadImports = staff.clearanceRoles.some((role) => hasRRAPermission(role, "imports.read"));
+    const canReadDisputes = staff.clearanceRoles.some((role) => hasRRAPermission(role, "investigation.case.manage") || hasRRAPermission(role, "compliance.followup.manage"));
 
     const [traders, transactions_, imports, disputes_] = await Promise.all([
         // Search traders by name, TIN, email
-        db
+        canSearchTraders ? db
             .select({
                 id: user.id,
                 businessName: user.businessName,
@@ -438,10 +481,10 @@ export async function adminGlobalSearch(query: string) {
                     ),
                 ),
             )
-            .limit(5),
+            .limit(5) : Promise.resolve([]),
 
         // Search transactions by ID or product name
-        db
+        canReadTransactions ? db
             .select({
                 id: transaction.id,
                 sellerName: user.businessName,
@@ -461,10 +504,10 @@ export async function adminGlobalSearch(query: string) {
                 ),
             )
             .orderBy(desc(transaction.createdAt))
-            .limit(5),
+            .limit(5) : Promise.resolve([]),
 
         // Search imports by customs ref, origin country, or business name
-        db
+        canReadImports ? db
             .select({
                 id: importDeclaration.id,
                 businessName: user.businessName,
@@ -488,10 +531,10 @@ export async function adminGlobalSearch(query: string) {
                 ),
             )
             .orderBy(desc(importDeclaration.createdAt))
-            .limit(5),
+            .limit(5) : Promise.resolve([]),
 
         // Search disputes by reference number or reason
-        db
+        canReadDisputes ? db
             .select({
                 id: dispute.id,
                 referenceNumber: dispute.referenceNumber,
@@ -510,7 +553,7 @@ export async function adminGlobalSearch(query: string) {
                 ),
             )
             .orderBy(desc(dispute.createdAt))
-            .limit(5),
+            .limit(5) : Promise.resolve([]),
     ]);
 
     return {

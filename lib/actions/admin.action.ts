@@ -2,11 +2,12 @@
 
 import { eq, sql, desc, and, or, gte, lte, ilike } from "drizzle-orm";
 import db from "@/db/drizzle";
-import { dispute, user, transaction, vatRecord, auditLog, stock, stockMovement, stockReservation, product, taxPayment, notification, b2bOrderAcceptance } from "@/db/schema";
+import { dispute, user, transaction, vatRecord, auditLog, stock, stockMovement, stockReservation, product, notification, b2bOrderAcceptance } from "@/db/schema";
 import {
-    requireRRASession,
-    type RRARole,
+    requireAnyRRAPermission,
+    requireRRAPermission,
 } from "@/lib/auth-guard";
+import { hasRRAPermission } from "@/lib/rra-rbac";
 import { logAudit } from "@/lib/audit";
 import { getSystemConfig } from "@/lib/actions/system-config.action";
 
@@ -18,7 +19,7 @@ import { getSystemConfig } from "@/lib/actions/system-config.action";
  * Get all traders in the system (paginated).
  */
 export async function getAllTraders() {
-    await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
+    await requireRRAPermission("taxpayer.intelligence.search");
 
     return db
         .select({
@@ -42,7 +43,7 @@ export async function getAllTraders() {
  * Get a single trader's profile.
  */
 export async function getTrader(traderId: string) {
-    await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
+    await requireRRAPermission("taxpayer.intelligence.search");
 
     const [trader] = await db
         .select()
@@ -71,7 +72,7 @@ export async function updateClearanceStatus(
     targetUserId: string,
     newStatus: ClearanceStatus,
 ) {
-    const { staff, ...session } = await requireRRASession("compliance_officer");
+    const { staff, ...session } = await requireRRAPermission("compliance.followup.manage");
 
     const validStatuses: ClearanceStatus[] = [
         "approved",
@@ -128,7 +129,7 @@ export async function getAllTransactions(filters?: {
     dateTo?: string;
     search?: string;
 }) {
-    await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
+    await requireRRAPermission("transaction.read");
 
     const seller = db
         .select({ id: user.id, businessName: user.businessName })
@@ -200,11 +201,14 @@ export async function getAllTransactions(filters?: {
 // ---------------------------------------------------------------------------
 
 export async function getComplianceReport() {
-    await requireRRASession("compliance_officer", "tax_compliance_officer");
+    const { staff } = await requireAnyRRAPermission("taxpayer.compliance.read", "tax.records.read", "transaction.read", "reports.aggregate.read", "analytics.read");
+    const canReadCompliance = staff.clearanceRoles.some((role) => hasRRAPermission(role, "taxpayer.compliance.read"));
+    const canReadTransactions = staff.clearanceRoles.some((role) => hasRRAPermission(role, "transaction.read") || hasRRAPermission(role, "reports.aggregate.read") || hasRRAPermission(role, "analytics.read"));
+    const canReadTaxRecords = staff.clearanceRoles.some((role) => hasRRAPermission(role, "tax.records.read") || hasRRAPermission(role, "reports.aggregate.read") || hasRRAPermission(role, "analytics.read"));
 
-    // Total traders by role
-    const tradersByRole = await db
-        .select({
+    const [tradersByRole, tradersByClearance, transactionStats, vatStats] = await Promise.all([
+        canReadCompliance ? db
+            .select({
             role: user.role,
             count: sql<number>`COUNT(*)`.as("count"),
         })
@@ -212,11 +216,10 @@ export async function getComplianceReport() {
         .where(
             sql`${user.role} IN ('manufacturer', 'wholesaler', 'retailer')`,
         )
-        .groupBy(user.role);
+            .groupBy(user.role) : Promise.resolve([]),
 
-    // Traders by clearance status
-    const tradersByClearance = await db
-        .select({
+        canReadCompliance ? db
+            .select({
             clearanceStatus: user.clearanceStatus,
             count: sql<number>`COUNT(*)`.as("count"),
         })
@@ -224,11 +227,10 @@ export async function getComplianceReport() {
         .where(
             sql`${user.role} IN ('manufacturer', 'wholesaler', 'retailer')`,
         )
-        .groupBy(user.clearanceStatus);
+            .groupBy(user.clearanceStatus) : Promise.resolve([]),
 
-    // Transaction stats
-    const transactionStats = await db
-        .select({
+        canReadTransactions ? db
+            .select({
             status: transaction.status,
             count: sql<number>`COUNT(*)`.as("count"),
             totalValue: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)::float8`.as(
@@ -236,16 +238,16 @@ export async function getComplianceReport() {
             ),
         })
         .from(transaction)
-        .groupBy(transaction.status);
+            .groupBy(transaction.status) : Promise.resolve([]),
 
-    // Total VAT
-    const vatStats = await db
-        .select({
+        canReadTaxRecords ? db
+            .select({
             vatType: vatRecord.vatType,
             total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`.as("total"),
         })
         .from(vatRecord)
-        .groupBy(vatRecord.vatType);
+            .groupBy(vatRecord.vatType) : Promise.resolve([]),
+    ]);
 
     return {
         tradersByRole,
@@ -264,7 +266,7 @@ export async function getAuditLogs(filters?: {
     action?: string;
     limit?: number;
 }) {
-    await requireRRASession("audit_officer", "audit_investigation_officer", "super_admin");
+    await requireRRAPermission("audit.trail.read");
 
     const limit = filters?.limit ?? 100;
 
@@ -314,7 +316,7 @@ export async function modifyTransaction(
         reason: string; // mandatory
     },
 ) {
-    const { staff, ...session } = await requireRRASession("compliance_officer", "tax_compliance_officer");
+    const { staff, ...session } = await requireRRAPermission("compliance.followup.manage");
 
     if (!changes.reason?.trim()) {
         throw new Error("A reason is required for all record modifications");
@@ -472,7 +474,7 @@ export async function modifyTransaction(
 // ---------------------------------------------------------------------------
 
 export async function getTraderTransactions(traderId: string) {
-    await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
+    await requireRRAPermission("transaction.read");
 
     return db
         .select({
@@ -508,7 +510,7 @@ export async function flagTransaction(
     transactionId: string,
     reason: string,
 ) {
-    const { staff, ...session } = await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
+    const { staff, ...session } = await requireAnyRRAPermission("compliance.followup.manage", "investigation.case.manage");
 
     if (!reason?.trim()) {
         throw new Error("A reason is required to flag a transaction.");
@@ -552,7 +554,7 @@ export async function cancelTransaction(
     transactionId: string,
     reason: string,
 ) {
-    const { staff, ...session } = await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
+    const { staff, ...session } = await requireAnyRRAPermission("compliance.followup.manage", "investigation.case.manage");
 
     if (!reason?.trim()) {
         throw new Error("A reason is required to cancel a transaction.");

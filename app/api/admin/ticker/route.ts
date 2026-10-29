@@ -1,5 +1,5 @@
-import { auth } from "@/lib/auth";
-import { headers } from "next/headers";
+import { requireRRASession } from "@/lib/auth-guard";
+import { hasRRAPermission } from "@/lib/rra-rbac";
 import db from "@/db/drizzle";
 import { transaction, importDeclaration, taxPayment, user } from "@/db/schema";
 import { sql, desc } from "drizzle-orm";
@@ -20,12 +20,14 @@ export interface TickerRow {
 }
 
 export async function GET() {
-    const session = await auth.api.getSession({ headers: await headers() });
-    if (!session?.user) return new Response("Unauthorized", { status: 401 });
+    const { staff } = await requireRRASession();
+    const canReadTransactions = staff.clearanceRoles.some((role) => hasRRAPermission(role, "transaction.read"));
+    const canReadImports = staff.clearanceRoles.some((role) => hasRRAPermission(role, "imports.read"));
+    const canReadPayments = staff.clearanceRoles.some((role) => hasRRAPermission(role, "payments.read"));
 
     try {
         const [txns, imports, payments] = await Promise.all([
-            db.select({
+            canReadTransactions ? db.select({
                 id: transaction.id,
                 businessName: user.businessName,
                 amount: transaction.totalAmount,
@@ -35,9 +37,9 @@ export async function GET() {
             .from(transaction)
             .innerJoin(user, sql`${user.id} = ${transaction.sellerId}`)
             .orderBy(desc(transaction.createdAt))
-            .limit(10),
+            .limit(10) : Promise.resolve([]),
 
-            db.select({
+            canReadImports ? db.select({
                 id: importDeclaration.id,
                 businessName: user.businessName,
                 amount: importDeclaration.totalValue,
@@ -47,9 +49,9 @@ export async function GET() {
             .from(importDeclaration)
             .innerJoin(user, sql`${user.id} = ${importDeclaration.importerId}`)
             .orderBy(desc(importDeclaration.createdAt))
-            .limit(5),
+            .limit(5) : Promise.resolve([]),
 
-            db.select({
+            canReadPayments ? db.select({
                 id: taxPayment.id,
                 businessName: user.businessName,
                 amount: taxPayment.amount,
@@ -59,7 +61,7 @@ export async function GET() {
             .from(taxPayment)
             .innerJoin(user, sql`${user.id} = ${taxPayment.businessId}`)
             .orderBy(desc(taxPayment.createdAt))
-            .limit(5),
+            .limit(5) : Promise.resolve([]),
         ]);
 
         const items: TickerItem[] = [

@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { getAdminSidebarGroups, ROLE_LABELS, ROLE_COLORS, type RRARole } from '@/lib/admin-sidebar-config';
+import { hasRRAPermission, isRRARole } from '@/lib/rra-rbac';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -293,6 +294,9 @@ interface AdminShellProps {
 export function AdminShell({ userId, userName, staffId, clearanceLevel, clearanceRoles, children }: AdminShellProps) {
   const pathname = usePathname();
   const groups = getAdminSidebarGroups(clearanceRoles.length ? clearanceRoles : [clearanceLevel]);
+  const effectiveRoles = clearanceRoles.length ? clearanceRoles : [clearanceLevel];
+  const canUseAssistant = effectiveRoles.some((role) => isRRARole(role) && hasRRAPermission(role, 'ai.assistant.use'));
+  const canUseSupport = effectiveRoles.some((role) => isRRARole(role) && hasRRAPermission(role, 'communications.staff.use'));
 
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState<string | null>(null);
@@ -704,9 +708,9 @@ export function AdminShell({ userId, userName, staffId, clearanceLevel, clearanc
               <Link href="/admin/profile" onClick={() => setIsAccountMenuOpen(false)} className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
                 <User className="h-3.5 w-3.5" /> Profile
               </Link>
-              <Link href="/admin/support" onClick={() => setIsAccountMenuOpen(false)} className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
+              {canUseSupport && <Link href="/admin/support" onClick={() => setIsAccountMenuOpen(false)} className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
                 <HelpCircle className="h-3.5 w-3.5" /> Help & Support
-              </Link>
+              </Link>}
             </div>
             <Separator className="opacity-60" />
             <div className="py-1">
@@ -734,9 +738,9 @@ export function AdminShell({ userId, userName, staffId, clearanceLevel, clearanc
           <Link href="/admin/profile" className="flex min-h-10 items-center gap-2.5 rounded-md px-3 text-sm text-muted-foreground hover:bg-accent hover:text-foreground">
             <User className="h-4 w-4" /> Profile
           </Link>
-          <Link href="/admin/support" className="flex min-h-10 items-center gap-2.5 rounded-md px-3 text-sm text-muted-foreground hover:bg-accent hover:text-foreground">
+          {canUseSupport && <Link href="/admin/support" className="flex min-h-10 items-center gap-2.5 rounded-md px-3 text-sm text-muted-foreground hover:bg-accent hover:text-foreground">
             <HelpCircle className="h-4 w-4" /> Help & Support
-          </Link>
+          </Link>}
           <button
             type="button"
             onClick={handleSignOut}
@@ -822,7 +826,7 @@ export function AdminShell({ userId, userName, staffId, clearanceLevel, clearanc
               <LangSelector value={lang} onChange={setLang} />
 
               {/* Ask AI button — hidden while panel is open */}
-              {!isAiOpen && <Button
+              {canUseAssistant && !isAiOpen && <Button
                 variant="outline"
                 size="sm"
                 onClick={openAI}

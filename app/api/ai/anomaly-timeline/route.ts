@@ -1,5 +1,4 @@
-import { auth } from "@/lib/auth";
-import { headers } from "next/headers";
+import { requireAnyRRAPermission } from "@/lib/auth-guard";
 import db from "@/db/drizzle";
 import { auditLog } from "@/db/schema";
 import { sql, desc } from "drizzle-orm";
@@ -18,8 +17,7 @@ export interface AnomalyTimelineData {
 }
 
 export async function GET() {
-    const session = await auth.api.getSession({ headers: await headers() });
-    if (!session?.user) return new Response("Unauthorized", { status: 401 });
+    await requireAnyRRAPermission("ai.findings.read", "audit.trail.read", "investigation.case.manage");
 
     try {
         const thirtyDaysAgo = new Date();

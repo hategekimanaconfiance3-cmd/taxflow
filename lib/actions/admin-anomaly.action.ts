@@ -1,9 +1,9 @@
 "use server";
 
-import { sql, eq, desc, and, gte } from "drizzle-orm";
+import { sql, eq, desc, gte } from "drizzle-orm";
 import db from "@/db/drizzle";
 import { transaction, stock, product, user } from "@/db/schema";
-import { requireRRASession } from "@/lib/auth-guard";
+import { requireRRAPermission } from "@/lib/auth-guard";
 import { computeAllRiskScores } from "@/lib/ai/risk-scoring";
 
 // ---------------------------------------------------------------------------
@@ -35,7 +35,7 @@ export type Anomaly = {
 // ---------------------------------------------------------------------------
 
 export async function detectAnomalies(): Promise<Anomaly[]> {
-    await requireRRASession("super_admin", "compliance_officer", "audit_officer", "audit_investigation_officer", "data_ai_analyst");
+    await requireRRAPermission("transaction.read");
 
     const anomalies: Anomaly[] = [];
     const thirtyDaysAgo = new Date();

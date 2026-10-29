@@ -64,8 +64,7 @@ export const RRA_ROLE_PERMISSIONS: Record<RRARole | "super_admin", readonly RRAP
 /** Compatibility for old route checks; super_admin is deliberately not an all-role bypass. */
 const LEGACY_GUARD_ALIASES: Partial<Record<RRAProposedRole, readonly string[]>> = {
     super_admin: ["super_admin"],
-    tax_compliance_officer: ["compliance_officer"],
-    audit_investigation_officer: ["audit_officer"],
+    // Product traceability has the exact same legacy stock-read permission set.
     product_traceability_officer: ["stock_officer"],
 };
 

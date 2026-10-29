@@ -7,7 +7,7 @@ import { randomUUID } from "node:crypto";
 import { headers } from "next/headers";
 import db from "@/db/drizzle";
 import { auditLog, b2bOrderAcceptance, dispute, notification, product, stock, stockMovement, transaction, user, vatRecord } from "@/db/schema";
-import { requireTraderSession, requireRRASession } from "@/lib/auth-guard";
+import { requireAnyRRAPermission, requireTraderSession } from "@/lib/auth-guard";
 import { emitToUser } from "@/lib/realtime";
 import { getSystemConfig } from "@/lib/actions/system-config.action";
 import { logAudit } from "@/lib/audit";
@@ -337,7 +337,7 @@ export async function getDisputes() {
 // ---------------------------------------------------------------------------
 
 export async function getAllDisputes() {
-    await requireRRASession("compliance_officer", "audit_officer");
+    await requireAnyRRAPermission("compliance.followup.manage", "investigation.case.manage");
 
     // We need filer and counterparty names — use subqueries
     const filer = db
@@ -402,7 +402,7 @@ const ACTION_LABELS: Record<RRADisputeAction, string> = {
 
 /** Generate an advisory draft using only the dispute record visible to an authorized resolver. */
 export async function generateDisputeAiAssistance(rawInput: DisputeAiAssistanceInput): Promise<{ text: string }> {
-    const { user: actor, staff } = await requireRRASession("compliance_officer", "audit_officer");
+    const { user: actor, staff } = await requireAnyRRAPermission("compliance.followup.manage", "investigation.case.manage");
     const parsed = disputeAiAssistanceSchema.safeParse(rawInput);
     if (!parsed.success) throw new Error("The AI writing request is invalid. Review the form and try again.");
     const input = parsed.data;
@@ -556,7 +556,7 @@ export async function resolveDispute(
         adjustedUnitPrice?: number;
     },
 ) {
-    const { staff, ...session } = await requireRRASession("compliance_officer", "audit_officer");
+    const { staff, ...session } = await requireAnyRRAPermission("compliance.followup.manage", "investigation.case.manage");
 
     if (!data.resolution?.trim()) {
         throw new Error("Resolution notes are required");

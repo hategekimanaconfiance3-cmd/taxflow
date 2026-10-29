@@ -1,16 +1,16 @@
 "use server";
 
-import { eq, desc, sql, and, ilike } from "drizzle-orm";
+import { eq, desc, sql, and } from "drizzle-orm";
 import db from "@/db/drizzle";
 import { auditLog, taxPayment, user } from "@/db/schema";
-import { requireRRASession } from "@/lib/auth-guard";
+import { requireRRAPermission } from "@/lib/auth-guard";
 
 // ---------------------------------------------------------------------------
 // Get all payments with trader info
 // ---------------------------------------------------------------------------
 
 export async function getAllPayments(filter?: "all" | "pending" | "confirmed" | "rejected") {
-    await requireRRASession("compliance_officer", "audit_officer", "reporting_officer", "payments_reconciliation_officer");
+    await requireRRAPermission("payments.read");
 
     const conditions = [
         sql`${user.role} IN ('manufacturer', 'wholesaler', 'retailer')`,
@@ -46,7 +46,7 @@ export async function getAllPayments(filter?: "all" | "pending" | "confirmed" | 
 // ---------------------------------------------------------------------------
 
 export async function getPaymentSummary() {
-    await requireRRASession("compliance_officer", "audit_officer", "reporting_officer", "payments_reconciliation_officer");
+    await requireRRAPermission("payments.read");
 
     const [totals] = await db
         .select({
@@ -77,7 +77,7 @@ export async function updatePaymentStatus(
     paymentId: string,
     status: "rejected",
 ) {
-    const session = await requireRRASession("compliance_officer", "audit_officer", "payments_reconciliation_officer");
+    const session = await requireRRAPermission("payments.reconcile");
     await db.transaction(async (tx) => {
         const [payment] = await tx
             .select()

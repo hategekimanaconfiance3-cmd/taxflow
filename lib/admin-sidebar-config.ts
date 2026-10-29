@@ -140,7 +140,7 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 label: "Command Center",
                 href: "/admin/dashboard/overview",
                 icon: LayoutDashboard,
-                allowedRoles: ALL,
+                allowedRoles: ["super_admin", "director_executive"],
                 children: [
                     {
                         label: "Overview",
@@ -179,8 +179,8 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 icon: ArrowLeftRight,
                 allowedRoles: [
                     "super_admin",
-                    "compliance_officer",
                     "audit_officer",
+                    "audit_investigation_officer",
                 ],
             },
             {
@@ -269,6 +269,7 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                     "compliance_officer",
                     "audit_officer",
                     "reporting_officer",
+                    "tax_compliance_officer",
                     "payments_reconciliation_officer",
                 ],
             },
@@ -333,7 +334,8 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                     "super_admin",
                     "compliance_officer",
                     "audit_officer",
-                    "data_ai_analyst",
+                    "tax_compliance_officer",
+                    "audit_investigation_officer",
                 ],
             },
             {
@@ -408,11 +410,8 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 icon: Activity,
                 allowedRoles: [
                     "super_admin",
-                    "compliance_officer",
                     "audit_officer",
-                    "tax_compliance_officer",
                     "audit_investigation_officer",
-                    "data_ai_analyst",
                 ],
             },
             {
@@ -563,7 +562,7 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
 
 /**
  * Filter sidebar groups by role.
- * Super Admin sees everything. Other roles see only their allowed items.
+ * Each role sees only explicitly allowed items; there is no implicit admin bypass.
  */
 export function getAdminSidebarGroups(roles: string | string[]): AdminSidebarGroup[] {
     const assignedRoles = Array.isArray(roles) ? roles : [roles];
@@ -591,4 +590,14 @@ export function getAdminSidebarGroups(roles: string | string[]): AdminSidebarGro
  */
 export function getAdminSidebarItems(roles: string | string[]): AdminSidebarItem[] {
     return getAdminSidebarGroups(roles).flatMap((g) => g.items);
+}
+
+/** Navigation destinations available to the supplied active RRA role set. */
+export function getAdminNavigationLinks(roles: string | string[]): Array<{ label: string; href: string }> {
+    return getAdminSidebarGroups(roles).flatMap((group) =>
+        group.items.flatMap((item) => [
+            { label: item.label, href: item.href },
+            ...(item.children ?? []).map((child) => ({ label: child.label, href: child.href })),
+        ]),
+    );
 }
