@@ -30,3 +30,33 @@ It has **not** been applied to any database, and no deployment, commit, or push 
 - This implementation does not assert the legal correctness of existing VAT timing. Existing VAT behavior is preserved; held recipe batches defer stock availability but do not create tax records in the review/release path.
 - Reviewer notifications use existing notification records; delivery/real-time behavior depends on existing notification infrastructure.
 - Review/release requires `stock_control_admin`; receipt verification allows `stock_control_admin` and `customs_import_officer`, as explicitly scoped in RBAC.
+
+## Phase 2 validation and remediation (2026-10-29)
+
+### Findings and changes
+
+- **Import-to-material association was not enforced by the receipt service.** A caller could submit an activated import declaration for a different material owned by the same manufacturer. The service now requires the declaration's `production_material_id` to equal the requested material for both submission and independent verification.
+- **Import unit matching was missing at receipt submission/review.** The service now rejects imports unless the product unit and material unit match after trim/case normalization. No conversion is performed; values such as `liter` and `L` remain incompatible.
+- **The migration was not rerunnable.** Its receipt and material-plan delete-protection triggers were created without dropping an existing trigger. The migration now drops those two triggers before recreating them. Other trigger definitions were already repeatable.
+- **Zero actual usage could prevent a valid batch release.** Production evidence permits zero actual usage, while the immutable ledger correctly rejects zero movements. Release now retains the zero-usage evidence and omits only the zero-value movement.
+- **Inactive sessions were not rejected by the production, material-accounting, or plan API guards.** These endpoints now return 403 for an authenticated inactive account. Role and RRA permission assignments were not broadened.
+- Re-inspection found the material-aware import views return confidential names only for the owning trader; RRA import views use a generic label and protected material codes, with codes restricted by the existing receipt-review permission. Formula names are returned only by the endpoint guarded by `production.formula.read`. The Super Admin role still has none of the new receipt, batch-review, or adjustment permissions.
+- The ordinary B2B receipt workflow remains unchanged and disabled as before. Recipe-backed batches remain held until review; releases remain transaction-scoped and lock the batch and sorted material rows before checking ledger balances and posting stock/material movements plus audit evidence.
+
+### Checks actually run
+
+- Focused ESLint on the changed production routes, material service, arithmetic helper, and new tests: **passed with no output**.
+- Focused test command `& .\node_modules\.bin\tsx.cmd --test tests/material-accounting.test.ts tests/manufacturing-material-accounting-postgres.test.ts`: **could not start**. Node 24 failed inside tsx with `uv_os_get_passwd returned ENOMEM`; no test assertions ran.
+- `& .\node_modules\.bin\tsc.cmd --noEmit`: **failed with 156 TypeScript diagnostic lines across the repository**. A filtered rerun showed no diagnostics in the changed manufacturing service/routes/test files. Reported errors include unrelated admin analytics/API, messaging, AI, and language files; this is not a clean project typecheck.
+- `& .\node_modules\.bin\next.ps1 build`: compilation succeeded, but static generation failed at `/admin-login` because local `.env.local` contains the literal redacted Better Auth URL placeholder `[SENSITIVE]`. Next skipped type validation during this build.
+- `git diff --check`: **passed** (Git printed only line-ending normalization warnings).
+- No `TEST_DATABASE_URL`, `DATABASE_URL`, or `POSTGRES_URL` is present in this environment; `psql`, `postgres`, and `docker` are unavailable on `PATH`. The migration and database-backed test therefore were **not executed**. An opt-in disposable-PostgreSQL integration test was added to check rerun behavior, numeric precision, foreign keys, workflow constraints, immutable triggers, indexes, and unchanged product/stock/transaction row counts inside a rolled-back transaction.
+
+### Not validated / production blockers
+
+- No migration application against either a clean disposable installation or a disposable existing-database upgrade was possible. The migration's PostgreSQL syntax, actual catalog shape, rerun behavior, and tracking integration remain unverified in a live PostgreSQL engine.
+- Receipt source matching/quantity ceilings, independent reviewer enforcement, ledger immutability, opening-balance evidence, insufficient-stock release rejection, all-or-nothing release rollback, concurrent release safety, duplicate retries, correction history, cross-company isolation, and permission-denial behavior still require database-backed service/API tests.
+- VAT timing remains a separate unresolved policy review. This validation made no tax-policy change and does not establish legal correctness.
+- Historical stock/batch data was not modified, fabricated, or backfilled. No production migration, deployment, commit, or push was performed.
+
+This work is **not production-ready** until disposable PostgreSQL migration and lifecycle/concurrency tests, authorization/confidentiality regressions, and existing VAT/retail/B2B/inventory regression tests pass, and the repository-level TypeScript/build failures are resolved or isolated.

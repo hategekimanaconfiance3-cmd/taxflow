@@ -16,6 +16,7 @@ function json(body: unknown, status: number, requestId: string): NextResponse {
 async function manufacturerId(request: Request, requestId: string): Promise<{ id: string } | { response: NextResponse }> {
   const session = await auth.api.getSession({ headers: request.headers });
   if (!session) return { response: json({ error: 'Sign in to continue.' }, 401, requestId) };
+  if (session.user.isActive === false) return { response: json({ error: 'This account is inactive.' }, 403, requestId) };
   if (session.user.role !== 'manufacturer') return { response: json({ error: 'Confidential material accounting is available only to the manufacturer account.' }, 403, requestId) };
   return { id: session.user.id };
 }

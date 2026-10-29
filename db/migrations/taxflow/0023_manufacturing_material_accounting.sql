@@ -165,6 +165,8 @@ $$ LANGUAGE plpgsql;
 --> statement-breakpoint
 DROP TRIGGER IF EXISTS production_material_receipt_evidence_guard ON public.production_material_receipt;
 --> statement-breakpoint
+DROP TRIGGER IF EXISTS production_material_receipt_no_delete ON public.production_material_receipt;
+--> statement-breakpoint
 CREATE TRIGGER production_material_receipt_evidence_guard BEFORE UPDATE ON public.production_material_receipt
   FOR EACH ROW EXECUTE FUNCTION public.guard_production_material_receipt_update();
 --> statement-breakpoint
@@ -190,6 +192,8 @@ END;
 $$ LANGUAGE plpgsql;
 --> statement-breakpoint
 DROP TRIGGER IF EXISTS production_material_plan_evidence_guard ON public.production_material_plan;
+--> statement-breakpoint
+DROP TRIGGER IF EXISTS production_material_plan_no_delete ON public.production_material_plan;
 --> statement-breakpoint
 CREATE TRIGGER production_material_plan_evidence_guard BEFORE UPDATE ON public.production_material_plan
   FOR EACH ROW EXECUTE FUNCTION public.guard_production_material_plan_update();

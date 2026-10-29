@@ -11,6 +11,7 @@ function json(body: unknown, status: number, requestId: string): NextResponse {
 async function getManufacturer(request: Request, requestId: string): Promise<string | NextResponse> {
   const session = await auth.api.getSession({ headers: request.headers });
   if (!session) return json({ error: 'Sign in to continue.' }, 401, requestId);
+  if (session.user.isActive === false) return json({ error: 'This account is inactive.' }, 403, requestId);
   if (session.user.role !== 'manufacturer') return json({ error: 'Production plans are available only to manufacturers.' }, 403, requestId);
   return session.user.id;
 }

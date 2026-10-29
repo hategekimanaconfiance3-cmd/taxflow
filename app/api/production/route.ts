@@ -24,6 +24,9 @@ function json(body: unknown, status: number, requestId: string): NextResponse {
 async function manufacturerSession(request: Request, requestId: string) {
   const session = await auth.api.getSession({ headers: request.headers });
   if (!session) return { authorized: false as const, response: json({ error: 'Sign in to continue.' }, 401, requestId) };
+  if (session.user.isActive === false) {
+    return { authorized: false as const, response: json({ error: 'This account is inactive.' }, 403, requestId) };
+  }
   if (session.user.role !== 'manufacturer') {
     return {
       authorized: false as const,

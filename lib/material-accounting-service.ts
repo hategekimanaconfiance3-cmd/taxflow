@@ -308,12 +308,24 @@ export async function submitProductionMaterialReceipt(manufacturerId: string, in
     }
 
     if (input.origin === 'import') {
-      const [declaration] = await tx.select({ id: importDeclaration.id, inspectedQuantity: importDeclaration.inspectedQuantity, status: importDeclaration.status, businessId: importDeclaration.businessId })
+      const [declaration] = await tx.select({
+        id: importDeclaration.id,
+        inspectedQuantity: importDeclaration.inspectedQuantity,
+        status: importDeclaration.status,
+        businessId: importDeclaration.businessId,
+        productionMaterialId: importDeclaration.productionMaterialId,
+        productUnit: product.unit,
+      })
         .from(importDeclaration)
+        .innerJoin(product, eq(importDeclaration.productId, product.id))
         .where(eq(importDeclaration.id, input.importDeclarationId ?? ''))
         .for('update').limit(1);
-      if (!declaration || declaration.businessId !== manufacturerId || declaration.status !== 'activated' || declaration.inspectedQuantity == null) {
+      if (!declaration || declaration.businessId !== manufacturerId || declaration.status !== 'activated'
+        || declaration.inspectedQuantity == null || declaration.productionMaterialId !== material.id) {
         throw new MaterialAccountingError('IMPORT_NOT_VERIFIED', 'Link only an activated import with recorded RRA inspection evidence.');
+      }
+      if (normalizeMaterialUnit(declaration.productUnit) !== normalizeMaterialUnit(material.unit)) {
+        throw new MaterialAccountingError('UNIT_MISMATCH', 'Import product unit must exactly match the selected material unit.');
       }
       const [claimed] = await tx.select({ quantity: sql<string>`COALESCE(SUM(${productionMaterialReceipt.quantity}), 0)::text` })
         .from(productionMaterialReceipt)
@@ -418,10 +430,23 @@ export async function listPendingProductionMaterialReceipts() {
 
 async function validateReceiptSource(tx: SelectDatabase, receipt: typeof productionMaterialReceipt.$inferSelect): Promise<void> {
   if (receipt.origin === 'import') {
-    const [declaration] = await tx.select({ id: importDeclaration.id, businessId: importDeclaration.businessId, status: importDeclaration.status, inspectedQuantity: importDeclaration.inspectedQuantity })
-      .from(importDeclaration).where(eq(importDeclaration.id, receipt.importDeclarationId ?? '')).for('update').limit(1);
-    if (!declaration || declaration.businessId !== receipt.manufacturerId || declaration.status !== 'activated' || declaration.inspectedQuantity == null) {
+    const [declaration] = await tx.select({
+      id: importDeclaration.id,
+      businessId: importDeclaration.businessId,
+      status: importDeclaration.status,
+      inspectedQuantity: importDeclaration.inspectedQuantity,
+      productionMaterialId: importDeclaration.productionMaterialId,
+      productUnit: product.unit,
+    })
+      .from(importDeclaration)
+      .innerJoin(product, eq(importDeclaration.productId, product.id))
+      .where(eq(importDeclaration.id, receipt.importDeclarationId ?? '')).for('update').limit(1);
+    if (!declaration || declaration.businessId !== receipt.manufacturerId || declaration.status !== 'activated'
+      || declaration.inspectedQuantity == null || declaration.productionMaterialId !== receipt.materialId) {
       throw new MaterialAccountingError('IMPORT_NOT_VERIFIED', 'The linked import is no longer supported by verified inspection evidence.');
+    }
+    if (normalizeMaterialUnit(declaration.productUnit) !== normalizeMaterialUnit(receipt.unit)) {
+      throw new MaterialAccountingError('UNIT_MISMATCH', 'Import product unit does not match the recorded material receipt unit.');
     }
     const [claimed] = await tx.select({ quantity: sql<string>`COALESCE(SUM(${productionMaterialReceipt.quantity}), 0)::text` })
       .from(productionMaterialReceipt)
@@ -607,6 +632,9 @@ export async function reviewProductionBatch(actorUserId: string, input: BatchRev
       const delta = -quantityToMicros(usage.actualQuantity);
       const before = entry.before;
       const after = before + delta;
+      // Zero actual usage is valid evidence, but the immutable ledger rejects
+      // zero-value movements. Preserve the usage row without inventing one.
+      if (delta === BigInt(0)) continue;
       await tx.insert(productionMaterialMovement).values({
         manufacturerId: batch.manufacturerId,
         materialId: usage.materialId,
