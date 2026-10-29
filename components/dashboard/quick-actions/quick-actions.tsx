@@ -4,10 +4,7 @@ import Link from 'next/link';
 import {
   Factory,
   ShoppingCart,
-  PackagePlus,
   ShoppingBag,
-  ClipboardList,
-  RefreshCw,
 } from 'lucide-react';
 import type { TraderRole } from '@/lib/sidebar-config';
 
@@ -28,13 +25,11 @@ function getQuickActions(role: TraderRole): QuickAction[] {
   if (role === 'wholesaler') {
     return [
       { label: 'Sell to Buyer', href: '/dashboard/sell', icon: ShoppingCart, variant: 'primary' },
-      { label: 'Restock', href: '/dashboard/restock', icon: RefreshCw, variant: 'outline' },
     ];
   }
   // retailer
   return [
     { label: 'Record Sale', href: '/dashboard/record-sale', icon: ShoppingBag, variant: 'primary' },
-    { label: 'Restock', href: '/dashboard/restock', icon: PackagePlus, variant: 'outline' },
   ];
 }
 

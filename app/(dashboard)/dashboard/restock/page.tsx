@@ -25,8 +25,8 @@ function statusLabel(status: string): string {
 }
 
 export default async function RestockRequestsPage({ searchParams }: { searchParams: Promise<{ result?: string; reference?: string }> }) {
+  await requireTraderSession(["manufacturer"]);
   const { user, suspended } = await requireApprovedClearance();
-  await requireTraderSession();
   const params = await searchParams;
   const notice = params.result ? RESULT_MESSAGES[params.result] : undefined;
   const [products, requests] = await Promise.all([

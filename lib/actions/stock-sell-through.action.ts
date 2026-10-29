@@ -187,7 +187,7 @@ async function evaluateRequest(
 
 /** Create a restock eligibility request using only the signed-in trader identity. */
 export async function createRestockRequestAction(formData: FormData): Promise<void> {
-  const session = await requireTraderSession();
+  const session = await requireTraderSession(["manufacturer"]);
   const requestId = randomUUID();
   const { suspended, clearanceStatus } = await requireApprovedClearance();
   if (suspended) redirect(`/dashboard/restock?result=clearance&status=${encodeURIComponent(clearanceStatus)}`);
