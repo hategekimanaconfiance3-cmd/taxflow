@@ -11,20 +11,27 @@ import { verifyTaxPayment } from "@/lib/actions/compliance.action";
 export function AdminPaymentActions({
   paymentId,
   reference,
+  method,
+  amount,
 }: {
   paymentId: string;
   reference?: string | null;
+  method: string;
+  amount: number;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const [evidenceReference, setEvidenceReference] = useState(reference ?? "");
+  const [evidenceType, setEvidenceType] = useState(method === "cash" ? "official_cash_receipt" : method === "bank_transfer" ? "bank_settlement" : "provider_settlement");
+  const [settledAmount, setSettledAmount] = useState(String(amount));
+  const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   function handleConfirm() {
     setError(null);
     startTransition(async () => {
       try {
-        await verifyTaxPayment({ paymentId, evidenceReference });
+        await verifyTaxPayment({ paymentId, evidenceReference, evidenceType, settledAmount: Number(settledAmount), reason });
         router.refresh();
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : "Payment verification failed.");
@@ -36,7 +43,7 @@ export function AdminPaymentActions({
     setError(null);
     startTransition(async () => {
       try {
-        await updatePaymentStatus(paymentId, "rejected");
+        await updatePaymentStatus({ paymentId, reason }, "rejected");
         router.refresh();
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : "Payment review failed.");
@@ -56,12 +63,38 @@ export function AdminPaymentActions({
         disabled={isPending}
         className="h-8 text-xs"
       />
+      <Input
+        type="number"
+        min={1}
+        step={1}
+        value={settledAmount}
+        onChange={(event) => setSettledAmount(event.target.value)}
+        placeholder="Verified amount"
+        aria-label="Independently verified settlement amount"
+        disabled={isPending}
+        className="h-8 text-xs"
+      />
+      <select value={evidenceType} onChange={(event) => setEvidenceType(event.target.value)} disabled={isPending} className="h-8 rounded-md border bg-background px-2 text-xs">
+        <option value="provider_settlement">Provider settlement record</option>
+        <option value="bank_settlement">Bank settlement record</option>
+        <option value="official_cash_receipt">Official cash receipt</option>
+      </select>
+      <Input
+        value={reason}
+        onChange={(event) => setReason(event.target.value)}
+        placeholder="Review reason (required)"
+        aria-label="Payment review reason"
+        minLength={10}
+        maxLength={500}
+        disabled={isPending}
+        className="h-8 text-xs"
+      />
       <div className="flex items-center gap-1">
         <Button
           variant="ghost"
           size="sm"
           className="h-7 text-emerald-700"
-          disabled={isPending || evidenceReference.trim().length < 5}
+          disabled={isPending || evidenceReference.trim().length < 5 || reason.trim().length < 10}
           onClick={handleConfirm}
         >
           {isPending ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <CheckCircle className="mr-1 h-3.5 w-3.5" />}
@@ -71,7 +104,7 @@ export function AdminPaymentActions({
           variant="ghost"
           size="sm"
           className="h-7 text-red-600"
-          disabled={isPending}
+          disabled={isPending || reason.trim().length < 10}
           onClick={handleReject}
         >
           <XCircle className="mr-1 h-3.5 w-3.5" />

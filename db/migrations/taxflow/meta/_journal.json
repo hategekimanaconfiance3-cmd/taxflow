@@ -183,6 +183,13 @@
       "when": 1793356400001,
       "tag": "0025_manufacturing_governance_accountability",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1793380000000,
+      "tag": "0026_payment_engine_hybrid_verification",
+      "breakpoints": true
     }
   ]
 }

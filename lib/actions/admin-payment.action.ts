@@ -2,8 +2,10 @@
 
 import { eq, desc, sql, and } from "drizzle-orm";
 import db from "@/db/drizzle";
-import { auditLog, taxPayment, user } from "@/db/schema";
+import { auditLog, taxPayment, taxPaymentEvent, user } from "@/db/schema";
 import { requireRRAPermission } from "@/lib/auth-guard";
+import { assertPaymentTransition, type PaymentStatus } from "@/lib/payment-engine/domain";
+import { taxPaymentRejectionSchema } from "@/lib/validation/tax-payment.schema";
 
 // ---------------------------------------------------------------------------
 // Get all payments with trader info
@@ -24,8 +26,10 @@ export async function getAllPayments(filter?: "all" | "pending" | "confirmed" | 
             id: taxPayment.id,
             amount: taxPayment.amount,
             method: taxPayment.method,
+            paymentReference: taxPayment.paymentReference,
             reference: taxPayment.reference,
             status: taxPayment.status,
+            workflowStatus: taxPayment.workflowStatus,
             createdAt: taxPayment.createdAt,
             businessId: taxPayment.businessId,
             businessName: user.businessName,
@@ -74,10 +78,13 @@ export async function getPaymentSummary() {
 // ---------------------------------------------------------------------------
 
 export async function updatePaymentStatus(
-    paymentId: string,
+    input: unknown,
     status: "rejected",
 ) {
     const session = await requireRRAPermission("payments.reconcile");
+    const parsed = taxPaymentRejectionSchema.safeParse(input);
+    if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? "Payment rejection details are invalid.");
+    const { paymentId, reason } = parsed.data;
     await db.transaction(async (tx) => {
         const [payment] = await tx
             .select()
@@ -87,6 +94,7 @@ export async function updatePaymentStatus(
             .limit(1);
         if (!payment) throw new Error("Payment not found.");
         if (payment.status !== "pending") throw new Error("Only pending payments can be reviewed.");
+        assertPaymentTransition(payment.workflowStatus as PaymentStatus, "FAILED");
 
         const [lockedUser] = await tx
             .select({ id: user.id })
@@ -98,7 +106,7 @@ export async function updatePaymentStatus(
 
         const [updated] = await tx
             .update(taxPayment)
-            .set({ status })
+            .set({ status, workflowStatus: "FAILED" })
             .where(and(eq(taxPayment.id, paymentId), eq(taxPayment.status, "pending")))
             .returning({ id: taxPayment.id });
         if (!updated) throw new Error("Payment status changed; review was not applied.");
@@ -115,7 +123,18 @@ export async function updatePaymentStatus(
                 amount: payment.amount,
                 previousStatus: payment.status,
                 status,
+                reason,
             }),
+        });
+
+        await tx.insert(taxPaymentEvent).values({
+            paymentId: payment.id,
+            eventKey: `${payment.id}:rejected:${session.user.id}`,
+            eventType: "PAYMENT_REJECTED",
+            fromStatus: payment.workflowStatus,
+            toStatus: "FAILED",
+            actorUserId: session.user.id,
+            details: { reason },
         });
     });
 

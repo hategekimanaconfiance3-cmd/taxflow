@@ -3,7 +3,7 @@ import { getTaxComplianceStatus } from '@/lib/actions/compliance.action';
 import { TaxPaymentForm } from '@/components/dashboard/tax-payment-form/tax-payment-form';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { formatRWF } from '@/components/dashboard/stat-card/stat-card';
-import { CreditCard, Shield } from 'lucide-react';
+import { Shield, Info } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export default async function PaymentsPage() {
@@ -12,43 +12,27 @@ export default async function PaymentsPage() {
   const compliance = await getTaxComplianceStatus();
 
   const outstanding = Math.max(0, compliance.netOwed - compliance.totalPaid);
-  const barColor =
-    compliance.compliancePct >= 95
-      ? 'bg-emerald-500'
-      : compliance.compliancePct >= 70
-      ? 'bg-amber-500'
-      : 'bg-red-500';
-
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Tax Payments</h1>
         <p className="text-muted-foreground text-sm mt-1">
-          Submit your VAT payments to the Rwanda Revenue Authority.
+          Request settlement review for the full recorded outstanding VAT balance.
         </p>
       </div>
 
-      {/* Compliance summary */}
+      {/* Informational recorded balance, not an official assessment */}
       <Card>
         <CardHeader className="pb-2 pt-3">
           <CardTitle className="text-sm font-semibold flex items-center gap-2">
             <Shield className="h-4 w-4 text-violet-500" />
-            Your Tax Compliance Status
+            Recorded VAT balance
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3 pb-3">
-          <div className="flex items-end gap-4">
-            <div>
-              <p className={cn('text-3xl font-bold', outstanding > 0 ? 'text-red-600' : 'text-emerald-600')}>
-                {compliance.compliancePct.toFixed(0)}%
-              </p>
-              <p className="text-xs text-muted-foreground">compliance rate</p>
-            </div>
-            <div className="flex-1 pb-1.5">
-              <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
-                <div className={cn('h-full rounded-full', barColor)} style={{ width: `${compliance.compliancePct}%` }} />
-              </div>
-            </div>
+          <div className="flex items-start gap-2 rounded-md border bg-muted/30 p-3 text-sm text-muted-foreground">
+            <Info className="mt-0.5 h-4 w-4 shrink-0" />
+            <p>TaxFlow has no period-specific RRA assessment data here, so it cannot calculate a separate compliance score or period payment score. These recorded VAT totals are informational and do not block payment.</p>
           </div>
           <div className="grid grid-cols-3 gap-3 text-xs">
             <div>

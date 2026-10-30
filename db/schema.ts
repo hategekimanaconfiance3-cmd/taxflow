@@ -572,9 +572,11 @@ export const taxPayment = pgTable(
       .references(() => user.id),
     amount: integer('amount').notNull(), // RWF
     method: text('method').notNull(), // "mobile_money", "bank_transfer", "cash"
+    paymentReference: text('payment_reference').notNull().$defaultFn(() => `TF-${crypto.randomUUID()}`),
     reference: text('reference').unique(), // payment reference / receipt number
     idempotencyKey: text('idempotency_key'),
-    status: text('status').default('confirmed').notNull(), // "pending", "confirmed", "rejected"
+    status: text('status').default('pending').notNull(), // legacy compatibility: pending | confirmed | rejected
+    workflowStatus: text('workflow_status').default('AWAITING_CONFIRMATION').notNull(),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at')
       .defaultNow()
@@ -584,8 +586,27 @@ export const taxPayment = pgTable(
   (table) => [
     index('tax_payment_business_idx').on(table.businessId),
     index('tax_payment_status_idx').on(table.status),
+    uniqueIndex('tax_payment_reference_uniq').on(table.paymentReference),
     uniqueIndex('tax_payment_business_idempotency_uniq').on(table.businessId, table.idempotencyKey),
+    check('tax_payment_workflow_status_check', sql`${table.workflowStatus} IN ('DRAFT','ELIGIBILITY_CHECKED','READY_FOR_PAYMENT','PAYMENT_INITIATED','AWAITING_CONFIRMATION','PROVIDER_CONFIRMED','RECONCILIATION_PENDING','PAID','REVIEW_REQUIRED','FAILED','EXPIRED','CANCELLED','REFUND_PENDING','REFUNDED')`),
   ],
+);
+
+/** Append-only event history for the payment state machine; audit_log remains the cross-domain audit trail. */
+export const taxPaymentEvent = pgTable(
+  'tax_payment_event',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    paymentId: text('payment_id').notNull().references(() => taxPayment.id),
+    eventKey: text('event_key').notNull().unique(),
+    eventType: text('event_type').notNull(),
+    fromStatus: text('from_status'),
+    toStatus: text('to_status').notNull(),
+    actorUserId: text('actor_user_id').references(() => user.id),
+    details: jsonb('details').$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [index('tax_payment_event_payment_created_idx').on(table.paymentId, table.createdAt)],
 );
 
 // ---------------------------------------------------------------------------
