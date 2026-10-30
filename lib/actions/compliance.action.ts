@@ -2,17 +2,25 @@
 
 import { eq, desc, sql, and } from 'drizzle-orm';
 import db from '@/db/drizzle';
-import { auditLog, vatRecord, taxPayment, taxPaymentEvent, user } from '@/db/schema';
+import { auditLog, vatRecord, taxObligation, taxObligationAdjustment, taxPayment, taxPaymentEvent, taxPaymentProviderEvent, taxPaymentReceipt, user } from '@/db/schema';
 import { requireTraderSession, requireRRAPermission, requireRRASession } from '@/lib/auth-guard';
 import { createNotification } from '@/lib/notifications';
 import { getSystemConfig } from '@/lib/actions/system-config.action';
-import { taxPaymentReviewSchema, taxPaymentSubmissionSchema } from '@/lib/validation/tax-payment.schema';
+import { simulatedPaymentAuthorizationSchema, simulatedPaymentInitiationSchema, taxPaymentReviewSchema, taxPaymentSubmissionSchema } from '@/lib/validation/tax-payment.schema';
 import { getBusinessComplianceStatus } from '@/lib/compliance-status';
 import { auth } from '@/lib/auth';
 import { headers } from 'next/headers';
 import { assertPaymentTransition, canInitiateTaxPayment, type PaymentStatus } from '@/lib/payment-engine/domain';
+import { amountToMinorUnits } from '@/lib/payment-engine/money';
+import { obligationAdjustmentDelta } from '@/lib/payment-engine/period-score-service';
+import { getSimulatedProvider, type SimulatedProviderName, type SimulationScenario, type SimulatorInitiationResult } from '@/lib/payment-engine/provider';
+import { reconcileProviderCallback } from '@/lib/payment-engine/reconcile';
 
 const CRITICAL_THRESHOLD = 0.8; // 80% — also notify RRA admins
+const simulatedPaymentLifetimeMs = (): number => {
+  const minutes = Number.parseInt(process.env.PAYMENT_SIM_MAX_DURATION_MINUTES ?? '15', 10);
+  return Math.max(1, Math.min(24 * 60, Number.isFinite(minutes) ? minutes : 15)) * 60_000;
+};
 
 // ---------------------------------------------------------------------------
 // Tax Compliance Status — the core compliance check
@@ -32,11 +40,25 @@ export async function getTaxComplianceStatus(userId?: string) {
   return getBusinessComplianceStatus(targetId);
 }
 
+export async function getOwnRecentTaxPayments() {
+  const session = await requireTraderSession();
+  return db.select({
+    id: taxPayment.id, amount: taxPayment.amount, currency: taxPayment.currency,
+    provider: taxPayment.provider, providerReference: taxPayment.providerReference,
+    status: taxPayment.status, workflowStatus: taxPayment.workflowStatus,
+    createdAt: taxPayment.createdAt, receiptNumber: taxPaymentReceipt.receiptNumber,
+  }).from(taxPayment)
+    .leftJoin(taxPaymentReceipt, eq(taxPaymentReceipt.paymentId, taxPayment.id))
+    .where(eq(taxPayment.businessId, session.user.id))
+    .orderBy(desc(taxPayment.createdAt)).limit(20);
+}
+
 // ---------------------------------------------------------------------------
 // Record Tax Payment
 // ---------------------------------------------------------------------------
 
 export async function recordTaxPayment(data: {
+  obligationId: string;
   method: 'mobile_money' | 'bank_transfer' | 'cash';
   reference?: string;
 }, idempotencyKey: string): Promise<typeof taxPayment.$inferSelect> {
@@ -56,29 +78,41 @@ export async function recordTaxPayment(data: {
       .where(and(eq(taxPayment.businessId, session.user.id), eq(taxPayment.idempotencyKey, paymentInput.idempotencyKey)))
       .limit(1);
     if (existingPayment) {
-      if (existingPayment.method !== paymentInput.method || existingPayment.reference !== (paymentInput.reference || null)) {
+      if (existingPayment.obligationId !== paymentInput.obligationId || existingPayment.method !== paymentInput.method || existingPayment.reference !== (paymentInput.reference || null)) {
         throw new Error('This payment request key was already used for different payment details.');
       }
       return existingPayment;
     }
 
-    // This is a recorded VAT balance, not an official RRA assessment. Never
-    // accept an amount from the browser or let the eligibility score block it.
-    const vatResult = await tx.select({
-      vatType: vatRecord.vatType,
-      total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`.as('total'),
-    }).from(vatRecord)
-      .where(and(eq(vatRecord.businessId, session.user.id), eq(vatRecord.isFrozen, false)))
-      .groupBy(vatRecord.vatType);
-    const vatOutput = Number(vatResult.find((row) => row.vatType === 'output')?.total) || 0;
-    const vatInput = Number(vatResult.find((row) => row.vatType === 'input')?.total) || 0;
-    const [paymentResult] = await tx.select({
-      totalPaid: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)::float8`.as('total_paid'),
-    }).from(taxPayment)
-      .where(and(eq(taxPayment.businessId, session.user.id), eq(taxPayment.status, 'confirmed')));
-    const outstanding = Math.max(0, vatOutput - vatInput - (Number(paymentResult?.totalPaid) || 0));
-    if (!canInitiateTaxPayment(outstanding)) {
-      throw new Error('No recorded VAT balance is currently outstanding. Payment request was not created.');
+    const [obligation] = await tx.select().from(taxObligation)
+      .where(and(eq(taxObligation.id, paymentInput.obligationId), eq(taxObligation.taxpayerId, session.user.id)))
+      .for('update').limit(1);
+    if (!obligation || obligation.status !== 'PAYABLE' || !obligation.approvedBy) {
+      throw new Error('Only your finalized and authorized payable tax obligations can be paid.');
+    }
+    if (obligation.currency !== 'RWF') {
+      throw new Error('This payment channel currently supports RWF only. Contact the tax office for another currency.');
+    }
+
+    const adjustments = await tx.select({ kind: taxObligationAdjustment.kind, amount: taxObligationAdjustment.amount })
+      .from(taxObligationAdjustment)
+      .where(and(eq(taxObligationAdjustment.obligationId, obligation.id), eq(taxObligationAdjustment.status, 'APPROVED')));
+    const [paid] = await tx.select({ total: sql<string>`COALESCE(SUM(${taxPayment.amount}),0)::text`.as('total') })
+      .from(taxPayment)
+      .where(and(
+        eq(taxPayment.obligationId, obligation.id),
+        eq(taxPayment.status, 'confirmed'),
+        eq(taxPayment.workflowStatus, 'PAID'),
+      ));
+    let outstandingMinor = amountToMinorUnits(obligation.originalAmount);
+    for (const adjustment of adjustments) outstandingMinor += obligationAdjustmentDelta(adjustment.kind, adjustment.amount);
+    outstandingMinor -= BigInt(paid?.total ?? '0') * BigInt(100);
+    if (outstandingMinor <= BigInt(0) || outstandingMinor % BigInt(100) !== BigInt(0)) {
+      throw new Error('The payable obligation has no whole-RWF outstanding balance. Payment was not created.');
+    }
+    const outstanding = Number(outstandingMinor / BigInt(100));
+    if (!canInitiateTaxPayment(outstanding) || outstanding > 2_147_483_647) {
+      throw new Error('The full obligation exceeds the current payment-record limit. No partial payment was created.');
     }
 
     const [otherPending] = await tx.select({ id: taxPayment.id }).from(taxPayment)
@@ -93,12 +127,14 @@ export async function recordTaxPayment(data: {
       .values({
         businessId: session.user.id,
         amount: outstanding,
+        currency: obligation.currency,
         method: paymentInput.method,
         paymentReference: `TF-${crypto.randomUUID()}`,
         reference: paymentInput.reference || null,
         idempotencyKey: paymentInput.idempotencyKey,
         status: 'pending',
         workflowStatus: 'AWAITING_CONFIRMATION',
+        obligationId: obligation.id,
       })
       .onConflictDoNothing({ target: [taxPayment.businessId, taxPayment.idempotencyKey] })
       .returning();
@@ -110,7 +146,7 @@ export async function recordTaxPayment(data: {
         .where(and(eq(taxPayment.businessId, session.user.id), eq(taxPayment.idempotencyKey, paymentInput.idempotencyKey)))
         .limit(1);
       if (!retryPayment) throw new Error('Payment retry could not be reconciled. Please contact support.');
-      if (retryPayment.method !== paymentInput.method || retryPayment.reference !== (paymentInput.reference || null)) {
+      if (retryPayment.obligationId !== paymentInput.obligationId || retryPayment.method !== paymentInput.method || retryPayment.reference !== (paymentInput.reference || null)) {
         throw new Error('This payment request key was already used for different payment details.');
       }
       return retryPayment;
@@ -134,7 +170,9 @@ export async function recordTaxPayment(data: {
         method: paymentInput.method,
         reference: paymentInput.reference,
         outstandingAtSubmission: outstanding,
-        amountSource: 'server_derived_recorded_vat_balance',
+        obligationId: obligation.id,
+        assessmentReference: obligation.assessmentReference,
+        amountSource: 'server_derived_approved_obligation_balance',
       }),
     });
 
@@ -145,13 +183,139 @@ export async function recordTaxPayment(data: {
       fromStatus: null,
       toStatus: 'AWAITING_CONFIRMATION',
       actorUserId: session.user.id,
-      details: { amount: outstanding, currency: 'RWF', paymentReference: createdPayment.paymentReference, amountSource: 'server_derived_recorded_vat_balance' },
+      details: { amount: outstanding, currency: obligation.currency, obligationId: obligation.id, assessmentReference: obligation.assessmentReference, paymentReference: createdPayment.paymentReference, amountSource: 'server_derived_approved_obligation_balance' },
     });
 
     return createdPayment;
   });
 
   return payment;
+}
+
+/** Initiates a clearly labelled sandbox request. Live MTN, Airtel, and bank adapters are not configured. */
+export async function initiateSimulatedTaxPayment(paymentId: string, providerName: SimulatedProviderName, scenario?: SimulationScenario): Promise<{ provider: SimulatedProviderName; providerReference: string; status: string; responseCode: string }> {
+  const session = await requireTraderSession();
+  const parsed = simulatedPaymentInitiationSchema.safeParse({ paymentId, provider: providerName, scenario });
+  if (!parsed.success) throw new Error('Simulated payment details are invalid.');
+  paymentId = parsed.data.paymentId;
+  providerName = parsed.data.provider;
+  scenario = parsed.data.scenario;
+  if (scenario && (process.env.NODE_ENV === 'production' || process.env.PAYMENT_SIM_ALLOW_SCENARIO_SELECTION !== 'true')) {
+    throw new Error('Scenario selection is restricted to explicitly enabled development and test environments.');
+  }
+  const provider = getSimulatedProvider(providerName);
+  const result = await db.transaction(async (tx) => {
+    const [payment] = await tx.select().from(taxPayment)
+      .where(and(eq(taxPayment.id, paymentId), eq(taxPayment.businessId, session.user.id)))
+      .for('update').limit(1);
+    if (!payment || !payment.obligationId || payment.status !== 'pending' || !['AWAITING_CONFIRMATION', 'PAYMENT_INITIATED'].includes(payment.workflowStatus)) {
+      throw new Error('This payment cannot be initiated.');
+    }
+    if (payment.providerReference) {
+      if (payment.provider !== providerName) throw new Error('A different provider already owns this payment request.');
+      return { provider: providerName, providerReference: payment.providerReference, status: 'pending', responseCode: 'SIM-01' };
+    }
+    let started: SimulatorInitiationResult;
+    try {
+      started = await provider.initiatePayment({ paymentReference: payment.paymentReference, amount: payment.amount, currency: 'RWF', taxpayerReference: session.user.id, obligationId: payment.obligationId, scenario });
+    } catch (error) {
+      const classification = error instanceof Error && error.message === 'SIMULATED_TIMEOUT'
+        ? 'timeout'
+        : error instanceof Error && error.message === 'SIMULATED_PROVIDER_UNAVAILABLE' ? 'provider_unavailable' : 'provider_error';
+      await tx.update(taxPayment).set({
+        provider: providerName, providerRequestReference: payment.paymentReference,
+        lastProviderClassification: classification, nextRetryAt: null, updatedAt: new Date(),
+      }).where(eq(taxPayment.id, payment.id));
+      await tx.insert(taxPaymentProviderEvent).values({
+        paymentId: payment.id, eventKey: `initiation-failure:${payment.id}:${crypto.randomUUID()}`, provider: providerName,
+        eventType: 'PAYMENT_INITIATION_FAILURE', classification, details: { simulated: true },
+      });
+      return { errorMessage: 'The simulated provider did not accept the request. You can retry initiation; the obligation remains unpaid.' };
+    }
+    if (!started.accepted) {
+      const [failed] = await tx.update(taxPayment).set({
+        provider: providerName, providerReference: started.providerReference, providerRequestReference: payment.paymentReference,
+        providerStatus: started.status, simulationScenario: started.scenario, confirmedAmount: null,
+        initiatedAt: new Date(), nextRetryAt: null, retryCount: 0, expiresAt: new Date(Date.now() + simulatedPaymentLifetimeMs()),
+        lastProviderClassification: started.responseCode, callbackProcessingState: 'PROCESSED',
+        workflowStatus: 'FAILED', status: 'rejected', updatedAt: new Date(),
+      }).where(eq(taxPayment.id, payment.id)).returning({ id: taxPayment.id });
+      if (!failed) throw new Error('Payment changed before the provider rejection was recorded.');
+      await tx.insert(taxPaymentEvent).values({
+        paymentId: payment.id, eventKey: `${payment.id}:provider-rejected:${started.providerReference}`,
+        eventType: 'SIMULATED_PROVIDER_REJECTED', fromStatus: payment.workflowStatus, toStatus: 'FAILED',
+        actorUserId: session.user.id, details: { provider: providerName, responseCode: started.responseCode, simulated: true },
+      });
+      await tx.insert(taxPaymentProviderEvent).values({
+        paymentId: payment.id, eventKey: `initiation-response:${started.providerReference}`, provider: providerName,
+        eventType: 'PAYMENT_INITIATION_RESPONSE', classification: started.responseCode,
+        details: { accepted: false, simulated: true, status: started.status },
+      });
+      return { provider: providerName, providerReference: started.providerReference, status: started.status, responseCode: started.responseCode };
+    }
+    const [updated] = await tx.update(taxPayment)
+      .set({
+        provider: providerName, providerReference: started.providerReference, providerRequestReference: payment.paymentReference,
+        providerStatus: 'pending', simulationScenario: started.scenario, confirmedAmount: null,
+        initiatedAt: new Date(), nextRetryAt: new Date(Date.now() + 60_000), retryCount: 0,
+        expiresAt: new Date(Date.now() + simulatedPaymentLifetimeMs()), lastProviderClassification: started.responseCode,
+        callbackProcessingState: 'NONE', workflowStatus: 'PAYMENT_INITIATED', updatedAt: new Date(),
+      })
+      .where(and(eq(taxPayment.id, payment.id), eq(taxPayment.businessId, session.user.id), eq(taxPayment.status, 'pending')))
+      .returning({ id: taxPayment.id });
+    if (!updated) throw new Error('Payment changed before initiation completed.');
+    await tx.insert(taxPaymentEvent).values({
+      paymentId: payment.id, eventKey: `${payment.id}:${providerName}-initiated`, eventType: 'SIMULATED_PAYMENT_INITIATED',
+      fromStatus: payment.workflowStatus, toStatus: 'PAYMENT_INITIATED', actorUserId: session.user.id,
+      details: { provider: providerName, providerReference: started.providerReference, simulated: true, responseCode: started.responseCode },
+    });
+    await tx.insert(taxPaymentProviderEvent).values({
+      paymentId: payment.id, eventKey: `initiation:${providerName}:${payment.id}`, provider: providerName,
+      eventType: 'PAYMENT_INITIATION_RESPONSE', classification: started.responseCode,
+      details: { accepted: started.accepted, simulated: true, status: started.status },
+    });
+    await tx.insert(auditLog).values({
+      userId: session.user.id, action: 'SIMULATED_TAX_PAYMENT_INITIATED', targetType: 'tax_payment', targetId: payment.id,
+      beforeState: { workflowStatus: payment.workflowStatus }, afterState: { workflowStatus: 'PAYMENT_INITIATED' },
+      metadata: JSON.stringify({ provider: providerName, simulated: true }),
+    });
+    return { provider: providerName, providerReference: started.providerReference, status: started.status, responseCode: started.responseCode };
+  });
+  if ('errorMessage' in result) throw new Error(result.errorMessage);
+  return result;
+}
+
+/** Completes the explicit mock authorization step; accepts no PIN or secret from the taxpayer. */
+export async function authorizeSimulatedTaxPayment(paymentId: string): Promise<{ status: string; message: string }> {
+  const session = await requireTraderSession();
+  const parsed = simulatedPaymentAuthorizationSchema.safeParse({ paymentId });
+  if (!parsed.success) throw new Error('Simulated payment reference is invalid.');
+  paymentId = parsed.data.paymentId;
+  const [payment] = await db.select().from(taxPayment)
+    .where(and(eq(taxPayment.id, paymentId), eq(taxPayment.businessId, session.user.id)))
+    .limit(1);
+  if (!payment || !payment.providerReference || !payment.obligationId ||
+    !['mtn_mobile_money', 'airtel_money', 'bank_gateway'].includes(payment.provider ?? '') ||
+    payment.status !== 'pending' || payment.workflowStatus !== 'PAYMENT_INITIATED') {
+    throw new Error('This simulated payment is not awaiting authorization.');
+  }
+  const providerName = payment.provider as SimulatedProviderName;
+  const provider = getSimulatedProvider(providerName);
+  const context = {
+    paymentReference: payment.paymentReference, providerReference: payment.providerReference,
+    taxpayerReference: payment.businessId, obligationId: payment.obligationId,
+    amount: payment.amount, currency: payment.currency,
+  };
+  const scenario = (payment.simulationScenario ?? 'pending') as SimulationScenario;
+  const result = await provider.authorize(context, scenario);
+  await db.insert(taxPaymentProviderEvent).values({
+    paymentId: payment.id, eventKey: `authorization:${payment.id}`, provider: providerName,
+    eventType: 'SIMULATED_AUTHORIZATION_RESULT', classification: result.responseCode,
+    details: { status: result.status, simulated: true, pinCollected: false },
+  }).onConflictDoNothing();
+  const callback = await provider.makeCallback(context, result.status);
+  const reconciled = await reconcileProviderCallback(providerName, callback.body, callback.signature);
+  return { status: reconciled === 'settled' ? 'confirmed' : reconciled, message: result.message };
 }
 
 // ---------------------------------------------------------------------------
@@ -185,8 +349,10 @@ export async function getPendingTaxPaymentsForReview() {
 }
 
 /**
- * Confirm a payment only after an authorized officer independently checks the
- * bank/provider/cash evidence. The evidence reference and reviewer are audited.
+ * Route a payment for exception review. A typed reference is not trusted
+ * settlement evidence, so this action must never mark a payment as paid.
+ * Settlement requires an authenticated provider confirmation or a separate,
+ * auditable evidence-review workflow that is not yet configured.
  */
 export async function verifyTaxPayment(input: unknown) {
   const session = await requireRRAPermission('payments.reconcile');
@@ -206,145 +372,50 @@ export async function verifyTaxPayment(input: unknown) {
     if (existing.status !== 'pending' || !['AWAITING_CONFIRMATION', 'REVIEW_REQUIRED'].includes(existing.workflowStatus)) {
       throw new Error('Only pending payment submissions can be reviewed.');
     }
-
-    const [lockedTrader] = await tx
-      .select({ id: user.id })
-      .from(user)
-      .where(eq(user.id, existing.businessId))
-      .for('update')
-      .limit(1);
-    if (!lockedTrader) throw new Error('Taxpayer account was not found.');
-
-    const vatTotals = await tx
-      .select({
-        vatType: vatRecord.vatType,
-        total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`.as('total'),
-      })
-      .from(vatRecord)
-      .where(and(eq(vatRecord.businessId, existing.businessId), eq(vatRecord.isFrozen, false)))
-      .groupBy(vatRecord.vatType);
-    const outputVat = Number(vatTotals.find((row) => row.vatType === 'output')?.total) || 0;
-    const inputVat = Number(vatTotals.find((row) => row.vatType === 'input')?.total) || 0;
-    const [paidRow] = await tx
-      .select({ total: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)::float8`.as('total') })
-      .from(taxPayment)
-      .where(and(eq(taxPayment.businessId, existing.businessId), eq(taxPayment.status, 'confirmed')));
-    const outstanding = Math.max(0, outputVat - inputVat - (Number(paidRow?.total) || 0));
-    let exceptionReason: string | null = null;
-    if (existing.amount !== outstanding || settledAmount !== existing.amount) {
-      exceptionReason = 'Settlement amount does not match the full current recorded outstanding balance.';
-    } else if ((existing.method === 'cash' && evidenceType !== 'official_cash_receipt')
-      || (existing.method === 'bank_transfer' && evidenceType !== 'bank_settlement')
-      || (existing.method === 'mobile_money' && evidenceType !== 'provider_settlement')) {
-      exceptionReason = 'Evidence type does not match the submitted payment method.';
-    }
-
-    // If the trader submitted a provider reference, it must match the reviewed evidence.
-    if (!exceptionReason && existing.reference && existing.reference.trim() !== evidenceReference) {
-      exceptionReason = 'The evidence reference does not match the reference submitted with this payment.';
+    if (existing.workflowStatus === 'REVIEW_REQUIRED') {
+      return {
+        payment: existing,
+        needsReview: true as const,
+        message: 'This payment is already awaiting independent settlement evidence review.',
+      };
     }
 
     const fromStatus = existing.workflowStatus as PaymentStatus;
-    if (exceptionReason) {
-      if (fromStatus !== 'REVIEW_REQUIRED') assertPaymentTransition(fromStatus, 'REVIEW_REQUIRED');
-      const [flagged] = await tx
-        .update(taxPayment)
-        .set({ workflowStatus: 'REVIEW_REQUIRED', updatedAt: new Date() })
-        .where(and(eq(taxPayment.id, existing.id), eq(taxPayment.status, 'pending')))
-        .returning();
-      if (!flagged) throw new Error('Payment status changed before the exception could be recorded.');
-
-      await tx.insert(taxPaymentEvent).values({
-        paymentId: existing.id,
-        eventKey: `${existing.id}:exception:${crypto.randomUUID()}`,
-        eventType: 'PAYMENT_EXCEPTION_RAISED',
-        fromStatus,
-        toStatus: 'REVIEW_REQUIRED',
-        actorUserId: session.user.id,
-        details: {
-          evidenceType,
-          evidenceReference,
-          reason,
-          settledAmount,
-          expectedAmount: existing.amount,
-          mismatch: exceptionReason,
-          paymentReference: existing.paymentReference,
-        },
-      });
-      await tx.insert(auditLog).values({
-        userId: session.user.id,
-        action: 'TAX_PAYMENT_EXCEPTION_RAISED',
-        targetType: 'tax_payment',
-        targetId: existing.id,
-        beforeState: { workflowStatus: existing.workflowStatus, status: existing.status },
-        afterState: { workflowStatus: flagged.workflowStatus, status: flagged.status },
-        metadata: JSON.stringify({ reason: exceptionReason, reviewReason: reason, evidenceType, evidenceReference, settledAmount, paymentReference: existing.paymentReference }),
-      });
-      return { payment: flagged, needsReview: true as const, message: exceptionReason };
-    }
-
     if (fromStatus !== 'REVIEW_REQUIRED') assertPaymentTransition(fromStatus, 'REVIEW_REQUIRED');
-    assertPaymentTransition('REVIEW_REQUIRED', 'RECONCILIATION_PENDING');
-    assertPaymentTransition('RECONCILIATION_PENDING', 'PAID');
 
-    const [updated] = await tx
+    const [flagged] = await tx
       .update(taxPayment)
-      .set({
-        status: 'confirmed',
-        workflowStatus: 'PAID',
-        reference: existing.reference ?? evidenceReference,
-        updatedAt: new Date(),
-      })
+      .set({ workflowStatus: 'REVIEW_REQUIRED', updatedAt: new Date() })
       .where(and(eq(taxPayment.id, existing.id), eq(taxPayment.status, 'pending')))
       .returning();
+    if (!flagged) throw new Error('Payment status changed before the review case could be recorded.');
 
-    if (!updated) throw new Error('Payment status changed before verification completed.');
-
-    await tx.insert(taxPaymentEvent).values([
-      {
-        paymentId: existing.id,
-        eventKey: `${existing.id}:manual-review:${crypto.randomUUID()}`,
-        eventType: 'MANUAL_EVIDENCE_REVIEWED',
-        fromStatus,
-        toStatus: 'REVIEW_REQUIRED',
-        actorUserId: session.user.id,
-        details: { evidenceType, evidenceReference, reason, paymentReference: existing.paymentReference },
+    const reviewReason = 'Reference recorded for review, but no authenticated provider or independently stored evidence can confirm settlement.';
+    await tx.insert(taxPaymentEvent).values({
+      paymentId: existing.id,
+      eventKey: `${existing.id}:exception:${crypto.randomUUID()}`,
+      eventType: 'PAYMENT_EXCEPTION_RAISED',
+      fromStatus,
+      toStatus: 'REVIEW_REQUIRED',
+      actorUserId: session.user.id,
+      details: {
+        evidenceType,
+        evidenceReference,
+        reason,
+        settledAmount,
+        expectedAmount: existing.amount,
+        reviewReason,
+        paymentReference: existing.paymentReference,
       },
-      {
-        paymentId: existing.id,
-        eventKey: `${existing.id}:reconciliation:${crypto.randomUUID()}`,
-        eventType: 'SETTLEMENT_RECONCILED',
-        fromStatus: 'REVIEW_REQUIRED',
-        toStatus: 'RECONCILIATION_PENDING',
-        actorUserId: session.user.id,
-        details: { evidenceType, evidenceReference, settledAmount, currency: 'RWF', paymentReference: existing.paymentReference },
-      },
-      {
-        paymentId: existing.id,
-        eventKey: `${existing.id}:paid:${crypto.randomUUID()}`,
-        eventType: 'TAX_PAYMENT_RECONCILED',
-        fromStatus: 'RECONCILIATION_PENDING',
-        toStatus: 'PAID',
-        actorUserId: session.user.id,
-        details: { evidenceType, evidenceReference, reason, settledAmount, currency: 'RWF', paymentReference: existing.paymentReference },
-      },
-    ]);
+    });
 
     await tx.insert(auditLog).values({
       userId: session.user.id,
-      action: 'TAX_PAYMENT_VERIFIED',
+      action: 'TAX_PAYMENT_EXCEPTION_RAISED',
       targetType: 'tax_payment',
       targetId: existing.id,
-      beforeState: {
-        status: existing.status,
-        amount: existing.amount,
-        reference: existing.reference,
-      },
-      afterState: {
-        status: updated.status,
-        amount: updated.amount,
-        reference: updated.reference,
-      },
+      beforeState: { status: existing.status, workflowStatus: existing.workflowStatus },
+      afterState: { status: flagged.status, workflowStatus: flagged.workflowStatus },
       metadata: JSON.stringify({
         traderId: existing.businessId,
         method: existing.method,
@@ -354,16 +425,15 @@ export async function verifyTaxPayment(input: unknown) {
         settledAmount,
         paymentReference: existing.paymentReference,
         reviewerUserId: session.user.id,
-        verificationMode: 'manual_authorized_review',
+        verificationMode: 'manual_exception_review_only',
+        reviewReason,
       }),
     });
 
-    return { payment: updated, needsReview: false as const, message: null };
+    return { payment: flagged, needsReview: true as const, message: reviewReason };
   });
 
-  return verificationResult.needsReview
-    ? { success: false, needsReview: true, message: verificationResult.message, payment: verificationResult.payment }
-    : { success: true, payment: verificationResult.payment };
+  return { success: false, needsReview: true, message: verificationResult.message, payment: verificationResult.payment };
 }
 
 // ---------------------------------------------------------------------------

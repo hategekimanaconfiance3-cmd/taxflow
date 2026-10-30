@@ -22,8 +22,8 @@ import { staffAccountSchema, staffAssignmentRoleSchema, staffRoleSchema, staffRo
 // Role catalogue
 // ---------------------------------------------------------------------------
 
-test("exactly 9 proposed RRA roles are defined in the expected order", () => {
-    assert.equal(RRA_ROLE_OPTIONS.length, 9);
+test("proposed RRA roles include dedicated assessment and rule governance roles", () => {
+    assert.equal(RRA_ROLE_OPTIONS.length, 13);
     assert.deepEqual(RRA_ROLE_OPTIONS.map((r) => r.value), [
         "super_admin",
         "director_executive",
@@ -32,6 +32,10 @@ test("exactly 9 proposed RRA roles are defined in the expected order", () => {
         "product_traceability_officer",
         "customs_import_officer",
         "payments_reconciliation_officer",
+        "tax_assessment_officer",
+        "tax_assessment_approver",
+        "tax_compliance_rule_governor",
+        "tax_compliance_rule_approver",
         "data_ai_analyst",
         "stock_control_admin",
     ]);
@@ -46,6 +50,10 @@ test("all role values (proposed + legacy) are accessible via RRA_ROLE_VALUES", (
         "product_traceability_officer",
         "customs_import_officer",
         "payments_reconciliation_officer",
+        "tax_assessment_officer",
+        "tax_assessment_approver",
+        "tax_compliance_rule_governor",
+        "tax_compliance_rule_approver",
         "data_ai_analyst",
         "stock_control_admin",
         "compliance_officer",
@@ -90,6 +98,12 @@ test("super_admin has explicit permissions without inheriting manufacturing oper
         "production.material.receipt.review",
         "production.batch.review",
         "production.material.adjust",
+        "tax.assessment.create",
+        "tax.assessment.approve",
+        "tax.adjustment.propose",
+        "tax.adjustment.approve",
+        "tax.compliance.rules.create",
+        "tax.compliance.rules.approve",
     ]);
     for (const perm of RRA_PERMISSIONS) {
         if (excluded.has(perm)) continue;
@@ -146,6 +160,20 @@ test("payments_reconciliation_officer: payments read and reconcile", () => {
     assert.ok(hasRRAPermission("payments_reconciliation_officer", "payments.read"));
     assert.ok(hasRRAPermission("payments_reconciliation_officer", "payments.reconcile"));
     assert.ok(hasRRAPermission("payments_reconciliation_officer", "ai.assistant.use"));
+});
+
+test("assessment and compliance-rule roles have separate least-privilege authority", () => {
+    assert.ok(hasRRAPermission("tax_assessment_officer", "tax.assessment.create"));
+    assert.ok(hasRRAPermission("tax_assessment_officer", "tax.adjustment.propose"));
+    assert.equal(hasRRAPermission("tax_assessment_officer", "tax.assessment.approve"), false);
+    assert.ok(hasRRAPermission("tax_assessment_approver", "tax.assessment.approve"));
+    assert.ok(hasRRAPermission("tax_assessment_approver", "tax.adjustment.approve"));
+    assert.equal(hasRRAPermission("tax_assessment_approver", "tax.assessment.create"), false);
+    assert.ok(hasRRAPermission("tax_compliance_rule_governor", "tax.compliance.rules.create"));
+    assert.equal(hasRRAPermission("tax_compliance_rule_governor", "tax.compliance.rules.approve"), false);
+    assert.ok(hasRRAPermission("tax_compliance_rule_approver", "tax.compliance.rules.approve"));
+    assert.equal(hasRRAPermission("super_admin", "tax.assessment.create"), false);
+    assert.equal(hasRRAPermission("super_admin", "tax.assessment.approve"), false);
 });
 
 test("data_ai_analyst: analytics, AI findings, data quality, feedback review", () => {
@@ -308,7 +336,7 @@ test("direct role match always succeeds regardless of aliases", () => {
 // Staff account creation schema — only proposed roles accepted
 // ---------------------------------------------------------------------------
 
-test("new staff accounts can only be assigned one of the 9 proposed roles", () => {
+test("new staff accounts can only be assigned proposed roles", () => {
     for (const role of RRA_ROLE_OPTIONS) {
         assert.ok(
             staffAssignmentRoleSchema.safeParse(role.value).success,

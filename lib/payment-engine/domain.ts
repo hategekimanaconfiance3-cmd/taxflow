@@ -113,7 +113,37 @@ export interface ProviderCallback {
   amount: number;
   currency: string;
   payerReference?: string;
-  outcome: 'success' | 'failed' | 'pending';
+  outcome: 'success' | 'failed' | 'pending' | 'expired';
+}
+
+export type PeriodPaymentScore =
+  | { state: 'AVAILABLE'; score: number; netObligation: string; confirmedPayments: string; outstandingAmount: string }
+  | { state: 'NO_OBLIGATION'; score: null; netObligation: '0.00'; confirmedPayments: string; outstandingAmount: '0.00' }
+  | { state: 'INSUFFICIENT_DATA'; score: null; reason: string };
+
+/** Uses exact decimal strings and returns no fabricated score for a zero/missing denominator. */
+export function calculatePeriodPaymentScore(
+  netObligation: string | null,
+  confirmedPayments: string | null,
+): PeriodPaymentScore {
+  if (netObligation === null || confirmedPayments === null) {
+    return { state: 'INSUFFICIENT_DATA', score: null, reason: 'A finalized, approved obligation or reconciled payment total is missing.' };
+  }
+  const parse = (value: string): bigint | null => {
+    if (!/^\d{1,18}(?:\.\d{1,2})?$/.test(value)) return null;
+    const [whole, fraction = ''] = value.split('.');
+    return BigInt(whole) * BigInt(100) + BigInt(fraction.padEnd(2, '0'));
+  };
+  const net = parse(netObligation);
+  const paid = parse(confirmedPayments);
+  if (net === null || paid === null) return { state: 'INSUFFICIENT_DATA', score: null, reason: 'Amounts are invalid.' };
+  if (net === BigInt(0)) {
+    return { state: 'NO_OBLIGATION', score: null, netObligation: '0.00', confirmedPayments, outstandingAmount: '0.00' };
+  }
+  const outstanding = net > paid ? net - paid : BigInt(0);
+  const score = Number((paid * BigInt(1_000_000)) / net) / 10_000;
+  const format = (value: bigint) => `${value / BigInt(100)}.${(value % BigInt(100)).toString().padStart(2, '0')}`;
+  return { state: 'AVAILABLE', score, netObligation: format(net), confirmedPayments: format(paid), outstandingAmount: format(outstanding) };
 }
 
 /** Adapter contract only: a production adapter must verify its documented provider signature. */

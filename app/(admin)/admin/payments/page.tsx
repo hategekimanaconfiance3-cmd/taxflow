@@ -23,7 +23,7 @@ export default async function AdminPaymentsPage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Revenue Payments</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Review submissions, verify settlement evidence, and inspect the payment history.
+          Inspect payment submissions and record exceptions. No payment provider is configured, so this page cannot verify or settle submissions.
         </p>
       </div>
 
@@ -36,9 +36,9 @@ export default async function AdminPaymentsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base"><ShieldCheck className="h-4 w-4" /> Payment verification queue</CardTitle>
+          <CardTitle className="flex items-center gap-2 text-base"><ShieldCheck className="h-4 w-4" /> Payment exception queue</CardTitle>
           <CardDescription>
-            A payment stays pending until an authorized reviewer checks independent settlement evidence. Confirmation and evidence are written to the append-only audit log.
+            A typed reference is not trusted settlement evidence. Staff may record exception details, but this build will not mark a submission paid without a verified provider callback or configured evidence review.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -46,7 +46,7 @@ export default async function AdminPaymentsPage() {
             <PaymentReviewQueue payments={pending} />
           ) : (
             <p className="rounded-lg border p-4 text-sm text-muted-foreground">
-              You can view payment records, but your current role cannot verify settlement. Contact an authorized compliance or audit officer.
+              You can view payment records, but your current role cannot record exception details. Contact an authorized payment reconciliation officer.
             </p>
           )}
         </CardContent>

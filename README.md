@@ -91,3 +91,8 @@ The GitHub Actions quality workflow is intended to run the same checks for pull 
 - [Tax engine](lib/intelligence/tax-engine.ts)
 - [Explainable risk rules](lib/intelligence/risk-rules.ts)
 - [Supply-chain reconciliation helpers](lib/intelligence/reconciliation.ts)
+# Simulated payment polling (development only)
+
+Copy `.env.simulation.example` to a local ignored environment file and set `PAYMENT_PROVIDER_MODE=simulation`. All three adapters and their `.taxflow.invalid` endpoints are simulations; they do not contact payment networks or move money. Production mode rejects these adapters.
+
+Pending requests are stored in PostgreSQL. A scheduler can trigger `POST /api/payments/poll` with `Authorization: Bearer <PAYMENT_POLL_CRON_SECRET>`; the endpoint claims due rows with `FOR UPDATE SKIP LOCKED`, records the attempt, and schedules bounded exponential retries. The repository does not currently configure a hosted cron provider, so a local scheduler or explicitly configured deployment scheduler must call it. Do not configure simulated provider credentials or enable simulation mode in production.

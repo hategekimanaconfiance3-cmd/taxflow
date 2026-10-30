@@ -52,7 +52,7 @@ export function PaymentReviewQueue({ payments }: { payments: PendingPaymentRevie
         reason: reason[payment.id] ?? "",
       });
       if (result.needsReview) {
-        setMessage({ id: payment.id, kind: "error", text: `Payment remains pending and was routed to exception review: ${result.message}` });
+        setMessage({ id: payment.id, kind: "success", text: `Settlement was not confirmed. The payment remains pending: ${result.message}` });
       } else {
         setMessage({ id: payment.id, kind: "success", text: "Payment verified and audit record created." });
       }
@@ -73,7 +73,7 @@ export function PaymentReviewQueue({ payments }: { payments: PendingPaymentRevie
       <div className="rounded-lg border p-8 text-center">
         <CheckCircle2 className="mx-auto h-8 w-8 text-emerald-600" />
         <p className="mt-3 font-medium">No pending payment submissions</p>
-        <p className="mt-1 text-sm text-muted-foreground">New submissions will appear here until an authorized officer verifies them.</p>
+        <p className="mt-1 text-sm text-muted-foreground">New requests appear here until trusted settlement verification is configured.</p>
       </div>
     );
   }
@@ -99,7 +99,7 @@ export function PaymentReviewQueue({ payments }: { payments: PendingPaymentRevie
               <p className="mt-1 text-xs text-muted-foreground">Submission reference: {payment.reference || "Not provided"}</p>
             </div>
             <div className="rounded-lg bg-muted/50 p-3 text-xs text-muted-foreground sm:max-w-56">
-              Verify the payment against independent provider, bank, or official cash-receipt evidence before confirming it.
+              TaxFlow cannot verify a typed reference. Record the external evidence details for follow-up; this action will not settle the payment.
             </div>
           </div>
 
@@ -145,13 +145,17 @@ export function PaymentReviewQueue({ payments }: { payments: PendingPaymentRevie
               aria-label={`Review reason for payment ${payment.id}`}
               disabled={busyId !== null}
             />
-            <Button type="submit" disabled={busyId !== null} className="shrink-0">
-              {busyId === payment.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}
-              {payment.workflowStatus === "REVIEW_REQUIRED" ? "Recheck settlement" : "Verify settlement"}
-            </Button>
+            {payment.workflowStatus === "REVIEW_REQUIRED" ? (
+              <Button type="button" disabled className="shrink-0">Awaiting trusted verification</Button>
+            ) : (
+              <Button type="submit" disabled={busyId !== null} className="shrink-0">
+                {busyId === payment.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}
+                Record exception details
+              </Button>
+            )}
           </div>
           <p className="mt-2 text-xs text-muted-foreground">
-            Verify against the provider or bank settlement record. A taxpayer screenshot alone is not settlement evidence.
+            A screenshot or text reference cannot settle a payment. Only a trusted authenticated provider confirmation can mark the obligation paid.
           </p>
           </form>
           {message?.id === payment.id && (

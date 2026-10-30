@@ -6,11 +6,35 @@ import {
   assertPaymentTransition,
   calculateThresholdScore,
   canInitiateTaxPayment,
+  calculatePeriodPaymentScore,
   evaluateGatedPaymentEligibility,
   meetsEligibilityThreshold,
   validateProviderCallback,
   verifyProviderAmount,
 } from '../lib/payment-engine/domain';
+import { amountIsWholeUnit, amountToMinorUnits, minorUnitsToAmount } from '../lib/payment-engine/money';
+
+test('money helpers use exact minor units and reject malformed or negative values', () => {
+  const exactMinorUnits = BigInt('100000000000000025');
+  assert.equal(amountToMinorUnits('1000000000000000.25'), exactMinorUnits);
+  assert.equal(minorUnitsToAmount(exactMinorUnits), '1000000000000000.25');
+  assert.equal(amountIsWholeUnit('1200.00'), true);
+  assert.equal(amountIsWholeUnit('1200.01'), false);
+  assert.throws(() => amountToMinorUnits('-1.00'));
+  assert.throws(() => amountToMinorUnits('1.001'));
+});
+
+test('period score counts only supplied confirmed totals, handles zero obligations and missing data explicitly', () => {
+  assert.deepEqual(calculatePeriodPaymentScore('100.00', '95.00'), {
+    state: 'AVAILABLE', score: 95, netObligation: '100.00', confirmedPayments: '95.00', outstandingAmount: '5.00',
+  });
+  assert.equal(calculatePeriodPaymentScore('0.00', '0.00').state, 'NO_OBLIGATION');
+  assert.equal(calculatePeriodPaymentScore(null, '10.00').state, 'INSUFFICIENT_DATA');
+  const overpaid = calculatePeriodPaymentScore('100.00', '110.00');
+  assert.equal(overpaid.state, 'AVAILABLE');
+  if (overpaid.state !== 'AVAILABLE') assert.fail('Expected an available score');
+  assert.equal(overpaid.outstandingAmount, '0.00');
+});
 
 test('95 percent threshold is evaluated separately and insufficient assessments stay unknown', () => {
   const atThreshold = calculateThresholdScore(95, 100);

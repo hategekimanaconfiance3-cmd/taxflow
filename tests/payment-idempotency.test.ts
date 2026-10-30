@@ -24,6 +24,7 @@ const databaseSkipReason = 'Requires TEST_DATABASE_URL pointing to a disposable 
 
 test('payment submission requires a UUID idempotency key and rejects client amount manipulation', () => {
   const valid = taxPaymentSubmissionSchema.safeParse({
+    obligationId: randomUUID(),
     method: 'mobile_money',
     reference: 'receipt-123',
     idempotencyKey: randomUUID(),
@@ -33,7 +34,7 @@ test('payment submission requires a UUID idempotency key and rejects client amou
     method: 'cash',
     idempotencyKey: randomUUID(),
   });
-  const invalid = taxPaymentSubmissionSchema.safeParse({ method: 'cash', idempotencyKey: 'not-a-uuid' });
+  const invalid = taxPaymentSubmissionSchema.safeParse({ obligationId: randomUUID(), method: 'cash', idempotencyKey: 'not-a-uuid' });
 
   assert.equal(valid.success, true);
   assert.equal(manipulatedAmount.success, false);

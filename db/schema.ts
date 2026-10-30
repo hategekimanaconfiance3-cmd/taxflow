@@ -1,5 +1,5 @@
 import { relations, sql } from 'drizzle-orm';
-import { pgTable, text, timestamp, boolean, integer, real, jsonb, index, uniqueIndex, bigint, check, numeric } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, boolean, integer, real, jsonb, index, uniqueIndex, bigint, check, numeric, foreignKey } from 'drizzle-orm/pg-core';
 
 // auth models
 
@@ -558,6 +558,52 @@ export const vatRecord = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+/** An assessment is payable only after an independent approver authorizes it. */
+export const taxObligation = pgTable(
+  'tax_obligation',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    taxpayerId: text('taxpayer_id').notNull().references(() => user.id),
+    taxType: text('tax_type').notNull(),
+    periodKey: text('period_key').notNull(),
+    assessmentReference: text('assessment_reference'),
+    assessmentSource: text('assessment_source').notNull(),
+    taxRuleVersion: text('tax_rule_version'),
+    calculationExplanation: jsonb('calculation_explanation').$type<Record<string, unknown>>(),
+    assessmentDate: timestamp('assessment_date').notNull(),
+    dueDate: timestamp('due_date'),
+    originalAmount: numeric('original_amount', { precision: 20, scale: 2 }).notNull(),
+    currency: text('currency').notNull().default('RWF'),
+    status: text('status').notNull().default('FINALIZED'),
+    supportingEvidenceReference: text('supporting_evidence_reference').notNull(),
+    sourcePayloadHash: text('source_payload_hash'),
+    createdBy: text('created_by').notNull().references(() => user.id),
+    finalizedBy: text('finalized_by').notNull().references(() => user.id),
+    finalizedAt: timestamp('finalized_at').notNull().defaultNow(),
+    approvedBy: text('approved_by').references(() => user.id),
+    approvedAt: timestamp('approved_at'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().$onUpdate(() => new Date()).notNull(),
+  },
+  (table) => [
+    index('tax_obligation_taxpayer_period_idx').on(table.taxpayerId, table.taxType, table.periodKey),
+    index('tax_obligation_status_due_idx').on(table.status, table.dueDate),
+    uniqueIndex('tax_obligation_taxpayer_id_id_uniq').on(table.taxpayerId, table.id),
+    uniqueIndex('tax_obligation_official_reference_uniq').on(table.assessmentReference),
+    check('tax_obligation_source_check', sql`${table.assessmentSource} IN ('OFFICIAL_RRA','TAXFLOW_CALCULATED')`),
+    check('tax_obligation_status_check', sql`${table.status} IN ('DRAFT','ESTIMATED','FINALIZED','DISPUTED','CANCELLED','PAYABLE','PAID','CLOSED_ZERO_BALANCE')`),
+    check('tax_obligation_amount_check', sql`${table.originalAmount} > 0`),
+    check('tax_obligation_tax_type_check', sql`length(trim(${table.taxType})) BETWEEN 1 AND 80`),
+    check('tax_obligation_period_check', sql`length(trim(${table.periodKey})) BETWEEN 1 AND 32`),
+    check('tax_obligation_evidence_check', sql`length(trim(${table.supportingEvidenceReference})) BETWEEN 1 AND 500`),
+    check('tax_obligation_currency_check', sql`${table.currency} ~ '^[A-Z]{3}$'`),
+    check('tax_obligation_source_reference_check', sql`(${table.assessmentSource} = 'OFFICIAL_RRA' AND ${table.assessmentReference} IS NOT NULL AND length(trim(${table.assessmentReference})) > 0) OR (${table.assessmentSource} = 'TAXFLOW_CALCULATED' AND ${table.taxRuleVersion} IS NOT NULL AND ${table.status} IN ('DRAFT','ESTIMATED'))`),
+    check('tax_obligation_approval_pair_check', sql`(${table.approvedBy} IS NULL) = (${table.approvedAt} IS NULL)`),
+    check('tax_obligation_payable_requires_approval_check', sql`${table.status} NOT IN ('PAYABLE','PAID') OR ${table.approvedBy} IS NOT NULL`),
+  ],
+);
+
+
 // Tax Payments — actual payments made to RRA
 // ---------------------------------------------------------------------------
 
@@ -571,12 +617,27 @@ export const taxPayment = pgTable(
       .notNull()
       .references(() => user.id),
     amount: integer('amount').notNull(), // RWF
+    currency: text('currency').notNull().default('RWF'),
     method: text('method').notNull(), // "mobile_money", "bank_transfer", "cash"
     paymentReference: text('payment_reference').notNull().$defaultFn(() => `TF-${crypto.randomUUID()}`),
     reference: text('reference').unique(), // payment reference / receipt number
     idempotencyKey: text('idempotency_key'),
     status: text('status').default('pending').notNull(), // legacy compatibility: pending | confirmed | rejected
     workflowStatus: text('workflow_status').default('AWAITING_CONFIRMATION').notNull(),
+    obligationId: text('obligation_id').references(() => taxObligation.id),
+    provider: text('provider'),
+    providerReference: text('provider_reference'),
+    providerRequestReference: text('provider_request_reference'),
+    providerStatus: text('provider_status'),
+    simulationScenario: text('simulation_scenario'),
+    confirmedAmount: integer('confirmed_amount'),
+    initiatedAt: timestamp('initiated_at'),
+    lastStatusCheckedAt: timestamp('last_status_checked_at'),
+    nextRetryAt: timestamp('next_retry_at'),
+    retryCount: integer('retry_count').notNull().default(0),
+    expiresAt: timestamp('expires_at'),
+    lastProviderClassification: text('last_provider_classification'),
+    callbackProcessingState: text('callback_processing_state').notNull().default('NONE'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at')
       .defaultNow()
@@ -588,7 +649,132 @@ export const taxPayment = pgTable(
     index('tax_payment_status_idx').on(table.status),
     uniqueIndex('tax_payment_reference_uniq').on(table.paymentReference),
     uniqueIndex('tax_payment_business_idempotency_uniq').on(table.businessId, table.idempotencyKey),
+    index('tax_payment_obligation_id_idx').on(table.obligationId),
+    uniqueIndex('tax_payment_provider_reference_uniq').on(table.provider, table.providerReference),
+    uniqueIndex('tax_payment_provider_request_reference_uniq').on(table.provider, table.providerRequestReference),
+    foreignKey({
+      name: 'tax_payment_obligation_taxpayer_fkey',
+      columns: [table.businessId, table.obligationId],
+      foreignColumns: [taxObligation.taxpayerId, taxObligation.id],
+    }),
     check('tax_payment_workflow_status_check', sql`${table.workflowStatus} IN ('DRAFT','ELIGIBILITY_CHECKED','READY_FOR_PAYMENT','PAYMENT_INITIATED','AWAITING_CONFIRMATION','PROVIDER_CONFIRMED','RECONCILIATION_PENDING','PAID','REVIEW_REQUIRED','FAILED','EXPIRED','CANCELLED','REFUND_PENDING','REFUNDED')`),
+    check('tax_payment_provider_status_check', sql`${table.providerStatus} IS NULL OR ${table.providerStatus} IN ('pending','success','failed','expired')`),
+    check('tax_payment_simulation_scenario_check', sql`${table.simulationScenario} IS NULL OR ${table.simulationScenario} IN ('success','pending','rejected','insufficient_funds','invalid_payer','timeout','unavailable','delayed','expired')`),
+    check('tax_payment_confirmed_amount_check', sql`${table.confirmedAmount} IS NULL OR ${table.confirmedAmount} > 0`),
+    check('tax_payment_callback_state_check', sql`${table.callbackProcessingState} IN ('NONE','RECEIVED','AUTHENTICATED','REJECTED','PROCESSED')`),
+    check('tax_payment_retry_count_check', sql`${table.retryCount} >= 0`),
+  ],
+);
+
+/** Unique immutable receipt issued only after verified provider settlement. */
+export const taxPaymentReceipt = pgTable(
+  'tax_payment_receipt',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    paymentId: text('payment_id').notNull().unique().references(() => taxPayment.id),
+    receiptNumber: text('receipt_number').notNull().unique(),
+    taxpayerId: text('taxpayer_id').notNull().references(() => user.id),
+    taxpayerName: text('taxpayer_name').notNull(),
+    obligationId: text('obligation_id').notNull().references(() => taxObligation.id),
+    taxType: text('tax_type').notNull(),
+    periodKey: text('period_key').notNull(),
+    assessmentReference: text('assessment_reference'),
+    amount: integer('amount').notNull(),
+    currency: text('currency').notNull(),
+    provider: text('provider').notNull(),
+    issuedAt: timestamp('issued_at').notNull().defaultNow(),
+    providerReference: text('provider_reference').notNull(),
+    verificationStatus: text('verification_status').notNull().default('VERIFIED'),
+  },
+  (table) => [
+    index('tax_payment_receipt_taxpayer_issued_idx').on(table.taxpayerId, table.issuedAt),
+    check('tax_payment_receipt_amount_positive_check', sql`${table.amount} > 0`),
+    check('tax_payment_receipt_verified_check', sql`${table.verificationStatus} = 'VERIFIED'`),
+  ],
+);
+
+/** Append-only provider processing history; payloads contain classifications, never credentials. */
+export const taxPaymentProviderEvent = pgTable(
+  'tax_payment_provider_event',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    paymentId: text('payment_id').notNull().references(() => taxPayment.id),
+    eventKey: text('event_key').notNull().unique(),
+    provider: text('provider').notNull(),
+    eventType: text('event_type').notNull(),
+    classification: text('classification'),
+    details: jsonb('details').$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('tax_payment_provider_event_payment_created_idx').on(table.paymentId, table.createdAt),
+    check('tax_payment_provider_event_provider_check', sql`${table.provider} IN ('mtn_mobile_money','airtel_money','bank_gateway')`),
+  ],
+);
+
+/** Corrections never overwrite the original assessment. Only independently approved rows affect net due. */
+export const taxObligationAdjustment = pgTable(
+  'tax_obligation_adjustment',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    obligationId: text('obligation_id').notNull().references(() => taxObligation.id),
+    kind: text('kind').notNull(),
+    amount: numeric('amount', { precision: 20, scale: 2 }).notNull(),
+    reason: text('reason').notNull(),
+    evidenceReference: text('evidence_reference').notNull(),
+    status: text('status').notNull().default('PROPOSED'),
+    createdBy: text('created_by').notNull().references(() => user.id),
+    approvedBy: text('approved_by').references(() => user.id),
+    approvedAt: timestamp('approved_at'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('tax_obligation_adjustment_obligation_status_idx').on(table.obligationId, table.status),
+    check('tax_obligation_adjustment_kind_check', sql`${table.kind} IN ('INCREASE','DECREASE','CREDIT','EXEMPTION')`),
+    check('tax_obligation_adjustment_status_check', sql`${table.status} IN ('PROPOSED','APPROVED','REJECTED')`),
+    check('tax_obligation_adjustment_amount_check', sql`${table.amount} > 0`),
+    check('tax_obligation_adjustment_approval_pair_check', sql`(${table.approvedBy} IS NULL) = (${table.approvedAt} IS NULL)`),
+  ],
+);
+
+/** Immutable obligation state and adjustment audit history. */
+export const taxObligationEvent = pgTable(
+  'tax_obligation_event',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    obligationId: text('obligation_id').notNull().references(() => taxObligation.id),
+    eventKey: text('event_key').notNull().unique(),
+    eventType: text('event_type').notNull(),
+    fromStatus: text('from_status'),
+    toStatus: text('to_status').notNull(),
+    actorUserId: text('actor_user_id').references(() => user.id),
+    details: jsonb('details').$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [index('tax_obligation_event_created_idx').on(table.obligationId, table.createdAt)],
+);
+
+/** Append-only score snapshots; zero obligations are represented without inventing a percentage. */
+export const taxPeriodPaymentScoreSnapshot = pgTable(
+  'tax_period_payment_score_snapshot',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    taxpayerId: text('taxpayer_id').notNull().references(() => user.id),
+    taxType: text('tax_type').notNull(),
+    periodKey: text('period_key').notNull(),
+    currency: text('currency').notNull(),
+    state: text('state').notNull(),
+    netObligation: numeric('net_obligation', { precision: 20, scale: 2 }),
+    confirmedPayments: numeric('confirmed_payments', { precision: 20, scale: 2 }),
+    outstandingAmount: numeric('outstanding_amount', { precision: 20, scale: 2 }),
+    score: numeric('score', { precision: 20, scale: 4 }),
+    calculatedAt: timestamp('calculated_at').defaultNow().notNull(),
+    explanation: jsonb('explanation').$type<Record<string, unknown>>().notNull().default({}),
+  },
+  (table) => [
+    index('tax_period_payment_score_owner_idx').on(table.taxpayerId, table.periodKey, table.taxType, table.currency, table.calculatedAt),
+    check('tax_period_payment_score_state_check', sql`${table.state} IN ('AVAILABLE','NO_OBLIGATION','INSUFFICIENT_DATA')`),
+    check('tax_period_payment_score_values_check', sql`(${table.state} = 'AVAILABLE' AND ${table.netObligation} > 0 AND ${table.confirmedPayments} >= 0 AND ${table.outstandingAmount} >= 0 AND ${table.score} IS NOT NULL) OR (${table.state} <> 'AVAILABLE' AND ${table.score} IS NULL)`),
   ],
 );
 
