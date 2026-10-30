@@ -51,6 +51,14 @@ test('recipe versions validate bounded materials, unique names, output, and tole
   assert.equal(productionRecipeSchema.safeParse({ ...valid, materials: [...valid.materials, { name: ' base OIL ', unit: 'kg', quantity: 2 }] }).success, false);
   assert.equal(productionRecipeSchema.safeParse({ ...valid, yieldToleranceBasisPoints: 10_001 }).success, false);
   assert.equal(productionRecipeSchema.safeParse({ ...valid, materials: [{ name: 'x', unit: 'kg', quantity: 0 }] }).success, false);
+  assert.equal(productionRecipeSchema.safeParse({
+    ...valid,
+    materials: [{ name: 'x', unit: 'kg', quantity: 2, consumptionToleranceBasisPoints: 1_250 }],
+  }).success, true);
+  assert.equal(productionRecipeSchema.safeParse({
+    ...valid,
+    materials: [{ name: 'x', unit: 'kg', quantity: 2, consumptionToleranceBasisPoints: 10_001 }],
+  }).success, false);
 });
 
 test('production recipe usage requires a complete unique line set', () => {

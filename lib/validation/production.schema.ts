@@ -88,6 +88,7 @@ const recipeMaterialInputSchema = z.object({
   name: z.string().trim().min(1).max(120),
   unit: z.string().trim().min(1).max(32),
   quantity: z.number().finite().positive().max(1_000_000_000),
+  consumptionToleranceBasisPoints: z.number().int().min(0).max(10_000).nullable().optional(),
 });
 
 export const productionRecipeSchema = z.object({

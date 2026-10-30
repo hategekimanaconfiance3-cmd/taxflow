@@ -13,6 +13,7 @@ import {
   productionMaterialPlan,
   productionMaterialPlanLine,
   productionMaterialReceipt,
+  productionHistoryComparison,
   productionRecipe,
   productionRecipeMaterial,
   product,
@@ -39,12 +40,51 @@ import type {
   productionMaterialReceiptSchema,
 } from '@/lib/validation/production.schema';
 import type { z } from 'zod';
+import { z as zod } from 'zod';
 
 type PlanInput = z.infer<typeof productionMaterialPlanSchema>;
 type ReceiptInput = z.infer<typeof productionMaterialReceiptSchema>;
 type ReceiptReviewInput = z.infer<typeof productionMaterialReceiptReviewSchema>;
 type BatchReviewInput = z.infer<typeof productionBatchMaterialReviewSchema>;
 type AdjustmentInput = z.infer<typeof productionMaterialAdjustmentSchema>;
+
+const storedComparisonSchema = zod.object({
+  comparisonAt: zod.string(),
+  ruleVersion: zod.string(),
+  alertReasons: zod.array(zod.string()),
+  limitations: zod.array(zod.string()),
+  previousDeclarations: zod.array(zod.object({
+    batchReference: zod.string(),
+    plannedOutputQuantity: zod.number().nullable(),
+    declaredOutputQuantity: zod.number(),
+    periodEnd: zod.string(),
+    materials: zod.array(zod.object({
+      materialCode: zod.string(),
+      unit: zod.string(),
+      plannedQuantity: zod.number(),
+      actualQuantity: zod.number(),
+    }).passthrough()),
+  }).passthrough()),
+  materials: zod.array(zod.object({
+    materialCode: zod.string(),
+    unit: zod.string(),
+    plannedQuantity: zod.number(),
+    actualQuantity: zod.number(),
+    consumptionToleranceBasisPoints: zod.number().nullable(),
+    verifiedAvailableQuantity: zod.string(),
+    shortageQuantity: zod.string(),
+  }).passthrough()),
+  metrics: zod.array(zod.object({
+    code: zod.string(),
+    signal: zod.string(),
+    expectedRatio: zod.number().nullable(),
+    observedRatio: zod.number().nullable(),
+    deviationPercent: zod.number().nullable(),
+    thresholdPercent: zod.number(),
+    baselineBatchCount: zod.number(),
+    confidence: zod.string(),
+  }).passthrough()),
+}).passthrough();
 
 export class MaterialAccountingError extends Error {
   constructor(readonly code: string, message: string) {
@@ -529,7 +569,7 @@ export async function reviewProductionMaterialReceipt(actorUserId: string, input
   return result;
 }
 
-export async function listPendingProductionBatchReviews() {
+export async function listPendingProductionBatchReviews(batchId?: string) {
   const batches = await db.select({
     id: productionBatch.id,
     manufacturerId: productionBatch.manufacturerId,
@@ -544,9 +584,12 @@ export async function listPendingProductionBatchReviews() {
   }).from(productionBatch)
     .innerJoin(user, eq(productionBatch.manufacturerId, user.id))
     .innerJoin(product, eq(productionBatch.productId, product.id))
-    .where(eq(productionBatch.materialReviewStatus, 'pending'))
+    .where(and(
+      eq(productionBatch.materialReviewStatus, 'pending'),
+      ...(batchId ? [eq(productionBatch.id, batchId)] : []),
+    ))
     .orderBy(productionBatch.createdAt)
-    .limit(250);
+    .limit(batchId ? 1 : 250);
 
   const batchIds = batches.map((batch) => batch.id);
   if (batchIds.length === 0) return [];
@@ -556,6 +599,7 @@ export async function listPendingProductionBatchReviews() {
     materialCode: productionMaterial.materialCode,
     materialUnit: productionMaterial.unit,
     actualQuantity: productionBatchMaterialUsage.actualQuantity,
+    consumptionToleranceBasisPoints: productionBatchMaterialUsage.consumptionToleranceBasisPoints,
   }).from(productionBatchMaterialUsage)
     .innerJoin(productionMaterial, eq(productionBatchMaterialUsage.materialId, productionMaterial.id))
     .where(inArray(productionBatchMaterialUsage.productionBatchId, batchIds));
@@ -566,8 +610,18 @@ export async function listPendingProductionBatchReviews() {
   const balanceByMaterial = new Map(balances.map((row) => [row.materialId, decimalToMicros(row.balance)]));
   const usagesByBatch = new Map<string, typeof usages>();
   for (const usage of usages) usagesByBatch.set(usage.batchId, [...(usagesByBatch.get(usage.batchId) ?? []), usage]);
+  const comparisonRows = await db.select({
+    batchId: productionHistoryComparison.productionBatchId,
+    snapshot: productionHistoryComparison.snapshot,
+  }).from(productionHistoryComparison)
+    .where(inArray(productionHistoryComparison.productionBatchId, batchIds));
+  const comparisonsByBatch = new Map(comparisonRows.map((row) => {
+    const parsed = storedComparisonSchema.safeParse(row.snapshot);
+    return [row.batchId, parsed.success ? parsed.data : null] as const;
+  }));
   return batches.map((batch) => ({
     ...batch,
+    historyComparison: comparisonsByBatch.get(batch.id) ?? null,
     materials: (usagesByBatch.get(batch.id) ?? []).map((usage) => {
       const balance = balanceByMaterial.get(usage.materialId) ?? BigInt(0);
       const required = quantityToMicros(usage.actualQuantity);

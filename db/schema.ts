@@ -1192,6 +1192,7 @@ export const productionRecipeMaterial = pgTable(
     recipeVersionId: text('recipe_version_id').notNull().references(() => productionRecipe.id),
     materialId: text('material_id').notNull().references(() => productionMaterial.id),
     quantity: real('quantity').notNull(),
+    consumptionToleranceBasisPoints: integer('consumption_tolerance_basis_points'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
   },
   (table) => [
@@ -1209,6 +1210,7 @@ export const productionBatchMaterialUsage = pgTable(
     materialId: text('material_id').notNull().references(() => productionMaterial.id),
     plannedQuantity: real('planned_quantity').notNull(),
     actualQuantity: real('actual_quantity').notNull(),
+    consumptionToleranceBasisPoints: integer('consumption_tolerance_basis_points'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
   },
   (table) => [
@@ -1391,6 +1393,28 @@ export const aiFinding = pgTable(
     index('ai_finding_severity_idx').on(table.severity),
     index('ai_finding_review_status_idx').on(table.reviewStatus),
     index('ai_finding_created_idx').on(table.createdAt),
+  ],
+);
+
+// Immutable point-in-time comparison evidence captured when a production
+// declaration is recorded. Findings remain in ai_finding for the existing
+// officer review lifecycle; this row preserves the reproducible comparison.
+export const productionHistoryComparison = pgTable(
+  'production_history_comparison',
+  {
+    id: text('id').primaryKey(),
+    productionBatchId: text('production_batch_id').notNull().references(() => productionBatch.id),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    productId: text('product_id').notNull().references(() => product.id),
+    recipeVersionId: text('recipe_version_id').references(() => productionRecipe.id),
+    ruleVersion: text('rule_version').notNull(),
+    snapshot: jsonb('snapshot').$type<Record<string, unknown>>().notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('production_history_comparison_batch_uniq').on(table.productionBatchId),
+    index('production_history_comparison_manufacturer_created_idx').on(table.manufacturerId, table.createdAt),
+    index('production_history_comparison_product_created_idx').on(table.productId, table.createdAt),
   ],
 );
 

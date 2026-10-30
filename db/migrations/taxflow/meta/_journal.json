@@ -29,6 +29,13 @@
       "when": 1793270000000,
       "tag": "0023_manufacturing_material_accounting",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793356400000,
+      "tag": "0024_production_history_comparisons",
+      "breakpoints": true
     }
   ]
 }

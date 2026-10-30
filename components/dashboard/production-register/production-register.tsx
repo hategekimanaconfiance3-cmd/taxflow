@@ -53,7 +53,9 @@ export function ProductionRegister({ records }: ProductionRegisterProps) {
                                         <TableCell className="text-right font-mono font-medium">{formatRWF(record.totalValue)}</TableCell>
                                         <TableCell className="text-right font-mono text-emerald-600">{formatRWF(record.potentialTax)}</TableCell>
                                         <TableCell className="whitespace-nowrap text-sm">
-                                            {record.productionValidationStatus === "review_required" ? <span className="text-amber-700">Review required</span> : record.productionValidationStatus === "within_tolerance" ? <span className="text-emerald-700">Within tolerance</span> : <span className="text-muted-foreground">No recipe evidence</span>}
+                                            <div>{record.productionValidationStatus === "review_required" ? <span className="text-amber-700">Review required</span> : record.productionValidationStatus === "within_tolerance" ? <span className="text-emerald-700">Within tolerance</span> : <span className="text-muted-foreground">No recipe evidence</span>}</div>
+                                            {record.materialReviewStatus === "pending" && <div className="text-xs text-amber-700">Held for independent release review</div>}
+                                            {record.materialShortageCount > 0 && <div className="text-xs text-destructive">{record.materialShortageCount} material shortage{record.materialShortageCount === 1 ? "" : "s"} against verified stock</div>}
                                         </TableCell>
                                         <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
                                             {new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(new Date(record.createdAt))}

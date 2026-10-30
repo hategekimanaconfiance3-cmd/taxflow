@@ -3,12 +3,13 @@ import 'server-only';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { createHash, randomUUID } from 'node:crypto';
 import db from '@/db/drizzle';
-import { auditLog, product, productionBatch, productionBatchMaterialUsage, productionMaterial, productionMaterialPlan, productionMaterialPlanLine, productionRecipe, productionRecipeMaterial, stock, stockMovement } from '@/db/schema';
+import { auditLog, product, productionBatch, productionBatchMaterialUsage, productionMaterial, productionMaterialMovement, productionMaterialPlan, productionMaterialPlanLine, productionRecipe, productionRecipeMaterial, stock, stockMovement } from '@/db/schema';
 import { getSystemConfig } from '@/lib/actions/system-config.action';
 import type { ProductionEntryInput, ProductRegistrationInput, productionRecipeSchema } from '@/lib/validation/production.schema';
 import { assessMaterialVariance, calculatePlannedMaterialQuantity, combineMaterialValidation } from '@/lib/production-confidentiality';
 import { decimalToMicros, quantityToMicros } from '@/lib/material-accounting';
 import { notifyProductionBatchSubmitted } from '@/lib/material-accounting-service';
+import { monitorProductionDeclaration } from '@/lib/ai/production-declaration-monitor';
 
 type ProductionRecipeInput = typeof productionRecipeSchema._output;
 
@@ -26,6 +27,8 @@ export interface ProductionHistoryItem {
   vatRate: number;
   potentialTax: number;
   status: string;
+  materialReviewStatus: string;
+  materialShortageCount: number;
   productionValidationStatus: string;
   createdAt: string;
 }
@@ -38,7 +41,7 @@ export interface ManufacturerRecipe {
   version: number;
   outputQuantity: number;
   yieldToleranceBasisPoints: number;
-  materials: Array<{ recipeMaterialId: string; materialId: string; materialCode: string; name: string; unit: string; quantity: number }>;
+  materials: Array<{ recipeMaterialId: string; materialId: string; materialCode: string; name: string; unit: string; quantity: number; consumptionToleranceBasisPoints: number | null }>;
 }
 
 export async function listManufacturerProducts(manufacturerId: string) {
@@ -63,6 +66,7 @@ export async function listManufacturerProduction(manufacturerId: string): Promis
     unitPrice: productionBatch.unitPrice,
     vatRateBasisPoints: productionBatch.vatRateBasisPoints,
     status: productionBatch.status,
+    materialReviewStatus: productionBatch.materialReviewStatus,
     productionValidationStatus: productionBatch.productionValidationStatus,
     createdAt: productionBatch.createdAt,
   }).from(productionBatch)
@@ -70,6 +74,38 @@ export async function listManufacturerProduction(manufacturerId: string): Promis
     .where(eq(productionBatch.manufacturerId, manufacturerId))
     .orderBy(desc(productionBatch.createdAt))
     .limit(100);
+
+  const batchIds = rows.map((row) => row.id);
+  const usageRows = batchIds.length ? await db.select({
+    batchId: productionBatchMaterialUsage.productionBatchId,
+    materialId: productionBatchMaterialUsage.materialId,
+    actualQuantity: productionBatchMaterialUsage.actualQuantity,
+  }).from(productionBatchMaterialUsage)
+    .innerJoin(productionMaterial, and(
+      eq(productionBatchMaterialUsage.materialId, productionMaterial.id),
+      eq(productionMaterial.manufacturerId, manufacturerId),
+    ))
+    .where(inArray(productionBatchMaterialUsage.productionBatchId, batchIds)) : [];
+  const materialIds = [...new Set(usageRows.map((usage) => usage.materialId))];
+  const balanceRows = materialIds.length ? await db.select({
+    materialId: productionMaterialMovement.materialId,
+    balance: sql<string>`COALESCE(SUM(${productionMaterialMovement.quantityDelta}), 0)::text`,
+  }).from(productionMaterialMovement)
+    .where(and(
+      eq(productionMaterialMovement.manufacturerId, manufacturerId),
+      inArray(productionMaterialMovement.materialId, materialIds),
+    )).groupBy(productionMaterialMovement.materialId) : [];
+  const balances = new Map(balanceRows.map((balance) => [balance.materialId, decimalToMicros(balance.balance)]));
+  const shortagesByBatch = new Map<string, number>();
+  const pendingBatchIds = new Set(rows.filter((row) => row.materialReviewStatus === 'pending').map((row) => row.id));
+  for (const usage of usageRows) {
+    // Current balances can only answer whether a held batch could be released
+    // now. They must not be used to label already released historical batches.
+    if (!pendingBatchIds.has(usage.batchId)) continue;
+    if ((balances.get(usage.materialId) ?? BigInt(0)) < quantityToMicros(usage.actualQuantity)) {
+      shortagesByBatch.set(usage.batchId, (shortagesByBatch.get(usage.batchId) ?? 0) + 1);
+    }
+  }
 
   return rows.map((row) => {
     const totalValue = Math.round(row.quantity * row.unitPrice);
@@ -86,6 +122,8 @@ export async function listManufacturerProduction(manufacturerId: string): Promis
       vatRate,
       potentialTax: Math.round(totalValue * vatRate),
       status: row.status ?? 'recorded',
+      materialReviewStatus: row.materialReviewStatus,
+      materialShortageCount: shortagesByBatch.get(row.id) ?? 0,
       productionValidationStatus: row.productionValidationStatus,
       createdAt: row.createdAt.toISOString(),
     };
@@ -117,6 +155,7 @@ export async function listManufacturerRecipes(manufacturerId: string): Promise<M
     name: productionMaterial.confidentialName,
     unit: productionMaterial.unit,
     quantity: productionRecipeMaterial.quantity,
+    consumptionToleranceBasisPoints: productionRecipeMaterial.consumptionToleranceBasisPoints,
   }).from(productionRecipeMaterial)
     .innerJoin(productionMaterial, eq(productionRecipeMaterial.materialId, productionMaterial.id))
     .where(inArray(productionRecipeMaterial.recipeVersionId, recipeIds));
@@ -130,6 +169,7 @@ export async function listManufacturerRecipes(manufacturerId: string): Promise<M
       name: material.name,
       unit: material.unit,
       quantity: material.quantity,
+      consumptionToleranceBasisPoints: material.consumptionToleranceBasisPoints,
     });
     materialsByRecipe.set(material.recipeVersionId, rows);
   }
@@ -191,6 +231,7 @@ export async function createManufacturerRecipe(manufacturerId: string, input: Pr
         recipeVersionId: createdRecipe.id,
         materialId,
         quantity: materialInput.quantity,
+        consumptionToleranceBasisPoints: materialInput.consumptionToleranceBasisPoints ?? null,
       }).returning({ id: productionRecipeMaterial.id });
       if (!line) throw new Error('Recipe material creation returned no row');
       lines.push({
@@ -200,6 +241,7 @@ export async function createManufacturerRecipe(manufacturerId: string, input: Pr
         name: materialInput.name,
         unit: materialUnit,
         quantity: materialInput.quantity,
+        consumptionToleranceBasisPoints: materialInput.consumptionToleranceBasisPoints ?? null,
       });
     }
 
@@ -332,9 +374,9 @@ export async function recordManufacturerProduction(
       };
     }
 
-    let recipeLines: Array<{ id: string; materialId: string; quantity: number }> = [];
+    let recipeLines: Array<{ id: string; materialId: string; quantity: number; consumptionToleranceBasisPoints: number | null }> = [];
     let productionValidationStatus: 'not_applicable' | 'within_tolerance' | 'review_required' = 'not_applicable';
-    let plannedMaterialUsage: Array<{ recipeMaterialId: string; materialId: string; plannedQuantity: number; actualQuantity: number }> = [];
+    let plannedMaterialUsage: Array<{ recipeMaterialId: string; materialId: string; plannedQuantity: number; actualQuantity: number; consumptionToleranceBasisPoints: number | null }> = [];
     if (input.recipeVersionId) {
       const [recipe] = await tx.select({
         id: productionRecipe.id,
@@ -354,6 +396,7 @@ export async function recordManufacturerProduction(
         id: productionRecipeMaterial.id,
         materialId: productionRecipeMaterial.materialId,
         quantity: productionRecipeMaterial.quantity,
+      consumptionToleranceBasisPoints: productionRecipeMaterial.consumptionToleranceBasisPoints,
       }).from(productionRecipeMaterial)
         .where(eq(productionRecipeMaterial.recipeVersionId, recipe.id));
       const actualByLine = new Map((input.actualMaterials ?? []).map((item) => [item.recipeMaterialId, item.actualQuantity]));
@@ -388,19 +431,23 @@ export async function recordManufacturerProduction(
         const actualQuantity = actualByLine.get(line.id);
         if (actualQuantity === undefined) throw new Error('Validated material usage is missing');
         return {
-          ...assessMaterialVariance(plannedQuantity, actualQuantity, recipe.yieldToleranceBasisPoints),
+          status: line.consumptionToleranceBasisPoints === null
+            ? 'review_required' as const
+            : assessMaterialVariance(plannedQuantity, actualQuantity, line.consumptionToleranceBasisPoints).status,
           recipeMaterialId: line.id,
           materialId: line.materialId,
           plannedQuantity,
           actualQuantity,
+          consumptionToleranceBasisPoints: line.consumptionToleranceBasisPoints,
         };
       });
       productionValidationStatus = combineMaterialValidation([outputCheck.status, ...materialChecks.map((item) => item.status)]);
-      plannedMaterialUsage = materialChecks.map(({ recipeMaterialId, materialId, plannedQuantity, actualQuantity }) => ({
+      plannedMaterialUsage = materialChecks.map(({ recipeMaterialId, materialId, plannedQuantity, actualQuantity, consumptionToleranceBasisPoints }) => ({
         recipeMaterialId,
         materialId,
         plannedQuantity,
         actualQuantity,
+        consumptionToleranceBasisPoints,
       }));
     } else if (input.actualMaterials?.length) {
       return { ok: false as const, code: 'MATERIAL_USAGE_MISMATCH' as const };
@@ -481,6 +528,7 @@ export async function recordManufacturerProduction(
         materialId: usage.materialId,
         plannedQuantity: usage.plannedQuantity,
         actualQuantity: usage.actualQuantity,
+        consumptionToleranceBasisPoints: usage.consumptionToleranceBasisPoints,
       })));
     }
 
@@ -571,11 +619,21 @@ export async function recordManufacturerProduction(
     };
   });
 
-  if (result.ok && !result.replayed && input.recipeVersionId) {
+  if (result.ok && !result.replayed) {
     try {
-      await notifyProductionBatchSubmitted(result.record.id);
+      await monitorProductionDeclaration(result.record.id);
     } catch (error) {
-      console.error('[production:material-review-notification]', { errorName: error instanceof Error ? error.name : 'UnknownError' });
+      console.error('[production:history-monitor]', {
+        batchId: result.record.id,
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+      });
+    }
+    if (input.recipeVersionId) {
+      try {
+        await notifyProductionBatchSubmitted(result.record.id);
+      } catch (error) {
+        console.error('[production:material-review-notification]', { errorName: error instanceof Error ? error.name : 'UnknownError' });
+      }
     }
   }
   return result;

@@ -25,6 +25,7 @@ function batch(index: number, overrides: Partial<ProductionHistoryBatch> = {}): 
       materialName: "Base oil",
       unit: "kg",
       recipeQuantity: 10,
+      consumptionToleranceBasisPoints: 500,
       plannedQuantity: 10,
       actualQuantity: 10,
     }],
@@ -48,6 +49,7 @@ test("historical baseline only uses prior independently supported batches of the
       materialName: "Base oil",
       unit: "kg",
       recipeQuantity: 10,
+      consumptionToleranceBasisPoints: 500,
       plannedQuantity: 10,
       actualQuantity: 15,
     }],
@@ -62,7 +64,9 @@ test("historical baseline only uses prior independently supported batches of the
   assert.equal(metrics[0]?.expectedRatio, 1);
   assert.equal(metrics[0]?.signal, "unusual");
   assert.equal(metrics[1]?.baselineBatchCount, 5);
-  assert.equal(metrics[1]?.signal, "unusual");
+  assert.equal(metrics[1]?.expectedRatio, 0.1);
+  assert.equal(metrics[1]?.observedRatio, 0.1);
+  assert.equal(metrics[1]?.signal, "within_baseline");
 });
 
 test("insufficient verified history is reported without inventing a baseline", () => {
@@ -71,4 +75,33 @@ test("insufficient verified history is reported without inventing a baseline", (
   assert.equal(metrics[0]?.signal, "insufficient_history");
   assert.equal(metrics[0]?.expectedRatio, null);
   assert.equal(metrics[0]?.confidence, "low");
+});
+
+test("material consumption and finished-output tolerances are evaluated independently", () => {
+  const target = batch(20, {
+    id: "candidate",
+    batchReference: "CANDIDATE",
+    status: "recorded",
+    createdAt: new Date("2026-03-01T00:00:00.000Z"),
+    periodEnd: new Date("2026-03-01T00:00:00.000Z"),
+    yieldToleranceBasisPoints: 5_000,
+    actualOutputQuantity: 102,
+    materials: [{
+      recipeMaterialId: "line-1",
+      materialId: "material-1",
+      materialCode: "M-1",
+      materialName: "Base oil",
+      unit: "kg",
+      recipeQuantity: 10,
+      consumptionToleranceBasisPoints: 1_000,
+      plannedQuantity: 10,
+      actualQuantity: 12,
+    }],
+  });
+  const metrics = analyzeProductionHistoryBatch(target, Array.from({ length: 5 }, (_, index) => batch(index + 1)));
+  assert.equal(metrics[0]?.signal, "within_baseline");
+  assert.equal(metrics[1]?.signal, "unusual");
+  assert.equal(metrics[1]?.expectedRatio, 0.1);
+  assert.equal(metrics[1]?.observedRatio, 12 / 102);
+  assert.equal(metrics[1]?.thresholdPercent, 10);
 });
