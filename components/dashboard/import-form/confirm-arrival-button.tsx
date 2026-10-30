@@ -64,6 +64,11 @@ export function SubmitArrivalButton({
 
         // Upload immediately
         setIsUploading(true);
+        const uploadAbortController = new AbortController();
+        const uploadTimeout = window.setTimeout(
+            () => uploadAbortController.abort(),
+            60_000,
+        );
         try {
             const filename = `${declarationId}_${crypto.randomUUID()}.pdf`;
             const pathname = `imports/${filename}`;
@@ -71,12 +76,14 @@ export function SubmitArrivalButton({
                 access: "private",
                 contentType: "application/pdf",
                 handleUploadUrl: "/api/import-invoice",
+                abortSignal: uploadAbortController.signal,
             });
 
             const response = await fetch("/api/import-invoice/verify", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ declarationId, pathname: blob.pathname }),
+                signal: uploadAbortController.signal,
             });
             const data = await response.json().catch(() => null) as { error?: string; url?: string; reference?: string } | null;
 
@@ -88,10 +95,15 @@ export function SubmitArrivalButton({
             setUploadedUrl(data.url);
         } catch (err) {
             setError(
-                err instanceof Error ? err.message : "Failed to upload file",
+                uploadAbortController.signal.aborted
+                    ? "The upload timed out. Check your connection and try again."
+                    : err instanceof Error
+                      ? err.message
+                      : "Failed to upload file",
             );
             setSelectedFile(null);
         } finally {
+            window.clearTimeout(uploadTimeout);
             setIsUploading(false);
         }
     }

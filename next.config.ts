@@ -21,7 +21,7 @@ const securityHeaders = [
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob:",
       "font-src 'self'",
-      "connect-src 'self' https://generativelanguage.googleapis.com https://api.anthropic.com",
+      "connect-src 'self' https://generativelanguage.googleapis.com https://api.anthropic.com https://blob.vercel-storage.com https://*.blob.vercel-storage.com",
       "frame-ancestors 'self'",
       "form-action 'self'",
       "base-uri 'self'",
