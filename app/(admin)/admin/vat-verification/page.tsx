@@ -20,15 +20,22 @@ const STATUS_COLORS: Record<string, string> = {
   critical: 'bg-red-100 text-red-700',
 };
 
+/**
+ * VAT Verification — accessible to compliance / audit roles only.
+ * Guard and action accept the same role set so redirect() never fires
+ * during Server Component render (which would cause a SC crash).
+ */
 export default async function AdminVatVerificationPage() {
-  await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
+  await requireRRASession(
+    "compliance_officer",
+    "audit_officer",
+    "tax_compliance_officer",
+    "audit_investigation_officer",
+  );
 
-  let discrepancies: Awaited<ReturnType<typeof getVatVerification>> = [];
-  try {
-    discrepancies = await getVatVerification();
-  } catch {
-    // Insufficient permissions — show empty state
-  }
+  // All roles above are also accepted by getVatVerification(), so no
+  // secondary redirect can be triggered from within this SC render.
+  const discrepancies = await getVatVerification();
 
   return (
     <div className="space-y-6">
@@ -63,7 +70,7 @@ export default async function AdminVatVerificationPage() {
               {discrepancies.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={7} className="text-center py-8 text-muted-foreground text-sm">
-                    No VAT verification data. Compliance officer access required.
+                    No VAT discrepancy data found.
                   </TableCell>
                 </TableRow>
               )}

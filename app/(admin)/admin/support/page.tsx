@@ -4,8 +4,14 @@ import SupportTicketPanel from "@/components/admin/support-ticket-panel";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * Roles that can mutate tickets (assign / reply / resolve / reopen).
+ * Must match the allowlist inside admin-support-ticket.action.ts.
+ */
+const MANAGE_ROLES = ["compliance_officer", "tax_compliance_officer"] as const;
+
 export default async function AdminSupportPage() {
-    await requireRRASession(
+    const { staff } = await requireRRASession(
         "compliance_officer",
         "audit_officer",
         "tax_compliance_officer",
@@ -17,6 +23,11 @@ export default async function AdminSupportPage() {
         getStaffList(),
     ]);
 
+    // Use clearanceRoles (validated array), not clearanceLevel (single raw DB string).
+    const canManage = staff.clearanceRoles.some((role) =>
+        (MANAGE_ROLES as readonly string[]).includes(role),
+    );
+
     return (
         <div className="space-y-6">
             <div>
@@ -26,7 +37,7 @@ export default async function AdminSupportPage() {
                 </p>
             </div>
 
-            <SupportTicketPanel tickets={tickets} staffList={staffList} />
+            <SupportTicketPanel tickets={tickets} staffList={staffList} canManage={canManage} />
         </div>
     );
 }

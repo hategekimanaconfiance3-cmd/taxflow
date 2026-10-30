@@ -1,4 +1,4 @@
-﻿import { requireRRASession } from "@/lib/auth-guard";
+import { requireRRASession } from "@/lib/auth-guard";
 import { getAllPayments, getPaymentSummary } from "@/lib/actions/admin-payment.action";
 import { PaymentReviewQueue, type PendingPaymentReviewItem } from "@/components/admin/payment-review-queue";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -7,15 +7,27 @@ import { Banknote, ShieldCheck } from "lucide-react";
 
 const money = (value: number) => `${Math.round(value).toLocaleString("en-RW")} RWF`;
 
+/** Roles that are authorized to verify settlement (must match compliance.action.ts). */
+const VERIFY_ROLES = ["compliance_officer", "audit_officer", "payments_reconciliation_officer"] as const;
+
 export default async function AdminPaymentsPage() {
-  const { staff } = await requireRRASession("compliance_officer", "audit_officer", "reporting_officer", "payments_reconciliation_officer");
+  const { staff } = await requireRRASession(
+    "compliance_officer",
+    "audit_officer",
+    "reporting_officer",
+    "payments_reconciliation_officer",
+  );
   const [payments, summary] = await Promise.all([
     getAllPayments("all"),
     getPaymentSummary(),
   ]);
 
   const pending = payments.filter((payment) => payment.status === "pending") as PendingPaymentReviewItem[];
-  const canVerify = ["compliance_officer", "audit_officer", "payments_reconciliation_officer"].includes(staff.clearanceLevel);
+
+  // Use clearanceRoles (the validated role array) — not clearanceLevel (a single raw DB string).
+  const canVerify = staff.clearanceRoles.some((role) =>
+    (VERIFY_ROLES as readonly string[]).includes(role),
+  );
 
   return (
     <div className="space-y-6">
@@ -33,23 +45,20 @@ export default async function AdminPaymentsPage() {
         <Card><CardHeader className="pb-2"><CardDescription>Rejected records</CardDescription><CardTitle className="text-2xl">{summary.countRejected}</CardTitle></CardHeader></Card>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base"><ShieldCheck className="h-4 w-4" /> Payment verification queue</CardTitle>
-          <CardDescription>
-            A payment stays pending until an authorized reviewer checks independent settlement evidence. Confirmation and evidence are written to the append-only audit log.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {canVerify ? (
+      {/* Payment verification queue — only visible to roles that can actually verify */}
+      {canVerify && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base"><ShieldCheck className="h-4 w-4" /> Payment verification queue</CardTitle>
+            <CardDescription>
+              A payment stays pending until an authorized reviewer checks independent settlement evidence. Confirmation and evidence are written to the append-only audit log.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
             <PaymentReviewQueue payments={pending} />
-          ) : (
-            <p className="rounded-lg border p-4 text-sm text-muted-foreground">
-              You can view payment records, but your current role cannot verify settlement. Contact an authorized compliance or audit officer.
-            </p>
-          )}
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>

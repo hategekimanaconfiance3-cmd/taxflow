@@ -141,12 +141,14 @@ function TicketDetailPanel({
     replyDraft,
     onReplyDraftChange,
     onActionSuccess,
+    canManage,
 }: {
     ticket: TicketDetail;
     staffList: StaffMember[];
     replyDraft: string;
     onReplyDraftChange: (val: string) => void;
     onActionSuccess: () => void;
+    canManage: boolean;
 }) {
     const [isPending, startTransition] = useTransition();
     const [resolution, setResolution] = useState(ticket.resolution ?? "");
@@ -233,7 +235,7 @@ function TicketDetailPanel({
     }
 
     const isResolved = ticket.status === "resolved" || ticket.status === "closed";
-    const canModify = !isResolved;
+    const canModify = !isResolved && canManage;
 
     return (
         <Card className="border-l-4 border-l-primary/40">
@@ -354,7 +356,7 @@ function TicketDetailPanel({
                 )}
 
                 {/* Reopen button for resolved tickets */}
-                {isResolved && (
+                {isResolved && canManage && (
                     <div className="space-y-2">
                         <div className="rounded-md bg-emerald-50 border border-emerald-200 p-3 text-xs text-emerald-800">
                             <div className="font-medium mb-1">
@@ -380,8 +382,8 @@ function TicketDetailPanel({
 
                 <Separator />
 
-                {/* Reply textarea */}
-                <div className="space-y-2">
+                {/* Reply textarea — only visible to roles that can manage tickets */}
+                {canManage && <div className="space-y-2">
                     <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
                         Reply to Trader
                     </Label>
@@ -498,6 +500,8 @@ function TicketDetailPanel({
                     </p>
                 </div>
 
+                }
+
                 {/* Feedback messages */}
                 {actionError && (
                     <div className="rounded-md bg-red-50 border border-red-200 px-3 py-2 flex items-center gap-2 text-xs text-red-700">
@@ -523,9 +527,11 @@ function TicketDetailPanel({
 export default function SupportTicketPanel({
     tickets,
     staffList,
+    canManage = false,
 }: {
     tickets: TicketRow[];
     staffList: StaffMember[];
+    canManage?: boolean;
 }) {
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [ticketDetail, setTicketDetail] = useState<TicketDetail | null>(null);
@@ -727,6 +733,7 @@ export default function SupportTicketPanel({
                             replyDraft={replyDraft}
                             onReplyDraftChange={setReplyDraft}
                             onActionSuccess={handleActionSuccess}
+                            canManage={canManage}
                         />
                     )}
 

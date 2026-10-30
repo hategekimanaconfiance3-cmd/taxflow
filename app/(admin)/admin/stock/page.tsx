@@ -13,15 +13,23 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Package } from 'lucide-react';
 
-export default async function AdminStockPage() {
-    await requireRRASession("stock_officer", "audit_officer", "correction_officer", "product_traceability_officer", "audit_investigation_officer");
+/** Roles that can edit / delete stock records. Must match admin-stock-correction.action.ts. */
+const CORRECTION_ROLES = ['correction_officer', 'super_admin'] as const;
 
-  let inventory: Awaited<ReturnType<typeof getSystemStockOverview>> = [];
-  try {
-    inventory = await getSystemStockOverview();
-  } catch {
-    // Insufficient permissions (requires stock_officer / audit_officer / correction_officer)
-  }
+export default async function AdminStockPage() {
+  const { staff } = await requireRRASession(
+    'stock_officer',
+    'audit_officer',
+    'correction_officer',
+    'product_traceability_officer',
+    'audit_investigation_officer',
+  );
+
+  const canCorrect = staff.clearanceRoles.some((role) =>
+    (CORRECTION_ROLES as readonly string[]).includes(role),
+  );
+
+  const inventory = await getSystemStockOverview();
 
   return (
     <div className="space-y-6">
@@ -50,14 +58,14 @@ export default async function AdminStockPage() {
                 <TableHead className="text-right">Quantity</TableHead>
                 <TableHead>Source</TableHead>
                 <TableHead>Last Updated</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+                {canCorrect && <TableHead className="text-right">Actions</TableHead>}
               </TableRow>
             </TableHeader>
             <TableBody>
               {inventory.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={8} className="text-center py-8 text-muted-foreground text-sm">
-                    No stock records available. Requires stock officer, audit officer, or correction officer role.
+                  <TableCell colSpan={canCorrect ? 8 : 7} className="text-center py-8 text-muted-foreground text-sm">
+                    No stock records available.
                   </TableCell>
                 </TableRow>
               )}
@@ -78,9 +86,14 @@ export default async function AdminStockPage() {
                   <TableCell className="text-xs text-muted-foreground">
                     {row.updatedAt ? new Date(row.updatedAt).toLocaleDateString() : '—'}
                   </TableCell>
-                  <TableCell className="text-right">
-                    <div className="inline-flex items-center gap-1"><EditStockDialog row={{ id: row.id, quantity: row.quantity, price: row.price, source: row.source, productName: row.productName, productUnit: row.productUnit }} /><DeleteStockDialog row={{ id: row.id, quantity: row.quantity, price: row.price, source: row.source, productName: row.productName, productUnit: row.productUnit }} /></div>
-                  </TableCell>
+                  {canCorrect && (
+                    <TableCell className="text-right">
+                      <div className="inline-flex items-center gap-1">
+                        <EditStockDialog row={{ id: row.id, quantity: row.quantity, price: row.price, source: row.source, productName: row.productName, productUnit: row.productUnit }} />
+                        <DeleteStockDialog row={{ id: row.id, quantity: row.quantity, price: row.price, source: row.source, productName: row.productName, productUnit: row.productUnit }} />
+                      </div>
+                    </TableCell>
+                  )}
                 </TableRow>
               ))}
             </TableBody>
