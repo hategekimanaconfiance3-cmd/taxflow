@@ -33,10 +33,18 @@ export function ImportForm({ products, materials }: ImportFormProps) {
         text: string;
         type: "success" | "error";
     } | null>(null);
+    const selectedProduct = products.find((product) => product.id === productId);
+    const selectedMaterial = materials.find((material) => material.id === productionMaterialId);
+    const unitsMismatch = Boolean(
+        selectedProduct &&
+        selectedMaterial &&
+        selectedProduct.unit.trim().toLocaleLowerCase("en-US") !==
+            selectedMaterial.unit.trim().toLocaleLowerCase("en-US"),
+    );
 
     function handleSubmit() {
         const qty = Number(expectedQuantity) || 0;
-        if (!productId || qty <= 0) return;
+        if (!productId || qty <= 0 || unitsMismatch) return;
 
         startTransition(async () => {
             try {
@@ -174,13 +182,20 @@ export function ImportForm({ products, materials }: ImportFormProps) {
                     </div>
                 )}
 
+                {unitsMismatch && selectedProduct && selectedMaterial && (
+                    <p role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                        Unit mismatch: this customs classification uses “{selectedProduct.unit}”, but the selected material is configured as “{selectedMaterial.unit}”. Choose a matching classification or have an authorized user correct the material unit. No unit conversion is applied.
+                    </p>
+                )}
+
                 <Button
                     onClick={handleSubmit}
                     disabled={
                         isPending ||
                         !productId ||
                         !expectedQuantity ||
-                        Number(expectedQuantity) <= 0
+                        Number(expectedQuantity) <= 0 ||
+                        unitsMismatch
                     }
                     className="w-full sm:w-auto gap-2"
                 >
