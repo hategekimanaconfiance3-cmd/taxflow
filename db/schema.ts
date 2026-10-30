@@ -1115,6 +1115,11 @@ export const productionBatch = pgTable(
     vatRateBasisPoints: integer('vat_rate_basis_points').notNull().default(0),
     recipeVersionId: text('recipe_version_id'),
     plannedOutputQuantity: real('planned_output_quantity'),
+    reportedGoodOutputQuantity: numeric('reported_good_output_quantity', { precision: 24, scale: 6, mode: 'string' }),
+    reportedRejectedOutputQuantity: numeric('reported_rejected_output_quantity', { precision: 24, scale: 6, mode: 'string' }),
+    goodOutputQuantity: numeric('good_output_quantity', { precision: 24, scale: 6, mode: 'string' }),
+    rejectedOutputQuantity: numeric('rejected_output_quantity', { precision: 24, scale: 6, mode: 'string' }),
+    yieldToleranceStandardId: text('yield_tolerance_standard_id').references(() => productionToleranceStandard.id),
     productionValidationStatus: text('production_validation_status').notNull().default('not_applicable'),
     recipeInputHash: text('recipe_input_hash'),
     materialPlanId: text('material_plan_id').references(() => productionMaterialPlan.id),
@@ -1140,6 +1145,8 @@ export const productionBatch = pgTable(
     index('prod_batch_manufacturer_idx').on(table.manufacturerId),
     index('prod_batch_product_idx').on(table.productId),
     index('prod_batch_status_idx').on(table.status),
+    check('production_batch_output_pair_check', sql`(${table.goodOutputQuantity} IS NULL AND ${table.rejectedOutputQuantity} IS NULL) OR (${table.goodOutputQuantity} IS NOT NULL AND ${table.rejectedOutputQuantity} IS NOT NULL AND ${table.goodOutputQuantity} >= 0 AND ${table.rejectedOutputQuantity} >= 0)`),
+    check('production_batch_reported_output_pair_check', sql`(${table.reportedGoodOutputQuantity} IS NULL AND ${table.reportedRejectedOutputQuantity} IS NULL) OR (${table.reportedGoodOutputQuantity} IS NOT NULL AND ${table.reportedRejectedOutputQuantity} IS NOT NULL AND ${table.reportedGoodOutputQuantity} >= 0 AND ${table.reportedRejectedOutputQuantity} >= 0)`),
     uniqueIndex('prod_batch_ref_uniq').on(table.batchReference),
     uniqueIndex('prod_batch_idempotency_key_uniq').on(table.idempotencyKey),
     uniqueIndex('prod_batch_material_plan_uniq').on(table.materialPlanId).where(sql`${table.materialPlanId} IS NOT NULL`),
@@ -1201,6 +1208,51 @@ export const productionRecipeMaterial = pgTable(
   ],
 );
 
+// Official versioned manufacturing standards are administered only by the
+// Super Admin governance routes. Recipe and material references preserve the
+// exact applicability without storing confidential ingredient names here.
+export const productionToleranceStandard = pgTable(
+  'production_tolerance_standard',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    productId: text('product_id').notNull().references(() => product.id),
+    recipeVersionId: text('recipe_version_id').notNull().references(() => productionRecipe.id),
+    materialId: text('material_id').references(() => productionMaterial.id),
+    toleranceType: text('tolerance_type').notNull(),
+    version: integer('version').notNull(),
+    toleranceBasisPoints: integer('tolerance_basis_points').notNull(),
+    toleranceUnit: text('tolerance_unit').notNull().default('basis_points'),
+    effectiveAt: timestamp('effective_at').notNull(),
+    status: text('status').notNull().default('draft'),
+    justification: text('justification').notNull(),
+    evidenceReference: text('evidence_reference').notNull(),
+    createdByUserId: text('created_by_user_id').notNull().references(() => user.id),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    approvedByUserId: text('approved_by_user_id').references(() => user.id),
+    approvedAt: timestamp('approved_at'),
+    approvalNote: text('approval_note'),
+    activatedByUserId: text('activated_by_user_id').references(() => user.id),
+    activatedAt: timestamp('activated_at'),
+    activationNote: text('activation_note'),
+    deactivatedByUserId: text('deactivated_by_user_id').references(() => user.id),
+    deactivatedAt: timestamp('deactivated_at'),
+    deactivationNote: text('deactivation_note'),
+  },
+  (table) => [
+    index('production_tolerance_standard_scope_effective_idx').on(table.manufacturerId, table.productId, table.recipeVersionId, table.toleranceType, table.effectiveAt),
+    index('production_tolerance_standard_status_created_idx').on(table.status, table.createdAt),
+    check('production_tolerance_standard_type_check', sql`${table.toleranceType} IN ('yield', 'material_consumption')`),
+    check('production_tolerance_standard_scope_check', sql`(${table.toleranceType} = 'yield' AND ${table.materialId} IS NULL) OR (${table.toleranceType} = 'material_consumption' AND ${table.materialId} IS NOT NULL)`),
+    check('production_tolerance_standard_version_positive', sql`${table.version} > 0`),
+    check('production_tolerance_standard_value_check', sql`${table.toleranceBasisPoints} BETWEEN 0 AND 10000`),
+    check('production_tolerance_standard_unit_check', sql`${table.toleranceUnit} = 'basis_points'`),
+    check('production_tolerance_standard_status_check', sql`${table.status} IN ('draft', 'approved', 'active', 'inactive')`),
+    uniqueIndex('production_tolerance_standard_yield_version_uniq').on(table.manufacturerId, table.productId, table.recipeVersionId, table.version).where(sql`${table.toleranceType} = 'yield' AND ${table.materialId} IS NULL`),
+    uniqueIndex('production_tolerance_standard_material_version_uniq').on(table.manufacturerId, table.productId, table.recipeVersionId, table.materialId, table.version).where(sql`${table.toleranceType} = 'material_consumption' AND ${table.materialId} IS NOT NULL`),
+  ],
+);
+
 export const productionBatchMaterialUsage = pgTable(
   'production_batch_material_usage',
   {
@@ -1211,6 +1263,8 @@ export const productionBatchMaterialUsage = pgTable(
     plannedQuantity: real('planned_quantity').notNull(),
     actualQuantity: real('actual_quantity').notNull(),
     consumptionToleranceBasisPoints: integer('consumption_tolerance_basis_points'),
+    consumptionToleranceStandardId: text('consumption_tolerance_standard_id').references(() => productionToleranceStandard.id),
+    wasteQuantity: numeric('waste_quantity', { precision: 24, scale: 6, mode: 'string' }),
     createdAt: timestamp('created_at').defaultNow().notNull(),
   },
   (table) => [
@@ -1260,6 +1314,33 @@ export const productionMaterialPlanLine = pgTable(
   ],
 );
 
+// Reservations commit verified stock to a plan without posting consumption.
+// Rows are resolved once, retaining their original reserved quantities.
+export const productionMaterialReservation = pgTable(
+  'production_material_reservation',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    planId: text('plan_id').notNull().references(() => productionMaterialPlan.id),
+    planLineId: text('plan_line_id').notNull().references(() => productionMaterialPlanLine.id),
+    materialId: text('material_id').notNull().references(() => productionMaterial.id),
+    reservedQuantity: numeric('reserved_quantity', { precision: 24, scale: 6, mode: 'string' }).notNull(),
+    consumedQuantity: numeric('consumed_quantity', { precision: 24, scale: 6, mode: 'string' }).notNull().default('0'),
+    status: text('status').notNull().default('active'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    resolvedAt: timestamp('resolved_at'),
+    resolvedByUserId: text('resolved_by_user_id').references(() => user.id),
+    resolutionNote: text('resolution_note'),
+  },
+  (table) => [
+    uniqueIndex('production_material_reservation_plan_line_uniq').on(table.planId, table.planLineId),
+    index('production_material_reservation_material_status_idx').on(table.manufacturerId, table.materialId, table.status),
+    check('production_material_reservation_quantity_positive', sql`${table.reservedQuantity} > 0`),
+    check('production_material_reservation_consumed_range', sql`${table.consumedQuantity} >= 0 AND ${table.consumedQuantity} <= ${table.reservedQuantity}`),
+    check('production_material_reservation_status_check', sql`${table.status} IN ('active', 'consumed', 'released')`),
+  ],
+);
+
 export const productionMaterialReceipt = pgTable(
   'production_material_receipt',
   {
@@ -1271,6 +1352,7 @@ export const productionMaterialReceipt = pgTable(
     transactionId: text('transaction_id').references(() => transaction.id),
     supplierReference: text('supplier_reference'),
     evidenceReference: text('evidence_reference').notNull(),
+    lotReference: text('lot_reference'),
     unit: text('unit').notNull(),
     quantity: numeric('quantity', { precision: 24, scale: 6, mode: 'string' }).notNull(),
     status: text('status').notNull().default('pending'),
@@ -1318,6 +1400,26 @@ export const productionMaterialMovement = pgTable(
     check('production_material_movement_type_check', sql`${table.movementType} IN ('receipt', 'consumption', 'adjustment')`),
     check('production_material_movement_nonzero_check', sql`${table.quantityDelta} <> 0`),
     check('production_material_movement_balance_check', sql`${table.quantityAfter} = ${table.quantityBefore} + ${table.quantityDelta}`),
+  ],
+);
+
+// Receipt allocations connect each posted consumption movement to the
+// verified acquisition record that supplied it. Historical usage is not
+// backfilled when receipt evidence cannot establish the source.
+export const productionMaterialUsageReceiptAllocation = pgTable(
+  'production_material_usage_receipt_allocation',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    batchUsageId: text('batch_usage_id').notNull().references(() => productionBatchMaterialUsage.id),
+    consumptionMovementId: text('consumption_movement_id').notNull().references(() => productionMaterialMovement.id),
+    sourceMovementId: text('source_movement_id').notNull().references(() => productionMaterialMovement.id),
+    quantity: numeric('quantity', { precision: 24, scale: 6, mode: 'string' }).notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('production_material_usage_receipt_allocation_uniq').on(table.batchUsageId, table.sourceMovementId),
+    index('production_material_usage_receipt_allocation_source_idx').on(table.sourceMovementId),
+    check('production_material_usage_receipt_allocation_quantity_positive', sql`${table.quantity} > 0`),
   ],
 );
 

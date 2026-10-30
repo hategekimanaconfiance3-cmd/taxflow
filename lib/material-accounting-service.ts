@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNull, sql } from 'drizzle-orm';
 import db from '@/db/drizzle';
 import {
   auditLog,
@@ -12,7 +12,9 @@ import {
   productionMaterialMovement,
   productionMaterialPlan,
   productionMaterialPlanLine,
+  productionMaterialReservation,
   productionMaterialReceipt,
+  productionMaterialUsageReceiptAllocation,
   productionHistoryComparison,
   productionRecipe,
   productionRecipeMaterial,
@@ -36,6 +38,7 @@ import type {
   productionBatchMaterialReviewSchema,
   productionMaterialAdjustmentSchema,
   productionMaterialPlanSchema,
+  productionMaterialPlanCancelSchema,
   productionMaterialReceiptReviewSchema,
   productionMaterialReceiptSchema,
 } from '@/lib/validation/production.schema';
@@ -43,6 +46,7 @@ import type { z } from 'zod';
 import { z as zod } from 'zod';
 
 type PlanInput = z.infer<typeof productionMaterialPlanSchema>;
+type PlanCancelInput = z.infer<typeof productionMaterialPlanCancelSchema>;
 type ReceiptInput = z.infer<typeof productionMaterialReceiptSchema>;
 type ReceiptReviewInput = z.infer<typeof productionMaterialReceiptReviewSchema>;
 type BatchReviewInput = z.infer<typeof productionBatchMaterialReviewSchema>;
@@ -198,6 +202,13 @@ export async function listManufacturerMaterialAccounting(manufacturerId: string)
     .where(eq(productionMaterialMovement.manufacturerId, manufacturerId))
     .groupBy(productionMaterialMovement.materialId);
   const balances = new Map(balanceRows.map((row) => [row.materialId, row.balance]));
+  const reservationRows = await db.select({
+    materialId: productionMaterialReservation.materialId,
+    quantity: sql<string>`COALESCE(SUM(${productionMaterialReservation.reservedQuantity}), 0)::text`,
+  }).from(productionMaterialReservation)
+    .where(and(eq(productionMaterialReservation.manufacturerId, manufacturerId), eq(productionMaterialReservation.status, 'active')))
+    .groupBy(productionMaterialReservation.materialId);
+  const reservations = new Map(reservationRows.map((row) => [row.materialId, row.quantity]));
 
   const receipts = await db.select({
     id: productionMaterialReceipt.id,
@@ -206,6 +217,7 @@ export async function listManufacturerMaterialAccounting(manufacturerId: string)
     origin: productionMaterialReceipt.origin,
     sourceReference: sql<string>`COALESCE(${productionMaterialReceipt.importDeclarationId}, ${productionMaterialReceipt.transactionId}, ${productionMaterialReceipt.supplierReference}, ${productionMaterialReceipt.evidenceReference})`,
     evidenceReference: productionMaterialReceipt.evidenceReference,
+    lotReference: productionMaterialReceipt.lotReference,
     quantity: productionMaterialReceipt.quantity,
     unit: productionMaterialReceipt.unit,
     status: productionMaterialReceipt.status,
@@ -237,14 +249,18 @@ export async function listManufacturerMaterialAccounting(manufacturerId: string)
     .limit(100);
 
   return {
-    materials: materials.map((material) => ({ ...material, balance: balances.get(material.id) ?? '0' })),
+    materials: materials.map((material) => {
+      const balance = decimalToMicros(balances.get(material.id) ?? '0');
+      const reserved = decimalToMicros(reservations.get(material.id) ?? '0');
+      return { ...material, balance: microsToDecimal(balance), reserved: microsToDecimal(reserved), available: microsToDecimal(balance - reserved) };
+    }),
     receipts,
     eligibleImports,
   };
 }
 
 export async function listManufacturerMaterialPlans(manufacturerId: string) {
-  return db.select({
+  const plans = await db.select({
     id: productionMaterialPlan.id,
     productId: productionMaterialPlan.productId,
     productName: product.name,
@@ -259,6 +275,19 @@ export async function listManufacturerMaterialPlans(manufacturerId: string) {
     .where(eq(productionMaterialPlan.manufacturerId, manufacturerId))
     .orderBy(desc(productionMaterialPlan.createdAt))
     .limit(100);
+  if (!plans.length) return [];
+  const planIds = plans.map((plan) => plan.id);
+  const [lineCounts, reservationCounts] = await Promise.all([
+    db.select({ planId: productionMaterialPlanLine.planId, count: sql<number>`COUNT(*)::int` })
+      .from(productionMaterialPlanLine).where(inArray(productionMaterialPlanLine.planId, planIds)).groupBy(productionMaterialPlanLine.planId),
+    db.select({ planId: productionMaterialReservation.planId, count: sql<number>`COUNT(*)::int` })
+      .from(productionMaterialReservation)
+      .where(and(inArray(productionMaterialReservation.planId, planIds), eq(productionMaterialReservation.status, 'active')))
+      .groupBy(productionMaterialReservation.planId),
+  ]);
+  const expected = new Map(lineCounts.map((row) => [row.planId, row.count]));
+  const reserved = new Map(reservationCounts.map((row) => [row.planId, row.count]));
+  return plans.map((plan) => ({ ...plan, reservationStatus: (expected.get(plan.id) ?? 0) > 0 && expected.get(plan.id) === reserved.get(plan.id) ? 'active' as const : 'missing' as const }));
 }
 
 export async function createManufacturerMaterialPlan(manufacturerId: string, input: PlanInput) {
@@ -284,10 +313,23 @@ export async function createManufacturerMaterialPlan(manufacturerId: string, inp
       .for('update').limit(1);
     if (!ownedProduct || !recipe) throw new MaterialAccountingError('RECIPE_NOT_FOUND', 'Select a recipe for a product registered to your business.');
 
+    const [concurrentPlan] = await tx.select().from(productionMaterialPlan)
+      .where(and(eq(productionMaterialPlan.manufacturerId, manufacturerId), eq(productionMaterialPlan.idempotencyKey, input.idempotencyKey)))
+      .limit(1);
+    if (concurrentPlan) {
+      if (concurrentPlan.productId !== input.productId || concurrentPlan.recipeVersionId !== input.recipeVersionId
+        || decimalToMicros(concurrentPlan.plannedOutputQuantity) !== outputMicros) {
+        throw new MaterialAccountingError('DUPLICATE_REQUEST', 'This plan key was already used for different details.');
+      }
+      return { id: concurrentPlan.id, replayed: true };
+    }
+
     const recipeLines = await tx.select({
+      id: productionRecipeMaterial.id,
       recipeMaterialId: productionRecipeMaterial.id,
       materialId: productionRecipeMaterial.materialId,
       quantity: productionRecipeMaterial.quantity,
+      materialCode: productionMaterial.materialCode,
       materialUnit: productionMaterial.unit,
       materialManufacturerId: productionMaterial.manufacturerId,
     }).from(productionRecipeMaterial)
@@ -295,6 +337,38 @@ export async function createManufacturerMaterialPlan(manufacturerId: string, inp
       .where(eq(productionRecipeMaterial.recipeVersionId, recipe.id));
     if (recipeLines.length === 0 || recipeLines.some((line) => line.materialManufacturerId !== manufacturerId)) {
       throw new MaterialAccountingError('RECIPE_INVALID', 'This recipe does not have valid business-owned material lines.');
+    }
+
+    const recipeOutputMicros = quantityToMicros(recipe.outputQuantity);
+    const planLines = recipeLines.map((line) => ({
+      recipeMaterialId: line.recipeMaterialId,
+      materialId: line.materialId,
+      materialCode: line.materialCode,
+      materialUnit: line.materialUnit,
+      plannedQuantity: microsToDecimal(multiplyQuantities(outputMicros, quantityToMicros(line.quantity), recipeOutputMicros)),
+    }));
+    for (const materialId of [...new Set(planLines.map((line) => line.materialId))].sort()) {
+      const [locked] = await tx.select({ id: productionMaterial.id })
+        .from(productionMaterial)
+        .where(and(eq(productionMaterial.id, materialId), eq(productionMaterial.manufacturerId, manufacturerId)))
+        .for('update')
+        .limit(1);
+      if (!locked) throw new MaterialAccountingError('MATERIAL_NOT_FOUND', 'A recipe material is unavailable for reservation.');
+    }
+    for (const line of planLines) {
+      const balance = await getMaterialBalance(tx, manufacturerId, line.materialId);
+      const [reservedRow] = await tx.select({ quantity: sql<string>`COALESCE(SUM(${productionMaterialReservation.reservedQuantity}), 0)::text` })
+        .from(productionMaterialReservation)
+        .where(and(
+          eq(productionMaterialReservation.manufacturerId, manufacturerId),
+          eq(productionMaterialReservation.materialId, line.materialId),
+          eq(productionMaterialReservation.status, 'active'),
+        ));
+      const available = balance - decimalToMicros(reservedRow?.quantity ?? '0');
+      const needed = decimalToMicros(line.plannedQuantity);
+      if (available < needed) {
+        throw new MaterialAccountingError('RESERVATION_INSUFFICIENT', `Insufficient verified material availability for ${line.materialCode}: ${microsToDecimal(available)} ${line.materialUnit} is unreserved.`);
+      }
     }
 
     const planId = crypto.randomUUID();
@@ -309,22 +383,73 @@ export async function createManufacturerMaterialPlan(manufacturerId: string, inp
     }).returning({ id: productionMaterialPlan.id });
     if (!plan) throw new Error('Production plan was not created.');
 
-    const recipeOutputMicros = quantityToMicros(recipe.outputQuantity);
-    const lines = recipeLines.map((line) => ({
+    const insertedLines = await tx.insert(productionMaterialPlanLine).values(planLines.map((line) => ({
       planId,
       recipeMaterialId: line.recipeMaterialId,
       materialId: line.materialId,
-      plannedQuantity: microsToDecimal(multiplyQuantities(outputMicros, quantityToMicros(line.quantity), recipeOutputMicros)),
-    }));
-    await tx.insert(productionMaterialPlanLine).values(lines);
+      plannedQuantity: line.plannedQuantity,
+    }))).returning({ id: productionMaterialPlanLine.id, recipeMaterialId: productionMaterialPlanLine.recipeMaterialId, materialId: productionMaterialPlanLine.materialId, plannedQuantity: productionMaterialPlanLine.plannedQuantity });
+    if (insertedLines.length !== planLines.length) throw new Error('Material plan lines were not fully recorded.');
+    await tx.insert(productionMaterialReservation).values(insertedLines.map((line) => ({
+      manufacturerId,
+      planId,
+      planLineId: line.id,
+      materialId: line.materialId,
+      reservedQuantity: line.plannedQuantity,
+    })));
     await tx.insert(auditLog).values({
       userId: manufacturerId,
       action: 'PRODUCTION_MATERIAL_PLAN_CREATED',
       targetType: 'production_material_plan',
       targetId: planId,
-      metadata: JSON.stringify({ productId: input.productId, recipeVersionId: input.recipeVersionId, materialLineCount: lines.length, plannedOutputQuantity: microsToDecimal(outputMicros) }),
+      metadata: JSON.stringify({ productId: input.productId, recipeVersionId: input.recipeVersionId, materialLineCount: insertedLines.length, plannedOutputQuantity: microsToDecimal(outputMicros), reservedMaterialIds: insertedLines.map((line) => line.materialId) }),
     });
     return { id: planId, replayed: false };
+  });
+}
+
+export async function cancelManufacturerMaterialPlan(manufacturerId: string, input: PlanCancelInput) {
+  return db.transaction(async (tx) => {
+    const [plan] = await tx.select().from(productionMaterialPlan)
+      .where(and(eq(productionMaterialPlan.id, input.planId), eq(productionMaterialPlan.manufacturerId, manufacturerId)))
+      .for('update')
+      .limit(1);
+    if (!plan) throw new MaterialAccountingError('PLAN_NOT_FOUND', 'Production plan was not found.');
+    if (plan.status === 'cancelled') return { planId: plan.id, replayed: true };
+    if (plan.status !== 'planned') throw new MaterialAccountingError('PLAN_NOT_CANCELLABLE', 'A plan attached to production can no longer be cancelled here.');
+
+    const reservations = await tx.select().from(productionMaterialReservation)
+      .where(and(eq(productionMaterialReservation.planId, plan.id), eq(productionMaterialReservation.status, 'active')))
+      .for('update');
+    for (const materialId of [...new Set(reservations.map((row) => row.materialId))].sort()) {
+      await tx.select({ id: productionMaterial.id }).from(productionMaterial)
+        .where(and(eq(productionMaterial.id, materialId), eq(productionMaterial.manufacturerId, manufacturerId)))
+        .for('update')
+        .limit(1);
+    }
+    const now = new Date();
+    for (const reservation of reservations) {
+      await tx.update(productionMaterialReservation).set({
+        status: 'released',
+        resolvedAt: now,
+        resolvedByUserId: manufacturerId,
+        resolutionNote: input.note,
+      }).where(and(eq(productionMaterialReservation.id, reservation.id), eq(productionMaterialReservation.status, 'active')));
+    }
+    const [updatedPlan] = await tx.update(productionMaterialPlan).set({ status: 'cancelled' })
+      .where(and(eq(productionMaterialPlan.id, plan.id), eq(productionMaterialPlan.status, 'planned')))
+      .returning({ id: productionMaterialPlan.id });
+    if (!updatedPlan) throw new MaterialAccountingError('CONCURRENT_PLAN_CHANGE', 'Plan status changed concurrently; refresh and try again.');
+    await tx.insert(auditLog).values({
+      userId: manufacturerId,
+      action: 'PRODUCTION_MATERIAL_PLAN_CANCELLED',
+      targetType: 'production_material_plan',
+      targetId: plan.id,
+      beforeState: { status: 'planned', activeReservationCount: reservations.length },
+      afterState: { status: 'cancelled', releasedReservationCount: reservations.length },
+      metadata: JSON.stringify({ note: input.note }),
+    });
+    return { planId: plan.id, replayed: false };
   });
 }
 
@@ -341,7 +466,8 @@ export async function submitProductionMaterialReceipt(manufacturerId: string, in
       .limit(1);
     if (existing) {
       if (existing.materialId !== input.materialId || existing.origin !== input.origin || existing.quantity !== quantity
-        || existing.importDeclarationId !== (input.importDeclarationId ?? null) || existing.transactionId !== (input.transactionId ?? null)) {
+        || existing.importDeclarationId !== (input.importDeclarationId ?? null) || existing.transactionId !== (input.transactionId ?? null)
+        || existing.lotReference !== (input.lotReference ?? null)) {
         throw new MaterialAccountingError('DUPLICATE_REQUEST', 'This request key was already used for different receipt details.');
       }
       return { receiptId: existing.id, replayed: true };
@@ -418,6 +544,7 @@ export async function submitProductionMaterialReceipt(manufacturerId: string, in
       transactionId: input.transactionId ?? null,
       supplierReference: input.supplierReference || null,
       evidenceReference: input.evidenceReference,
+      lotReference: input.lotReference || null,
       unit: material.unit,
       quantity,
       idempotencyKey: input.idempotencyKey,
@@ -430,7 +557,7 @@ export async function submitProductionMaterialReceipt(manufacturerId: string, in
       action: 'PRODUCTION_MATERIAL_RECEIPT_SUBMITTED',
       targetType: 'production_material_receipt',
       targetId: receipt.id,
-      metadata: JSON.stringify({ materialId: input.materialId, origin: input.origin, importDeclarationId: input.importDeclarationId ?? null, transactionId: input.transactionId ?? null, quantity, unit: material.unit, evidenceReference: input.evidenceReference }),
+      metadata: JSON.stringify({ materialId: input.materialId, origin: input.origin, importDeclarationId: input.importDeclarationId ?? null, transactionId: input.transactionId ?? null, quantity, unit: material.unit, evidenceReference: input.evidenceReference, lotReference: input.lotReference ?? null }),
     });
     return { receiptId: receipt.id, replayed: false };
   });
@@ -457,6 +584,7 @@ export async function listPendingProductionMaterialReceipts() {
     transactionId: productionMaterialReceipt.transactionId,
     supplierReference: productionMaterialReceipt.supplierReference,
     evidenceReference: productionMaterialReceipt.evidenceReference,
+    lotReference: productionMaterialReceipt.lotReference,
     quantity: productionMaterialReceipt.quantity,
     unit: productionMaterialReceipt.unit,
     submittedAt: productionMaterialReceipt.createdAt,
@@ -572,6 +700,7 @@ export async function reviewProductionMaterialReceipt(actorUserId: string, input
 export async function listPendingProductionBatchReviews(batchId?: string) {
   const batches = await db.select({
     id: productionBatch.id,
+    materialPlanId: productionBatch.materialPlanId,
     manufacturerId: productionBatch.manufacturerId,
     manufacturerName: user.businessName,
     productId: productionBatch.productId,
@@ -579,6 +708,8 @@ export async function listPendingProductionBatchReviews(batchId?: string) {
     batchReference: productionBatch.batchReference,
     outputQuantity: productionBatch.declaredQuantity,
     outputUnit: product.unit,
+    reportedGoodOutputQuantity: productionBatch.reportedGoodOutputQuantity,
+    reportedRejectedOutputQuantity: productionBatch.reportedRejectedOutputQuantity,
     validationStatus: productionBatch.productionValidationStatus,
     createdAt: productionBatch.createdAt,
   }).from(productionBatch)
@@ -608,6 +739,21 @@ export async function listPendingProductionBatchReviews(batchId?: string) {
     .where(usages.length ? inArray(productionMaterialMovement.materialId, [...new Set(usages.map((usage) => usage.materialId))]) : sql`false`)
     .groupBy(productionMaterialMovement.materialId);
   const balanceByMaterial = new Map(balances.map((row) => [row.materialId, decimalToMicros(row.balance)]));
+  const materialIds = [...new Set(usages.map((usage) => usage.materialId))];
+  const reservations = materialIds.length ? await db.select({
+    planId: productionMaterialReservation.planId,
+    materialId: productionMaterialReservation.materialId,
+    quantity: productionMaterialReservation.reservedQuantity,
+  }).from(productionMaterialReservation)
+    .where(and(inArray(productionMaterialReservation.materialId, materialIds), eq(productionMaterialReservation.status, 'active'))) : [];
+  const reservedByMaterial = new Map<string, bigint>();
+  const reservedByPlanMaterial = new Map<string, bigint>();
+  for (const reservation of reservations) {
+    const quantity = decimalToMicros(reservation.quantity);
+    reservedByMaterial.set(reservation.materialId, (reservedByMaterial.get(reservation.materialId) ?? BigInt(0)) + quantity);
+    const key = `${reservation.planId}:${reservation.materialId}`;
+    reservedByPlanMaterial.set(key, (reservedByPlanMaterial.get(key) ?? BigInt(0)) + quantity);
+  }
   const usagesByBatch = new Map<string, typeof usages>();
   for (const usage of usages) usagesByBatch.set(usage.batchId, [...(usagesByBatch.get(usage.batchId) ?? []), usage]);
   const comparisonRows = await db.select({
@@ -625,13 +771,17 @@ export async function listPendingProductionBatchReviews(batchId?: string) {
     materials: (usagesByBatch.get(batch.id) ?? []).map((usage) => {
       const balance = balanceByMaterial.get(usage.materialId) ?? BigInt(0);
       const required = quantityToMicros(usage.actualQuantity);
+      const thisPlanReserved = batch.materialPlanId
+        ? reservedByPlanMaterial.get(`${batch.materialPlanId}:${usage.materialId}`) ?? BigInt(0)
+        : BigInt(0);
+      const available = balance - ((reservedByMaterial.get(usage.materialId) ?? BigInt(0)) - thisPlanReserved);
       return {
         materialId: usage.materialId,
         materialCode: usage.materialCode,
         unit: usage.materialUnit,
         requiredQuantity: microsToDecimal(required),
-        availableQuantity: microsToDecimal(balance),
-        shortage: microsToDecimal(balance >= required ? BigInt(0) : required - balance),
+        availableQuantity: microsToDecimal(available),
+        shortage: microsToDecimal(available >= required ? BigInt(0) : required - available),
       };
     }),
   }));
@@ -646,16 +796,38 @@ export async function reviewProductionBatch(actorUserId: string, input: BatchRev
 
     if (input.decision === 'reject') {
       const now = new Date();
+      const reservations = batch.materialPlanId ? await tx.select().from(productionMaterialReservation)
+        .where(and(eq(productionMaterialReservation.planId, batch.materialPlanId), eq(productionMaterialReservation.status, 'active')))
+        .for('update') : [];
+      for (const reservation of reservations) {
+        await tx.update(productionMaterialReservation).set({ status: 'released', resolvedAt: now, resolvedByUserId: actorUserId, resolutionNote: input.note })
+          .where(and(eq(productionMaterialReservation.id, reservation.id), eq(productionMaterialReservation.status, 'active')));
+      }
       await tx.update(productionBatch).set({ materialReviewStatus: 'rejected', materialReviewNote: input.note, materialReviewedById: actorUserId, materialReviewedAt: now, status: 'held_material_review' })
         .where(and(eq(productionBatch.id, batch.id), eq(productionBatch.materialReviewStatus, 'pending')));
+      if (batch.materialPlanId) {
+        await tx.update(productionMaterialPlan).set({ status: 'cancelled' })
+          .where(and(eq(productionMaterialPlan.id, batch.materialPlanId), eq(productionMaterialPlan.status, 'in_progress')));
+      }
       await tx.insert(auditLog).values({ userId: actorUserId, action: 'PRODUCTION_BATCH_MATERIAL_REVIEW_REJECTED', targetType: 'production_batch', targetId: batch.id, beforeState: { materialReviewStatus: 'pending' }, afterState: { materialReviewStatus: 'rejected', status: 'held_material_review' }, metadata: JSON.stringify({ manufacturerId: batch.manufacturerId, batchReference: batch.batchReference, decisionNote: input.note }) });
       return { batchId: batch.id, manufacturerId: batch.manufacturerId, status: 'rejected', replayed: false };
+    }
+
+    if (input.goodOutputQuantity === undefined || input.rejectedOutputQuantity === undefined || !input.outputEvidenceReference) {
+      throw new MaterialAccountingError('OUTPUT_EVIDENCE_REQUIRED', 'Record independently verified good and rejected output with its evidence reference before release.');
+    }
+    const goodOutputMicros = quantityToMicros(input.goodOutputQuantity);
+    const rejectedOutputMicros = quantityToMicros(input.rejectedOutputQuantity);
+    const declaredOutputMicros = quantityToMicros(batch.declaredQuantity);
+    if (goodOutputMicros + rejectedOutputMicros !== declaredOutputMicros) {
+      throw new MaterialAccountingError('OUTPUT_RECONCILIATION_FAILED', 'Verified good and rejected output must reconcile exactly to the declared total output.');
     }
 
     const usages = await tx.select({
       id: productionBatchMaterialUsage.id,
       materialId: productionBatchMaterialUsage.materialId,
       actualQuantity: productionBatchMaterialUsage.actualQuantity,
+      wasteQuantity: productionBatchMaterialUsage.wasteQuantity,
       materialUnit: productionMaterial.unit,
       materialManufacturerId: productionMaterial.manufacturerId,
       materialCode: productionMaterial.materialCode,
@@ -676,8 +848,78 @@ export async function reviewProductionBatch(actorUserId: string, input: BatchRev
       entry.used += quantityToMicros(usage.actualQuantity);
       computed.set(usage.materialId, entry);
     }
-    const shortages = [...computed.entries()].filter(([, entry]) => entry.before < entry.used).map(([materialId, entry]) => ({ materialId, materialCode: entry.code, unit: entry.unit, shortage: microsToDecimal(entry.used - entry.before) }));
+    const reservationRows = batch.materialPlanId ? await tx.select().from(productionMaterialReservation)
+      .where(and(eq(productionMaterialReservation.planId, batch.materialPlanId), eq(productionMaterialReservation.status, 'active')))
+      .for('update') : [];
+    const reservedForBatch = new Map<string, bigint>();
+    for (const reservation of reservationRows) {
+      reservedForBatch.set(reservation.materialId, (reservedForBatch.get(reservation.materialId) ?? BigInt(0)) + decimalToMicros(reservation.reservedQuantity));
+    }
+    if (batch.materialPlanId && reservationRows.length === 0) {
+      throw new MaterialAccountingError('PLAN_RESERVATION_MISSING', 'This production plan has no active material reservation.');
+    }
+    const allActiveReservations = await tx.select({
+      materialId: productionMaterialReservation.materialId,
+      quantity: sql<string>`COALESCE(SUM(${productionMaterialReservation.reservedQuantity}), 0)::text`,
+    }).from(productionMaterialReservation)
+      .where(and(eq(productionMaterialReservation.manufacturerId, batch.manufacturerId), eq(productionMaterialReservation.status, 'active')))
+      .groupBy(productionMaterialReservation.materialId);
+    const activeReservationByMaterial = new Map(allActiveReservations.map((row) => [row.materialId, decimalToMicros(row.quantity)]));
+    const shortages = [...computed.entries()].filter(([materialId, entry]) => {
+      const othersReserved = (activeReservationByMaterial.get(materialId) ?? BigInt(0)) - (reservedForBatch.get(materialId) ?? BigInt(0));
+      const reservation = reservedForBatch.get(materialId);
+      return entry.before < entry.used + othersReserved || (batch.materialPlanId !== null && entry.used > (reservation ?? BigInt(0)));
+    }).map(([materialId, entry]) => {
+      const othersReserved = (activeReservationByMaterial.get(materialId) ?? BigInt(0)) - (reservedForBatch.get(materialId) ?? BigInt(0));
+      const required = entry.used + othersReserved;
+      return { materialId, materialCode: entry.code, unit: entry.unit, shortage: microsToDecimal(required > entry.before ? required - entry.before : BigInt(0)) };
+    });
     if (shortages.length > 0) throw new MaterialAccountingError('MATERIAL_SHORTAGE', `Insufficient verified material stock: ${shortages.map((item) => `${item.materialCode} short ${item.shortage} ${item.unit}`).join('; ')}`);
+
+    // Allocate each consumption against immutable positive ledger sources in FIFO order.
+    // A positive adjustment remains traceable to its adjustment evidence; no lot is invented.
+    const sourceMovementIds = new Set<string>();
+    const sourcesByMaterial = new Map<string, Array<{ id: string; remaining: bigint }>>();
+    for (const materialId of sortedMaterialIds) {
+      const sourceRows = await tx.select({
+        id: productionMaterialMovement.id,
+        movementType: productionMaterialMovement.movementType,
+        quantityDelta: productionMaterialMovement.quantityDelta,
+        receiptId: productionMaterialMovement.receiptId,
+        receiptStatus: productionMaterialReceipt.status,
+      }).from(productionMaterialMovement)
+        .leftJoin(productionMaterialReceipt, eq(productionMaterialMovement.receiptId, productionMaterialReceipt.id))
+        .where(and(
+          eq(productionMaterialMovement.manufacturerId, batch.manufacturerId),
+          eq(productionMaterialMovement.materialId, materialId),
+          gt(productionMaterialMovement.quantityDelta, '0'),
+        ))
+        .orderBy(asc(productionMaterialMovement.createdAt), asc(productionMaterialMovement.id));
+      const eligibleSources = sourceRows.filter((row) => row.movementType === 'adjustment'
+        || (row.movementType === 'receipt' && row.receiptId !== null && row.receiptStatus === 'verified'));
+      const priorAllocations = eligibleSources.length ? await tx.select({
+        sourceMovementId: productionMaterialUsageReceiptAllocation.sourceMovementId,
+        quantity: sql<string>`COALESCE(SUM(${productionMaterialUsageReceiptAllocation.quantity}), 0)::text`,
+      }).from(productionMaterialUsageReceiptAllocation)
+        .where(inArray(productionMaterialUsageReceiptAllocation.sourceMovementId, eligibleSources.map((row) => row.id)))
+        .groupBy(productionMaterialUsageReceiptAllocation.sourceMovementId) : [];
+      const allocatedBySource = new Map(priorAllocations.map((row) => [row.sourceMovementId, decimalToMicros(row.quantity)]));
+      const sourceRowsRemaining = eligibleSources.map((row) => ({
+        id: row.id,
+        remaining: decimalToMicros(row.quantityDelta) - (allocatedBySource.get(row.id) ?? BigInt(0)),
+      })).filter((row) => row.remaining > BigInt(0));
+      sourcesByMaterial.set(materialId, sourceRowsRemaining);
+      for (const row of sourceRowsRemaining) sourceMovementIds.add(row.id);
+    }
+    const sourceQuantityByMaterial = new Map<string, bigint>();
+    for (const usage of usages) {
+      sourceQuantityByMaterial.set(usage.materialId, (sourceQuantityByMaterial.get(usage.materialId) ?? BigInt(0))
+        + (sourcesByMaterial.get(usage.materialId) ?? []).reduce((sum, source) => sum + source.remaining, BigInt(0)));
+    }
+    const untraceable = [...computed.entries()].filter(([materialId, entry]) => (sourceQuantityByMaterial.get(materialId) ?? BigInt(0)) < entry.used);
+    if (untraceable.length > 0) {
+      throw new MaterialAccountingError('MATERIAL_TRACEABILITY_INCOMPLETE', `Verified receipt or evidence-backed adjustment sources do not cover consumption for: ${untraceable.map(([, entry]) => entry.code).join(', ')}.`);
+    }
 
     const now = new Date();
     for (const usage of usages) {
@@ -689,7 +931,7 @@ export async function reviewProductionBatch(actorUserId: string, input: BatchRev
       // Zero actual usage is valid evidence, but the immutable ledger rejects
       // zero-value movements. Preserve the usage row without inventing one.
       if (delta === BigInt(0)) continue;
-      await tx.insert(productionMaterialMovement).values({
+      const [consumption] = await tx.insert(productionMaterialMovement).values({
         manufacturerId: batch.manufacturerId,
         materialId: usage.materialId,
         movementType: 'consumption',
@@ -700,18 +942,53 @@ export async function reviewProductionBatch(actorUserId: string, input: BatchRev
         batchUsageId: usage.id,
         actorUserId,
         reason: `Verified production batch ${batch.batchReference} consumption`,
-      });
+      }).returning({ id: productionMaterialMovement.id });
+      if (!consumption) throw new Error('Material consumption movement was not recorded.');
+      let remainingToAllocate = -delta;
+      const allocations = sourcesByMaterial.get(usage.materialId) ?? [];
+      for (const source of allocations) {
+        if (remainingToAllocate === BigInt(0)) break;
+        const allocated = source.remaining < remainingToAllocate ? source.remaining : remainingToAllocate;
+        if (allocated === BigInt(0)) continue;
+        await tx.insert(productionMaterialUsageReceiptAllocation).values({
+          batchUsageId: usage.id,
+          consumptionMovementId: consumption.id,
+          sourceMovementId: source.id,
+          quantity: microsToDecimal(allocated),
+        });
+        source.remaining -= allocated;
+        remainingToAllocate -= allocated;
+      }
+      if (remainingToAllocate !== BigInt(0)) throw new MaterialAccountingError('MATERIAL_TRACEABILITY_INCOMPLETE', 'Material source quantities changed during allocation; no release was posted.');
       entry.before = after;
     }
 
-    const [updatedStock] = await tx.insert(stock).values({ businessId: batch.manufacturerId, productId: batch.productId, quantity: batch.declaredQuantity, source: 'manufactured', price: batch.unitPrice })
-      .onConflictDoUpdate({ target: [stock.businessId, stock.productId], set: { quantity: sql`${stock.quantity} + ${batch.declaredQuantity}`, price: batch.unitPrice, source: 'manufactured', updatedAt: now } })
-      .returning({ quantity: stock.quantity });
-    if (!updatedStock) throw new Error('Finished-product inventory update returned no row.');
-    const quantityBefore = updatedStock.quantity - batch.declaredQuantity;
-    await tx.insert(stockMovement).values({ businessId: batch.manufacturerId, productId: batch.productId, quantityDelta: batch.declaredQuantity, quantityBefore, quantityAfter: updatedStock.quantity, movementType: 'production', sourceType: 'production_batch', sourceId: batch.id, actorUserId, reason: 'Material-reviewed production batch released' });
+    const goodOutputQuantity = Number(microsToDecimal(goodOutputMicros));
+    const updatedStock = goodOutputQuantity > 0 ? (await tx.insert(stock).values({ businessId: batch.manufacturerId, productId: batch.productId, quantity: goodOutputQuantity, source: 'manufactured', price: batch.unitPrice })
+      .onConflictDoUpdate({ target: [stock.businessId, stock.productId], set: { quantity: sql`${stock.quantity} + ${goodOutputQuantity}`, price: batch.unitPrice, source: 'manufactured', updatedAt: now } })
+      .returning({ quantity: stock.quantity }))[0] : undefined;
+    const previousStock = await tx.select({ quantity: stock.quantity }).from(stock)
+      .where(and(eq(stock.businessId, batch.manufacturerId), eq(stock.productId, batch.productId))).for('update').limit(1);
+    const quantityAfter = updatedStock?.quantity ?? previousStock[0]?.quantity ?? 0;
+    const quantityBefore = quantityAfter - goodOutputQuantity;
+    if (goodOutputQuantity > 0) {
+      if (!updatedStock) throw new Error('Finished-product inventory update returned no row.');
+      await tx.insert(stockMovement).values({ businessId: batch.manufacturerId, productId: batch.productId, quantityDelta: goodOutputQuantity, quantityBefore, quantityAfter, movementType: 'production', sourceType: 'production_batch', sourceId: batch.id, actorUserId, reason: 'Independently verified good output released from held production batch' });
+    }
 
-    const [updatedBatch] = await tx.update(productionBatch).set({ materialReviewStatus: 'released', materialReviewNote: input.note, materialReviewedById: actorUserId, materialReviewedAt: now, materialPostedAt: now, status: 'independently_supported' })
+    for (const reservation of reservationRows) {
+      const usage = usages.find((item) => item.materialId === reservation.materialId);
+      const consumed = usage ? quantityToMicros(usage.actualQuantity) : BigInt(0);
+      await tx.update(productionMaterialReservation).set({
+        consumedQuantity: microsToDecimal(consumed),
+        status: 'consumed',
+        resolvedAt: now,
+        resolvedByUserId: actorUserId,
+        resolutionNote: `Released with batch ${batch.batchReference}; unconsumed reservation amount returned.`,
+      }).where(and(eq(productionMaterialReservation.id, reservation.id), eq(productionMaterialReservation.status, 'active')));
+    }
+
+    const [updatedBatch] = await tx.update(productionBatch).set({ goodOutputQuantity: microsToDecimal(goodOutputMicros), rejectedOutputQuantity: microsToDecimal(rejectedOutputMicros), materialReviewStatus: 'released', materialReviewNote: input.note, materialReviewedById: actorUserId, materialReviewedAt: now, materialPostedAt: now, status: 'independently_supported' })
       .where(and(eq(productionBatch.id, batch.id), eq(productionBatch.materialReviewStatus, 'pending')))
       .returning({ id: productionBatch.id });
     if (!updatedBatch) throw new MaterialAccountingError('CONCURRENT_REVIEW', 'Batch state changed concurrently; no posting was completed.');
@@ -719,7 +996,7 @@ export async function reviewProductionBatch(actorUserId: string, input: BatchRev
       await tx.update(productionMaterialPlan).set({ status: 'completed' })
         .where(and(eq(productionMaterialPlan.id, batch.materialPlanId), eq(productionMaterialPlan.status, 'in_progress')));
     }
-    await tx.insert(auditLog).values({ userId: actorUserId, action: 'PRODUCTION_BATCH_MATERIAL_REVIEW_RELEASED', targetType: 'production_batch', targetId: batch.id, beforeState: { materialReviewStatus: 'pending', stockQuantity: quantityBefore }, afterState: { materialReviewStatus: 'released', stockQuantity: updatedStock.quantity }, metadata: JSON.stringify({ manufacturerId: batch.manufacturerId, batchReference: batch.batchReference, outputProductId: batch.productId, outputQuantity: batch.declaredQuantity, materialCount: usages.length, materialCodes: usages.map((usage) => usage.materialCode), decisionNote: input.note }) });
+    await tx.insert(auditLog).values({ userId: actorUserId, action: 'PRODUCTION_BATCH_MATERIAL_REVIEW_RELEASED', targetType: 'production_batch', targetId: batch.id, beforeState: { materialReviewStatus: 'pending', stockQuantity: quantityBefore, manufacturerReportedGoodOutputQuantity: batch.reportedGoodOutputQuantity, manufacturerReportedRejectedOutputQuantity: batch.reportedRejectedOutputQuantity }, afterState: { materialReviewStatus: 'released', stockQuantity: quantityAfter, verifiedGoodOutputQuantity: microsToDecimal(goodOutputMicros), verifiedRejectedOutputQuantity: microsToDecimal(rejectedOutputMicros) }, metadata: JSON.stringify({ manufacturerId: batch.manufacturerId, batchReference: batch.batchReference, outputProductId: batch.productId, totalOutputQuantity: batch.declaredQuantity, verifiedGoodOutputQuantity: goodOutputQuantity, rejectedOutputQuantity: microsToDecimal(rejectedOutputMicros), outputEvidenceReference: input.outputEvidenceReference, materialCount: usages.length, materialCodes: usages.map((usage) => usage.materialCode), sourceMovementIds: [...sourceMovementIds], decisionNote: input.note }) });
     return { batchId: batch.id, manufacturerId: batch.manufacturerId, status: 'released', replayed: false };
   });
 
@@ -727,6 +1004,138 @@ export async function reviewProductionBatch(actorUserId: string, input: BatchRev
     await notifySafely({ userId: result.manufacturerId, type: 'system', title: result.status === 'released' ? 'Production batch released' : 'Production batch held', message: result.status === 'released' ? 'Verified material consumption and finished-product stock were posted together.' : 'The production batch remains held. Review the officer decision and resolve the recorded discrepancy.', link: '/dashboard/production' });
   }
   return result;
+}
+
+export async function getProductionBatchMaterialTraceability(batchId: string, manufacturerId?: string) {
+  const [batch] = await db.select({
+    id: productionBatch.id,
+    manufacturerId: productionBatch.manufacturerId,
+    batchReference: productionBatch.batchReference,
+    productId: product.id,
+    productName: product.name,
+    totalOutput: productionBatch.declaredQuantity,
+    reportedGoodOutput: productionBatch.reportedGoodOutputQuantity,
+    reportedRejectedOutput: productionBatch.reportedRejectedOutputQuantity,
+    goodOutput: productionBatch.goodOutputQuantity,
+    rejectedOutput: productionBatch.rejectedOutputQuantity,
+    yieldToleranceStandardId: productionBatch.yieldToleranceStandardId,
+    status: productionBatch.materialReviewStatus,
+    materialPlanId: productionBatch.materialPlanId,
+  }).from(productionBatch)
+    .innerJoin(product, eq(productionBatch.productId, product.id))
+    .where(and(
+      eq(productionBatch.id, batchId),
+      ...(manufacturerId ? [eq(productionBatch.manufacturerId, manufacturerId)] : []),
+    )).limit(1);
+  if (!batch) throw new MaterialAccountingError('NOT_FOUND', 'Production batch was not found.');
+
+  const usageRows = await db.select({
+    usageId: productionBatchMaterialUsage.id,
+    materialId: productionBatchMaterialUsage.materialId,
+    materialCode: productionMaterial.materialCode,
+    unit: productionMaterial.unit,
+    plannedQuantity: productionBatchMaterialUsage.plannedQuantity,
+    actualQuantity: productionBatchMaterialUsage.actualQuantity,
+    wasteQuantity: productionBatchMaterialUsage.wasteQuantity,
+    consumptionToleranceStandardId: productionBatchMaterialUsage.consumptionToleranceStandardId,
+    consumptionMovementId: productionMaterialMovement.id,
+  }).from(productionBatchMaterialUsage)
+    .innerJoin(productionMaterial, eq(productionBatchMaterialUsage.materialId, productionMaterial.id))
+    .leftJoin(productionMaterialMovement, eq(productionMaterialMovement.batchUsageId, productionBatchMaterialUsage.id))
+    .where(eq(productionBatchMaterialUsage.productionBatchId, batch.id));
+
+  const usageIds = usageRows.map((row) => row.usageId);
+  const allocationRows = usageIds.length ? await db.select({
+    usageId: productionMaterialUsageReceiptAllocation.batchUsageId,
+    quantity: productionMaterialUsageReceiptAllocation.quantity,
+    sourceMovementId: productionMaterialMovement.id,
+    sourceMovementType: productionMaterialMovement.movementType,
+    sourceQuantity: productionMaterialMovement.quantityDelta,
+    sourceReference: productionMaterialMovement.sourceReference,
+    sourceReason: productionMaterialMovement.reason,
+    receiptId: productionMaterialReceipt.id,
+    origin: productionMaterialReceipt.origin,
+    lotReference: productionMaterialReceipt.lotReference,
+    evidenceReference: productionMaterialReceipt.evidenceReference,
+    supplierReference: productionMaterialReceipt.supplierReference,
+    sourceStatus: productionMaterialReceipt.status,
+    sourceCreatedAt: productionMaterialMovement.createdAt,
+  }).from(productionMaterialUsageReceiptAllocation)
+    .innerJoin(productionMaterialMovement, eq(productionMaterialUsageReceiptAllocation.sourceMovementId, productionMaterialMovement.id))
+    .leftJoin(productionMaterialReceipt, eq(productionMaterialMovement.receiptId, productionMaterialReceipt.id))
+    .where(inArray(productionMaterialUsageReceiptAllocation.batchUsageId, usageIds))
+    .orderBy(asc(productionMaterialMovement.createdAt)) : [];
+
+  const materialIds = [...new Set(usageRows.map((row) => row.materialId))];
+  const sourceRows = materialIds.length ? await db.select({
+    id: productionMaterialMovement.id,
+    materialId: productionMaterialMovement.materialId,
+    movementType: productionMaterialMovement.movementType,
+    quantityDelta: productionMaterialMovement.quantityDelta,
+    receiptStatus: productionMaterialReceipt.status,
+  }).from(productionMaterialMovement)
+    .leftJoin(productionMaterialReceipt, eq(productionMaterialMovement.receiptId, productionMaterialReceipt.id))
+    .where(and(
+      eq(productionMaterialMovement.manufacturerId, batch.manufacturerId),
+      inArray(productionMaterialMovement.materialId, materialIds),
+      gt(productionMaterialMovement.quantityDelta, '0'),
+    )) : [];
+  const eligibleSourceRows = sourceRows.filter((row) => row.movementType === 'adjustment'
+    || (row.movementType === 'receipt' && row.receiptStatus === 'verified'));
+  const sourceIds = eligibleSourceRows.map((row) => row.id);
+  const sourceTotals = sourceIds.length ? await db.select({
+    sourceMovementId: productionMaterialUsageReceiptAllocation.sourceMovementId,
+    allocatedQuantity: sql<string>`COALESCE(SUM(${productionMaterialUsageReceiptAllocation.quantity}), 0)::text`,
+  }).from(productionMaterialUsageReceiptAllocation)
+    .where(inArray(productionMaterialUsageReceiptAllocation.sourceMovementId, sourceIds))
+    .groupBy(productionMaterialUsageReceiptAllocation.sourceMovementId) : [];
+  const allocatedBySource = new Map(sourceTotals.map((row) => [row.sourceMovementId, decimalToMicros(row.allocatedQuantity)]));
+  const allocationsByUsage = new Map<string, typeof allocationRows>();
+  for (const allocation of allocationRows) allocationsByUsage.set(allocation.usageId, [...(allocationsByUsage.get(allocation.usageId) ?? []), allocation]);
+
+  const remainingForMaterial = new Map<string, bigint>();
+  for (const source of eligibleSourceRows) {
+    const remaining = decimalToMicros(source.quantityDelta) - (allocatedBySource.get(source.id) ?? BigInt(0));
+    remainingForMaterial.set(source.materialId, (remainingForMaterial.get(source.materialId) ?? BigInt(0)) + remaining);
+  }
+
+  return {
+    batch: {
+      id: batch.id,
+      batchReference: batch.batchReference,
+      manufacturerId: batch.manufacturerId,
+      productId: batch.productId,
+      productName: batch.productName,
+      totalOutput: batch.totalOutput,
+      goodOutput: batch.goodOutput,
+      rejectedOutput: batch.rejectedOutput,
+      yieldToleranceStandardId: batch.yieldToleranceStandardId,
+      status: batch.status,
+      materialPlanId: batch.materialPlanId,
+    },
+    materials: usageRows.map((usage) => ({
+      materialCode: usage.materialCode,
+      unit: usage.unit,
+      plannedQuantity: usage.plannedQuantity,
+      actualQuantity: usage.actualQuantity,
+      wasteQuantity: usage.wasteQuantity,
+      consumptionToleranceStandardId: usage.consumptionToleranceStandardId,
+      remainingLinkedSourceQuantity: microsToDecimal(remainingForMaterial.get(usage.materialId) ?? BigInt(0)),
+      consumptionMovementId: usage.consumptionMovementId,
+      sources: (allocationsByUsage.get(usage.usageId) ?? []).map((source) => ({
+        movementId: source.sourceMovementId,
+        movementType: source.sourceMovementType,
+        quantityAllocated: source.quantity,
+        origin: source.origin ?? 'evidence-backed adjustment',
+        lotReference: source.lotReference,
+        receiptId: source.receiptId,
+        evidenceReference: source.evidenceReference ?? source.sourceReference,
+        supplierReference: source.supplierReference,
+        verified: source.sourceMovementType === 'adjustment' || source.sourceStatus === 'verified',
+        occurredAt: source.sourceCreatedAt,
+      })),
+    })),
+  };
 }
 
 export async function adjustProductionMaterialStock(actorUserId: string, input: AdjustmentInput) {
@@ -738,6 +1147,16 @@ export async function adjustProductionMaterialStock(actorUserId: string, input: 
     const before = await getMaterialBalance(tx, material.manufacturerId, material.id);
     const after = before + delta;
     if (after < BigInt(0)) throw new MaterialAccountingError('MATERIAL_SHORTAGE', 'An adjustment cannot reduce verified material stock below zero.');
+    const [reservationTotal] = await tx.select({ quantity: sql<string>`COALESCE(SUM(${productionMaterialReservation.reservedQuantity}), 0)::text` })
+      .from(productionMaterialReservation)
+      .where(and(
+        eq(productionMaterialReservation.manufacturerId, material.manufacturerId),
+        eq(productionMaterialReservation.materialId, material.id),
+        eq(productionMaterialReservation.status, 'active'),
+      ));
+    if (after < decimalToMicros(reservationTotal?.quantity ?? '0')) {
+      throw new MaterialAccountingError('RESERVED_STOCK_PROTECTED', 'This adjustment would reduce verified material below quantities reserved for production plans.');
+    }
     await tx.insert(productionMaterialMovement).values({ manufacturerId: material.manufacturerId, materialId: material.id, movementType: 'adjustment', quantityDelta: microsToDecimal(delta), quantityBefore: microsToDecimal(before), quantityAfter: microsToDecimal(after), sourceReference: input.evidenceReference, actorUserId, reason: input.reason });
     await tx.insert(auditLog).values({ userId: actorUserId, action: 'PRODUCTION_MATERIAL_STOCK_ADJUSTED', targetType: 'production_material', targetId: material.id, beforeState: { balance: microsToDecimal(before) }, afterState: { balance: microsToDecimal(after) }, metadata: JSON.stringify({ manufacturerId: material.manufacturerId, materialCode: material.materialCode, quantityDelta: microsToDecimal(delta), evidenceReference: input.evidenceReference, reason: input.reason }) });
     return { materialId: material.id, balance: microsToDecimal(after) };

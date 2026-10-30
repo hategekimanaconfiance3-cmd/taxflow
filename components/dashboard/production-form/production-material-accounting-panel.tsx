@@ -14,6 +14,8 @@ interface Material {
   name: string;
   unit: string;
   balance: string;
+  reserved: string;
+  available: string;
 }
 
 interface Receipt {
@@ -22,6 +24,7 @@ interface Receipt {
   origin: string;
   sourceReference: string | null;
   evidenceReference: string;
+  lotReference: string | null;
   quantity: string;
   unit: string;
   status: string;
@@ -62,6 +65,7 @@ export function ProductionMaterialAccountingPanel({ materials, receipts, incomin
   const [sourceId, setSourceId] = useState("");
   const [quantity, setQuantity] = useState("");
   const [supplierReference, setSupplierReference] = useState("");
+  const [lotReference, setLotReference] = useState("");
   const [evidenceReference, setEvidenceReference] = useState("");
   const [feedback, setFeedback] = useState<{ text: string; error: boolean } | null>(null);
   const requestKey = useRef<string | null>(null);
@@ -87,6 +91,7 @@ export function ProductionMaterialAccountingPanel({ materials, receipts, incomin
       quantity: Number(quantity),
       evidenceReference: evidenceReference.trim(),
       supplierReference: supplierReference.trim() || undefined,
+      lotReference: lotReference.trim() || undefined,
       idempotencyKey: requestKey.current,
       ...(origin === "import" ? { importDeclarationId: sourceId } : {}),
       ...(origin === "domestic" ? { transactionId: sourceId } : {}),
@@ -107,6 +112,7 @@ export function ProductionMaterialAccountingPanel({ materials, receipts, incomin
         requestKey.current = null;
         setQuantity("");
         setSupplierReference("");
+        setLotReference("");
         setEvidenceReference("");
         setSourceId("");
         router.refresh();
@@ -130,7 +136,8 @@ export function ProductionMaterialAccountingPanel({ materials, receipts, incomin
             {materials.map((material) => (
               <div key={material.id} className="rounded-lg border p-3">
                 <p className="font-medium">{material.name} <span className="font-mono text-xs text-muted-foreground">({material.materialCode})</span></p>
-                <p className="mt-1 text-sm text-muted-foreground">Available: <span className="font-mono text-foreground">{material.balance} {material.unit}</span></p>
+                <p className="mt-1 text-sm text-muted-foreground">Verified balance: <span className="font-mono text-foreground">{material.balance} {material.unit}</span></p>
+                <p className="text-xs text-muted-foreground">Reserved: {material.reserved} {material.unit} · Available to plan: <span className="font-mono text-foreground">{material.available} {material.unit}</span></p>
               </div>
             ))}
           </div>
@@ -184,7 +191,11 @@ export function ProductionMaterialAccountingPanel({ materials, receipts, incomin
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="material-receipt-supplier">Supplier/reference (optional)</Label>
-              <Input id="material-receipt-supplier" value={supplierReference} onChange={(event) => setSupplierReference(event.target.value)} maxLength={160} />
+              <Input id="material-receipt-supplier" value={supplierReference} onChange={(event) => { setSupplierReference(event.target.value); requestKey.current = null; }} maxLength={160} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="material-receipt-lot">Supplier or receipt lot (if documented)</Label>
+              <Input id="material-receipt-lot" value={lotReference} onChange={(event) => { setLotReference(event.target.value); requestKey.current = null; }} maxLength={160} />
             </div>
             <div className="space-y-1.5 md:col-span-2">
               <Label htmlFor="material-receipt-evidence">Evidence reference</Label>
@@ -200,7 +211,7 @@ export function ProductionMaterialAccountingPanel({ materials, receipts, incomin
           {receipts.length === 0 ? <p className="text-sm text-muted-foreground">No material receipts are recorded.</p> : (
             <div className="divide-y rounded-md border">
               {receipts.map((receipt) => <div key={receipt.id} className="flex flex-wrap items-center justify-between gap-2 p-3 text-sm">
-                <div><p className="font-medium">{receipt.materialCode} · {receipt.origin.replaceAll("_", " ")}</p><p className="text-xs text-muted-foreground">Evidence: {receipt.evidenceReference} · {new Date(receipt.createdAt).toLocaleDateString()}</p></div>
+                <div><p className="font-medium">{receipt.materialCode} · {receipt.origin.replaceAll("_", " ")}</p><p className="text-xs text-muted-foreground">Evidence: {receipt.evidenceReference}{receipt.lotReference ? ` · lot ${receipt.lotReference}` : ""} · {new Date(receipt.createdAt).toLocaleDateString()}</p></div>
                 <div className="text-right"><p className="font-mono">{receipt.quantity} {receipt.unit}</p><p className={receipt.status === "verified" ? "text-xs text-emerald-700" : receipt.status === "rejected" ? "text-xs text-destructive" : "text-xs text-amber-700"}>{receipt.status}</p></div>
               </div>)}
             </div>

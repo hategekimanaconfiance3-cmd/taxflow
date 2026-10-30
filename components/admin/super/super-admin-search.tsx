@@ -9,6 +9,7 @@ import {
   Lock,
   Server,
   TrendingUp,
+  Scale,
   ShieldAlert,
   ArrowRight,
   Users,
@@ -28,6 +29,7 @@ const STATIC_RESULTS: SearchResult[] = [
   // SA pages
   { label: 'SA Overview', description: 'Super Admin command center', href: '/admin/super', icon: ShieldAlert, category: 'page' },
   { label: 'Admin Management', description: 'Staff accounts, roles, status', href: '/admin/super/admins', icon: UserCog, category: 'page' },
+  { label: 'Manufacturing Standards', description: 'Super Admin tolerance governance', href: '/admin/super/manufacturing/tolerances', icon: Scale, category: 'page' },
   { label: 'Security Center', description: 'Auth events, permission changes', href: '/admin/super/security', icon: Lock, category: 'page' },
   { label: 'System Health', description: 'Database latency, data counts', href: '/admin/super/system', icon: Server, category: 'page' },
   { label: 'Top Taxpayers', description: 'Top 20 by output VAT', href: '/admin/super/taxpayers', icon: TrendingUp, category: 'page' },

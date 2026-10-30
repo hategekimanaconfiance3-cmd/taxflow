@@ -9,6 +9,7 @@ import {
     TableRow,
 } from "@/components/ui/table";
 import type { ProductionHistoryItem } from "@/lib/production-service";
+import { ProductionMaterialTraceability } from "@/components/dashboard/production-register/production-material-traceability";
 
 interface ProductionRegisterProps {
     records: ProductionHistoryItem[];
@@ -55,7 +56,10 @@ export function ProductionRegister({ records }: ProductionRegisterProps) {
                                         <TableCell className="whitespace-nowrap text-sm">
                                             <div>{record.productionValidationStatus === "review_required" ? <span className="text-amber-700">Review required</span> : record.productionValidationStatus === "within_tolerance" ? <span className="text-emerald-700">Within tolerance</span> : <span className="text-muted-foreground">No recipe evidence</span>}</div>
                                             {record.materialReviewStatus === "pending" && <div className="text-xs text-amber-700">Held for independent release review</div>}
+                                            {record.materialReviewStatus !== "not_required" && <div className="text-xs text-muted-foreground">Reported: {record.reportedGoodOutputQuantity ?? "—"} good / {record.reportedRejectedOutputQuantity ?? "—"} rejected</div>}
+                                            {record.materialReviewStatus !== "not_required" && <div className="text-xs text-muted-foreground">Verified: {record.goodOutputQuantity ?? "pending"} good / {record.rejectedOutputQuantity ?? "pending"} rejected</div>}
                                             {record.materialShortageCount > 0 && <div className="text-xs text-destructive">{record.materialShortageCount} material shortage{record.materialShortageCount === 1 ? "" : "s"} against verified stock</div>}
+                                            {record.materialReviewStatus !== "not_required" && <ProductionMaterialTraceability batchId={record.id} />}
                                         </TableCell>
                                         <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
                                             {new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(new Date(record.createdAt))}

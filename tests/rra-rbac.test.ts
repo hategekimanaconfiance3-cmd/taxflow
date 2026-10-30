@@ -83,16 +83,22 @@ test("isRRARole returns false for trader roles and unknown strings", () => {
 // Super Admin does not bypass the separate taxpayer/formula confidentiality permissions.
 // ---------------------------------------------------------------------------
 
-test("super_admin has every defined permission except taxpayer search and confidential formulas", () => {
+test("super_admin has explicit permissions without inheriting manufacturing operations or restricted data access", () => {
+    const excluded = new Set<RRAPermission>([
+        "taxpayer.intelligence.search",
+        "production.formula.read",
+        "production.material.receipt.review",
+        "production.batch.review",
+        "production.material.adjust",
+    ]);
     for (const perm of RRA_PERMISSIONS) {
-        if (perm === "taxpayer.intelligence.search" || perm === "production.formula.read") continue;
+        if (excluded.has(perm)) continue;
         assert.ok(
             hasRRAPermission("super_admin", perm as RRAPermission),
             `super_admin should have permission: ${perm}`,
         );
     }
-    assert.equal(hasRRAPermission("super_admin", "taxpayer.intelligence.search"), false);
-    assert.equal(hasRRAPermission("super_admin", "production.formula.read"), false);
+    for (const perm of excluded) assert.equal(hasRRAPermission("super_admin", perm), false);
 });
 
 // ---------------------------------------------------------------------------
@@ -389,5 +395,15 @@ test("only super_admin can manage staff accounts", () => {
         } else {
             assert.equal(has, false, `"${role}" should NOT have staff.manage`);
         }
+    }
+});
+
+test("only super_admin can govern official manufacturing tolerance standards", () => {
+    for (const role of RRA_ROLE_VALUES) {
+        assert.equal(
+            hasRRAPermission(role as RRARole, "production.tolerance.govern"),
+            role === "super_admin",
+            `Expected only super_admin to govern manufacturing tolerances; received ${role}`,
+        );
     }
 });

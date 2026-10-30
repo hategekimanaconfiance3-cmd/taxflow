@@ -12,6 +12,7 @@ import {
   productionMaterial,
   productionMaterialMovement,
   productionMaterialReceipt,
+  productionMaterialReservation,
   notification,
   rraStaff,
   rraStaffRole,
@@ -46,8 +47,15 @@ export async function monitorProductionDeclaration(batchId: string): Promise<{ c
     recipeVersionId: productionBatch.recipeVersionId,
     declaredQuantity: productionBatch.declaredQuantity,
     plannedOutputQuantity: productionBatch.plannedOutputQuantity,
+    reportedGoodOutputQuantity: productionBatch.reportedGoodOutputQuantity,
+    reportedRejectedOutputQuantity: productionBatch.reportedRejectedOutputQuantity,
+    verifiedGoodOutputQuantity: productionBatch.goodOutputQuantity,
+    verifiedRejectedOutputQuantity: productionBatch.rejectedOutputQuantity,
+    yieldToleranceStandardId: productionBatch.yieldToleranceStandardId,
     validationStatus: productionBatch.productionValidationStatus,
     status: productionBatch.status,
+    materialReviewStatus: productionBatch.materialReviewStatus,
+    materialPlanId: productionBatch.materialPlanId,
     periodEnd: productionBatch.periodEnd,
     createdAt: productionBatch.createdAt,
     tin: user.tinNumber,
@@ -64,8 +72,14 @@ export async function monitorProductionDeclaration(batchId: string): Promise<{ c
       recipeVersionId: productionBatch.recipeVersionId,
       plannedOutputQuantity: productionBatch.plannedOutputQuantity,
       declaredQuantity: productionBatch.declaredQuantity,
+      reportedGoodOutputQuantity: productionBatch.reportedGoodOutputQuantity,
+      reportedRejectedOutputQuantity: productionBatch.reportedRejectedOutputQuantity,
+      verifiedGoodOutputQuantity: productionBatch.goodOutputQuantity,
+      verifiedRejectedOutputQuantity: productionBatch.rejectedOutputQuantity,
+      yieldToleranceStandardId: productionBatch.yieldToleranceStandardId,
       validationStatus: productionBatch.productionValidationStatus,
       status: productionBatch.status,
+      materialReviewStatus: productionBatch.materialReviewStatus,
       periodEnd: productionBatch.periodEnd,
     }).from(productionBatch)
       .where(and(
@@ -81,7 +95,9 @@ export async function monitorProductionDeclaration(batchId: string): Promise<{ c
       unit: productionMaterial.unit,
       plannedQuantity: productionBatchMaterialUsage.plannedQuantity,
       actualQuantity: productionBatchMaterialUsage.actualQuantity,
+      wasteQuantity: productionBatchMaterialUsage.wasteQuantity,
       consumptionToleranceBasisPoints: productionBatchMaterialUsage.consumptionToleranceBasisPoints,
+      consumptionToleranceStandardId: productionBatchMaterialUsage.consumptionToleranceStandardId,
     }).from(productionBatchMaterialUsage)
       .innerJoin(productionMaterial, eq(productionBatchMaterialUsage.materialId, productionMaterial.id))
       .where(and(
@@ -91,7 +107,7 @@ export async function monitorProductionDeclaration(batchId: string): Promise<{ c
   ]);
 
   const materialIds = [...new Set(usages.map((usage) => usage.materialId))];
-  const [balanceRows, previousUsageRows, verifiedReceipts] = await Promise.all([
+  const [balanceRows, previousUsageRows, verifiedReceipts, activeReservations] = await Promise.all([
     materialIds.length ? db.select({
     materialId: productionMaterialMovement.materialId,
     balance: sql<string>`COALESCE(SUM(${productionMaterialMovement.quantityDelta}), 0)::text`,
@@ -107,7 +123,9 @@ export async function monitorProductionDeclaration(batchId: string): Promise<{ c
       unit: productionMaterial.unit,
       plannedQuantity: productionBatchMaterialUsage.plannedQuantity,
       actualQuantity: productionBatchMaterialUsage.actualQuantity,
+      wasteQuantity: productionBatchMaterialUsage.wasteQuantity,
       consumptionToleranceBasisPoints: productionBatchMaterialUsage.consumptionToleranceBasisPoints,
+      consumptionToleranceStandardId: productionBatchMaterialUsage.consumptionToleranceStandardId,
     }).from(productionBatchMaterialUsage)
       .innerJoin(productionMaterial, eq(productionBatchMaterialUsage.materialId, productionMaterial.id))
       .where(and(
@@ -120,6 +138,7 @@ export async function monitorProductionDeclaration(batchId: string): Promise<{ c
       origin: productionMaterialReceipt.origin,
       sourceReference: sql<string>`COALESCE(${productionMaterialReceipt.importDeclarationId}, ${productionMaterialReceipt.transactionId}, ${productionMaterialReceipt.supplierReference}, ${productionMaterialReceipt.evidenceReference})`,
       quantity: productionMaterialReceipt.quantity,
+      lotReference: productionMaterialReceipt.lotReference,
       unit: productionMaterialReceipt.unit,
       verifiedAt: productionMaterialReceipt.reviewedAt,
     }).from(productionMaterialReceipt)
@@ -128,28 +147,57 @@ export async function monitorProductionDeclaration(batchId: string): Promise<{ c
         inArray(productionMaterialReceipt.materialId, materialIds),
         eq(productionMaterialReceipt.status, 'verified'),
       )).orderBy(desc(productionMaterialReceipt.reviewedAt)).limit(250) : Promise.resolve([]),
+    materialIds.length ? db.select({
+      materialId: productionMaterialReservation.materialId,
+      planId: productionMaterialReservation.planId,
+      reservedQuantity: productionMaterialReservation.reservedQuantity,
+    }).from(productionMaterialReservation)
+      .where(and(
+        eq(productionMaterialReservation.manufacturerId, batch.manufacturerId),
+        inArray(productionMaterialReservation.materialId, materialIds),
+        eq(productionMaterialReservation.status, 'active'),
+      )) : Promise.resolve([]),
   ]);
   const balances = new Map(balanceRows.map((row) => [row.materialId, decimalToMicros(row.balance)]));
+  const reservedElsewhereByMaterial = new Map<string, bigint>();
+  const reservedForBatchByMaterial = new Map<string, bigint>();
+  for (const reservation of activeReservations) {
+    const reserved = decimalToMicros(reservation.reservedQuantity);
+    if (batch.materialPlanId && reservation.planId === batch.materialPlanId) {
+      reservedForBatchByMaterial.set(reservation.materialId, (reservedForBatchByMaterial.get(reservation.materialId) ?? BigInt(0)) + reserved);
+    } else {
+      reservedElsewhereByMaterial.set(reservation.materialId, (reservedElsewhereByMaterial.get(reservation.materialId) ?? BigInt(0)) + reserved);
+    }
+  }
   const previousUsageByBatch = new Map<string, typeof previousUsageRows>();
   for (const item of previousUsageRows) previousUsageByBatch.set(item.batchId, [...(previousUsageByBatch.get(item.batchId) ?? []), item]);
   const receiptsByMaterial = new Map<string, typeof verifiedReceipts>();
   for (const receipt of verifiedReceipts) receiptsByMaterial.set(receipt.materialId, [...(receiptsByMaterial.get(receipt.materialId) ?? []), receipt]);
   const materialSnapshot = usages.map((usage) => {
     const required = quantityToMicros(usage.actualQuantity);
-    const available = balances.get(usage.materialId) ?? BigInt(0);
+    const ledgerBalance = balances.get(usage.materialId) ?? BigInt(0);
+    const reservedElsewhere = reservedElsewhereByMaterial.get(usage.materialId) ?? BigInt(0);
+    const available = ledgerBalance > reservedElsewhere ? ledgerBalance - reservedElsewhere : BigInt(0);
     return {
       materialId: usage.materialId,
       materialCode: usage.materialCode,
       unit: usage.unit,
       plannedQuantity: usage.plannedQuantity,
-      actualQuantity: usage.actualQuantity,
+      declaredActualQuantity: usage.actualQuantity,
+      declaredWasteQuantity: usage.wasteQuantity,
+      quantityStatus: 'manufacturer_reported_pending_independent_review',
       consumptionToleranceBasisPoints: usage.consumptionToleranceBasisPoints,
-      verifiedAvailableQuantity: microsToDecimal(available),
+      consumptionToleranceStandardId: usage.consumptionToleranceStandardId,
+      ledgerBalanceQuantity: microsToDecimal(ledgerBalance),
+      activeReservationsForThisBatch: microsToDecimal(reservedForBatchByMaterial.get(usage.materialId) ?? BigInt(0)),
+      activeReservationsForOtherPlans: microsToDecimal(reservedElsewhere),
+      availableAfterOtherReservations: microsToDecimal(available),
       verifiedReceipts: (receiptsByMaterial.get(usage.materialId) ?? []).map((receipt) => ({
         receiptId: receipt.receiptId,
         origin: receipt.origin,
         sourceReference: receipt.sourceReference,
-        quantity: receipt.quantity,
+        originallyVerifiedQuantity: receipt.quantity,
+        lotReference: receipt.lotReference,
         unit: receipt.unit,
         verifiedAt: receipt.verifiedAt?.toISOString() ?? null,
       })),
@@ -204,7 +252,7 @@ export async function monitorProductionDeclaration(batchId: string): Promise<{ c
     ? createHash('sha256').update(`${historyRuleVersion}:${batch.id}`).digest('hex')
     : null;
   const snapshot: Record<string, unknown> = {
-    schemaVersion: 'production-history-comparison-v1',
+    schemaVersion: 'production-history-comparison-v2',
     declaration: {
       batchId: batch.id,
       batchReference: batch.batchReference,
@@ -213,8 +261,15 @@ export async function monitorProductionDeclaration(batchId: string): Promise<{ c
       recipeVersionId: batch.recipeVersionId,
       declaredOutputQuantity: batch.declaredQuantity,
       plannedOutputQuantity: batch.plannedOutputQuantity,
+      manufacturerReportedGoodOutputQuantity: batch.reportedGoodOutputQuantity,
+      manufacturerReportedRejectedOutputQuantity: batch.reportedRejectedOutputQuantity,
+      independentlyVerifiedGoodOutputQuantity: batch.verifiedGoodOutputQuantity,
+      independentlyVerifiedRejectedOutputQuantity: batch.verifiedRejectedOutputQuantity,
+      yieldToleranceStandardId: batch.yieldToleranceStandardId,
       productionValidationStatus: batch.validationStatus,
-      materialReviewStatus: batch.status,
+      productionStatus: batch.status,
+      materialReviewStatus: batch.materialReviewStatus,
+      outputVerificationStatus: 'pending_independent_review',
     },
     comparisonAt: new Date().toISOString(),
     ruleVersion: historyRuleVersion,
@@ -224,7 +279,13 @@ export async function monitorProductionDeclaration(batchId: string): Promise<{ c
       recipeVersionId: previous.recipeVersionId,
       plannedOutputQuantity: previous.plannedOutputQuantity,
       declaredOutputQuantity: previous.declaredQuantity,
+      manufacturerReportedGoodOutputQuantity: previous.reportedGoodOutputQuantity,
+      manufacturerReportedRejectedOutputQuantity: previous.reportedRejectedOutputQuantity,
+      independentlyVerifiedGoodOutputQuantity: previous.verifiedGoodOutputQuantity,
+      independentlyVerifiedRejectedOutputQuantity: previous.verifiedRejectedOutputQuantity,
+      yieldToleranceStandardId: previous.yieldToleranceStandardId,
       validationStatus: previous.validationStatus,
+      materialReviewStatus: previous.materialReviewStatus,
       status: previous.status,
       periodEnd: previous.periodEnd.toISOString(),
       materials: (previousUsageByBatch.get(previous.id) ?? []).map((usage) => ({
@@ -232,8 +293,10 @@ export async function monitorProductionDeclaration(batchId: string): Promise<{ c
         materialCode: usage.materialCode,
         unit: usage.unit,
         plannedQuantity: usage.plannedQuantity,
-        actualQuantity: usage.actualQuantity,
+        manufacturerReportedActualQuantity: usage.actualQuantity,
+        manufacturerReportedWasteQuantity: usage.wasteQuantity,
         consumptionToleranceBasisPoints: usage.consumptionToleranceBasisPoints,
+        consumptionToleranceStandardId: usage.consumptionToleranceStandardId,
       })),
     })),
     materials: materialSnapshot,

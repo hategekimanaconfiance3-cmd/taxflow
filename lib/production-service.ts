@@ -1,13 +1,13 @@
 import 'server-only';
 
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, lte, sql } from 'drizzle-orm';
 import { createHash, randomUUID } from 'node:crypto';
 import db from '@/db/drizzle';
-import { auditLog, product, productionBatch, productionBatchMaterialUsage, productionMaterial, productionMaterialMovement, productionMaterialPlan, productionMaterialPlanLine, productionRecipe, productionRecipeMaterial, stock, stockMovement } from '@/db/schema';
+import { auditLog, product, productionBatch, productionBatchMaterialUsage, productionMaterial, productionMaterialMovement, productionMaterialPlan, productionMaterialPlanLine, productionMaterialReservation, productionRecipe, productionRecipeMaterial, productionToleranceStandard, stock, stockMovement } from '@/db/schema';
 import { getSystemConfig } from '@/lib/actions/system-config.action';
 import type { ProductionEntryInput, ProductRegistrationInput, productionRecipeSchema } from '@/lib/validation/production.schema';
 import { assessMaterialVariance, calculatePlannedMaterialQuantity, combineMaterialValidation } from '@/lib/production-confidentiality';
-import { decimalToMicros, quantityToMicros } from '@/lib/material-accounting';
+import { decimalToMicros, microsToDecimal, quantityToMicros } from '@/lib/material-accounting';
 import { notifyProductionBatchSubmitted } from '@/lib/material-accounting-service';
 import { monitorProductionDeclaration } from '@/lib/ai/production-declaration-monitor';
 
@@ -22,6 +22,10 @@ export interface ProductionHistoryItem {
   unit: string;
   batchReference: string;
   quantity: number;
+  reportedGoodOutputQuantity: string | null;
+  reportedRejectedOutputQuantity: string | null;
+  goodOutputQuantity: string | null;
+  rejectedOutputQuantity: string | null;
   unitPrice: number;
   totalValue: number;
   vatRate: number;
@@ -40,8 +44,9 @@ export interface ManufacturerRecipe {
   productUnit: string;
   version: number;
   outputQuantity: number;
-  yieldToleranceBasisPoints: number;
-  materials: Array<{ recipeMaterialId: string; materialId: string; materialCode: string; name: string; unit: string; quantity: number; consumptionToleranceBasisPoints: number | null }>;
+  yieldToleranceBasisPoints: number | null;
+  yieldToleranceStandardId: string | null;
+  materials: Array<{ recipeMaterialId: string; materialId: string; materialCode: string; name: string; unit: string; quantity: number; consumptionToleranceBasisPoints: number | null; consumptionToleranceStandardId: string | null }>;
 }
 
 export async function listManufacturerProducts(manufacturerId: string) {
@@ -63,6 +68,10 @@ export async function listManufacturerProduction(manufacturerId: string): Promis
     unit: product.unit,
     batchReference: productionBatch.batchReference,
     quantity: productionBatch.declaredQuantity,
+    reportedGoodOutputQuantity: productionBatch.reportedGoodOutputQuantity,
+    reportedRejectedOutputQuantity: productionBatch.reportedRejectedOutputQuantity,
+    goodOutputQuantity: productionBatch.goodOutputQuantity,
+    rejectedOutputQuantity: productionBatch.rejectedOutputQuantity,
     unitPrice: productionBatch.unitPrice,
     vatRateBasisPoints: productionBatch.vatRateBasisPoints,
     status: productionBatch.status,
@@ -117,6 +126,10 @@ export async function listManufacturerProduction(manufacturerId: string): Promis
       unit: row.unit,
       batchReference: row.batchReference,
       quantity: row.quantity,
+      reportedGoodOutputQuantity: row.reportedGoodOutputQuantity,
+      reportedRejectedOutputQuantity: row.reportedRejectedOutputQuantity,
+      goodOutputQuantity: row.goodOutputQuantity,
+      rejectedOutputQuantity: row.rejectedOutputQuantity,
       unitPrice: row.unitPrice,
       totalValue,
       vatRate,
@@ -138,7 +151,6 @@ export async function listManufacturerRecipes(manufacturerId: string): Promise<M
     productUnit: product.unit,
     version: productionRecipe.version,
     outputQuantity: productionRecipe.outputQuantity,
-    yieldToleranceBasisPoints: productionRecipe.yieldToleranceBasisPoints,
   }).from(productionRecipe)
     .innerJoin(product, eq(productionRecipe.productId, product.id))
     .where(eq(productionRecipe.manufacturerId, manufacturerId))
@@ -147,6 +159,33 @@ export async function listManufacturerRecipes(manufacturerId: string): Promise<M
 
   if (recipes.length === 0) return [];
   const recipeIds = recipes.map((recipe) => recipe.id);
+  const now = new Date();
+  const activeStandards = await db.select({
+    id: productionToleranceStandard.id,
+    recipeVersionId: productionToleranceStandard.recipeVersionId,
+    materialId: productionToleranceStandard.materialId,
+    toleranceType: productionToleranceStandard.toleranceType,
+    toleranceBasisPoints: productionToleranceStandard.toleranceBasisPoints,
+    effectiveAt: productionToleranceStandard.effectiveAt,
+    version: productionToleranceStandard.version,
+  }).from(productionToleranceStandard)
+    .where(and(
+      eq(productionToleranceStandard.manufacturerId, manufacturerId),
+      inArray(productionToleranceStandard.recipeVersionId, recipeIds),
+      eq(productionToleranceStandard.status, 'active'),
+      lte(productionToleranceStandard.effectiveAt, now),
+    ))
+    .orderBy(desc(productionToleranceStandard.effectiveAt), desc(productionToleranceStandard.version));
+  const yieldStandards = new Map<string, { id: string; value: number }>();
+  const materialStandards = new Map<string, { id: string; value: number }>();
+  for (const standard of activeStandards) {
+    if (standard.toleranceType === 'yield') {
+      if (!yieldStandards.has(standard.recipeVersionId)) yieldStandards.set(standard.recipeVersionId, { id: standard.id, value: standard.toleranceBasisPoints });
+    } else if (standard.materialId) {
+      const key = `${standard.recipeVersionId}:${standard.materialId}`;
+      if (!materialStandards.has(key)) materialStandards.set(key, { id: standard.id, value: standard.toleranceBasisPoints });
+    }
+  }
   const materials = await db.select({
     recipeVersionId: productionRecipeMaterial.recipeVersionId,
     recipeMaterialId: productionRecipeMaterial.id,
@@ -155,7 +194,6 @@ export async function listManufacturerRecipes(manufacturerId: string): Promise<M
     name: productionMaterial.confidentialName,
     unit: productionMaterial.unit,
     quantity: productionRecipeMaterial.quantity,
-    consumptionToleranceBasisPoints: productionRecipeMaterial.consumptionToleranceBasisPoints,
   }).from(productionRecipeMaterial)
     .innerJoin(productionMaterial, eq(productionRecipeMaterial.materialId, productionMaterial.id))
     .where(inArray(productionRecipeMaterial.recipeVersionId, recipeIds));
@@ -169,11 +207,20 @@ export async function listManufacturerRecipes(manufacturerId: string): Promise<M
       name: material.name,
       unit: material.unit,
       quantity: material.quantity,
-      consumptionToleranceBasisPoints: material.consumptionToleranceBasisPoints,
+      consumptionToleranceBasisPoints: materialStandards.get(`${material.recipeVersionId}:${material.materialId}`)?.value ?? null,
+      consumptionToleranceStandardId: materialStandards.get(`${material.recipeVersionId}:${material.materialId}`)?.id ?? null,
     });
     materialsByRecipe.set(material.recipeVersionId, rows);
   }
-  return recipes.map((recipe) => ({ ...recipe, materials: materialsByRecipe.get(recipe.id) ?? [] }));
+  return recipes.map((recipe) => {
+    const yieldStandard = yieldStandards.get(recipe.id);
+    return {
+      ...recipe,
+      yieldToleranceBasisPoints: yieldStandard?.value ?? null,
+      yieldToleranceStandardId: yieldStandard?.id ?? null,
+      materials: materialsByRecipe.get(recipe.id) ?? [],
+    };
+  });
 }
 
 export async function createManufacturerRecipe(manufacturerId: string, input: ProductionRecipeInput): Promise<{ ok: true; recipe: ManufacturerRecipe } | { ok: false; code: 'PRODUCT_NOT_FOUND' | 'MATERIAL_UNIT_MISMATCH' }> {
@@ -200,7 +247,6 @@ export async function createManufacturerRecipe(manufacturerId: string, input: Pr
       recipeCode,
       version,
       outputQuantity: input.outputQuantity,
-      yieldToleranceBasisPoints: input.yieldToleranceBasisPoints,
       createdByUserId: manufacturerId,
     }).returning({ id: productionRecipe.id });
     if (!createdRecipe) throw new Error('Recipe version creation returned no row');
@@ -231,7 +277,6 @@ export async function createManufacturerRecipe(manufacturerId: string, input: Pr
         recipeVersionId: createdRecipe.id,
         materialId,
         quantity: materialInput.quantity,
-        consumptionToleranceBasisPoints: materialInput.consumptionToleranceBasisPoints ?? null,
       }).returning({ id: productionRecipeMaterial.id });
       if (!line) throw new Error('Recipe material creation returned no row');
       lines.push({
@@ -241,7 +286,8 @@ export async function createManufacturerRecipe(manufacturerId: string, input: Pr
         name: materialInput.name,
         unit: materialUnit,
         quantity: materialInput.quantity,
-        consumptionToleranceBasisPoints: materialInput.consumptionToleranceBasisPoints ?? null,
+        consumptionToleranceBasisPoints: null,
+        consumptionToleranceStandardId: null,
       });
     }
 
@@ -260,7 +306,8 @@ export async function createManufacturerRecipe(manufacturerId: string, input: Pr
       productUnit: ownedProduct.unit,
       version,
       outputQuantity: input.outputQuantity,
-      yieldToleranceBasisPoints: input.yieldToleranceBasisPoints,
+      yieldToleranceBasisPoints: null,
+      yieldToleranceStandardId: null,
       materials: lines,
     } satisfies ManufacturerRecipe;
     });
@@ -316,6 +363,8 @@ export async function recordManufacturerProduction(
       actualMaterials: [...(input.actualMaterials ?? [])]
         .sort((left, right) => left.recipeMaterialId.localeCompare(right.recipeMaterialId)),
       plannedOutputQuantity: input.plannedOutputQuantity,
+      goodOutputQuantity: input.goodOutputQuantity,
+      rejectedOutputQuantity: input.rejectedOutputQuantity,
       materialPlanId: input.materialPlanId ?? null,
     })).digest('hex')
     : null;
@@ -336,6 +385,8 @@ export async function recordManufacturerProduction(
       batchReference: productionBatch.batchReference,
       productId: productionBatch.productId,
       quantity: productionBatch.declaredQuantity,
+      reportedGoodOutputQuantity: productionBatch.reportedGoodOutputQuantity,
+      reportedRejectedOutputQuantity: productionBatch.reportedRejectedOutputQuantity,
       unitPrice: productionBatch.unitPrice,
       vatRateBasisPoints: productionBatch.vatRateBasisPoints,
       recipeVersionId: productionBatch.recipeVersionId,
@@ -363,6 +414,8 @@ export async function recordManufacturerProduction(
           unit: ownedProduct.unit,
           batchReference: priorBatch.batchReference,
           quantity: priorBatch.quantity,
+          reportedGoodOutputQuantity: priorBatch.reportedGoodOutputQuantity,
+          reportedRejectedOutputQuantity: priorBatch.reportedRejectedOutputQuantity,
           unitPrice: priorBatch.unitPrice,
           totalValue: replayTotal,
           vatRate: replayVatRate,
@@ -374,14 +427,14 @@ export async function recordManufacturerProduction(
       };
     }
 
-    let recipeLines: Array<{ id: string; materialId: string; quantity: number; consumptionToleranceBasisPoints: number | null }> = [];
+    let recipeLines: Array<{ id: string; materialId: string; quantity: number }> = [];
+    let yieldToleranceStandardId: string | null = null;
     let productionValidationStatus: 'not_applicable' | 'within_tolerance' | 'review_required' = 'not_applicable';
-    let plannedMaterialUsage: Array<{ recipeMaterialId: string; materialId: string; plannedQuantity: number; actualQuantity: number; consumptionToleranceBasisPoints: number | null }> = [];
+    let plannedMaterialUsage: Array<{ recipeMaterialId: string; materialId: string; plannedQuantity: number; actualQuantity: number; wasteQuantity: number; consumptionToleranceBasisPoints: number | null; consumptionToleranceStandardId: string | null }> = [];
     if (input.recipeVersionId) {
       const [recipe] = await tx.select({
         id: productionRecipe.id,
         outputQuantity: productionRecipe.outputQuantity,
-        yieldToleranceBasisPoints: productionRecipe.yieldToleranceBasisPoints,
       }).from(productionRecipe)
         .where(and(
           eq(productionRecipe.id, input.recipeVersionId),
@@ -390,13 +443,30 @@ export async function recordManufacturerProduction(
         ))
         .limit(1);
       if (!recipe) return { ok: false as const, code: 'RECIPE_NOT_FOUND' as const };
-      const outputCheck = assessMaterialVariance(input.plannedOutputQuantity!, input.quantity, recipe.yieldToleranceBasisPoints);
+      const applicableStandards = await tx.select({
+        id: productionToleranceStandard.id,
+        materialId: productionToleranceStandard.materialId,
+        toleranceType: productionToleranceStandard.toleranceType,
+        toleranceBasisPoints: productionToleranceStandard.toleranceBasisPoints,
+      }).from(productionToleranceStandard)
+        .where(and(
+          eq(productionToleranceStandard.manufacturerId, manufacturerId),
+          eq(productionToleranceStandard.productId, input.productId),
+          eq(productionToleranceStandard.recipeVersionId, recipe.id),
+          eq(productionToleranceStandard.status, 'active'),
+          lte(productionToleranceStandard.effectiveAt, now),
+        ))
+        .orderBy(desc(productionToleranceStandard.effectiveAt), desc(productionToleranceStandard.version));
+      const yieldStandard = applicableStandards.find((standard) => standard.toleranceType === 'yield' && standard.materialId === null);
+      yieldToleranceStandardId = yieldStandard?.id ?? null;
+      const outputCheck = yieldStandard
+        ? assessMaterialVariance(input.plannedOutputQuantity!, input.goodOutputQuantity!, yieldStandard.toleranceBasisPoints)
+        : { status: 'review_required' as const };
 
       recipeLines = await tx.select({
         id: productionRecipeMaterial.id,
         materialId: productionRecipeMaterial.materialId,
         quantity: productionRecipeMaterial.quantity,
-      consumptionToleranceBasisPoints: productionRecipeMaterial.consumptionToleranceBasisPoints,
       }).from(productionRecipeMaterial)
         .where(eq(productionRecipeMaterial.recipeVersionId, recipe.id));
       const actualByLine = new Map((input.actualMaterials ?? []).map((item) => [item.recipeMaterialId, item.actualQuantity]));
@@ -424,30 +494,41 @@ export async function recordManufacturerProduction(
         if (planLines.length !== recipeLines.length || planLines.some((line) => !recipeLines.some((recipeLine) => recipeLine.id === line.recipeMaterialId))) {
           return { ok: false as const, code: 'PLAN_MISMATCH' as const };
         }
+        const reservations = await tx.select({ planLineId: productionMaterialReservation.planLineId, status: productionMaterialReservation.status })
+          .from(productionMaterialReservation).where(eq(productionMaterialReservation.planId, plan.id));
+        if (reservations.length !== planLines.length || reservations.some((reservation) => reservation.status !== 'active')) {
+          return { ok: false as const, code: 'PLAN_RESERVATION_MISSING' as const };
+        }
       }
 
       const materialChecks = recipeLines.map((line) => {
         const plannedQuantity = calculatePlannedMaterialQuantity(input.plannedOutputQuantity!, recipe.outputQuantity, line.quantity);
         const actualQuantity = actualByLine.get(line.id);
         if (actualQuantity === undefined) throw new Error('Validated material usage is missing');
+        const standard = applicableStandards.find((item) => item.toleranceType === 'material_consumption' && item.materialId === line.materialId);
+        const inputMaterial = input.actualMaterials?.find((item) => item.recipeMaterialId === line.id);
         return {
-          status: line.consumptionToleranceBasisPoints === null
+          status: standard === undefined
             ? 'review_required' as const
-            : assessMaterialVariance(plannedQuantity, actualQuantity, line.consumptionToleranceBasisPoints).status,
+            : assessMaterialVariance(plannedQuantity, actualQuantity, standard.toleranceBasisPoints).status,
           recipeMaterialId: line.id,
           materialId: line.materialId,
           plannedQuantity,
           actualQuantity,
-          consumptionToleranceBasisPoints: line.consumptionToleranceBasisPoints,
+          wasteQuantity: inputMaterial?.wasteQuantity ?? 0,
+          consumptionToleranceBasisPoints: standard?.toleranceBasisPoints ?? null,
+          consumptionToleranceStandardId: standard?.id ?? null,
         };
       });
       productionValidationStatus = combineMaterialValidation([outputCheck.status, ...materialChecks.map((item) => item.status)]);
-      plannedMaterialUsage = materialChecks.map(({ recipeMaterialId, materialId, plannedQuantity, actualQuantity, consumptionToleranceBasisPoints }) => ({
+      plannedMaterialUsage = materialChecks.map(({ recipeMaterialId, materialId, plannedQuantity, actualQuantity, wasteQuantity, consumptionToleranceBasisPoints, consumptionToleranceStandardId }) => ({
         recipeMaterialId,
         materialId,
         plannedQuantity,
         actualQuantity,
+        wasteQuantity,
         consumptionToleranceBasisPoints,
+        consumptionToleranceStandardId,
       }));
     } else if (input.actualMaterials?.length) {
       return { ok: false as const, code: 'MATERIAL_USAGE_MISMATCH' as const };
@@ -462,6 +543,9 @@ export async function recordManufacturerProduction(
       vatRateBasisPoints,
       recipeVersionId: input.recipeVersionId ?? null,
       plannedOutputQuantity: input.plannedOutputQuantity ?? null,
+      reportedGoodOutputQuantity: input.goodOutputQuantity === undefined ? null : microsToDecimal(quantityToMicros(input.goodOutputQuantity)),
+      reportedRejectedOutputQuantity: input.rejectedOutputQuantity === undefined ? null : microsToDecimal(quantityToMicros(input.rejectedOutputQuantity)),
+      yieldToleranceStandardId,
       productionValidationStatus,
       recipeInputHash,
       idempotencyKey: input.idempotencyKey,
@@ -486,6 +570,8 @@ export async function recordManufacturerProduction(
         vatRateBasisPoints: productionBatch.vatRateBasisPoints,
         recipeVersionId: productionBatch.recipeVersionId,
         recipeInputHash: productionBatch.recipeInputHash,
+        reportedGoodOutputQuantity: productionBatch.reportedGoodOutputQuantity,
+        reportedRejectedOutputQuantity: productionBatch.reportedRejectedOutputQuantity,
         productionValidationStatus: productionBatch.productionValidationStatus,
         status: productionBatch.status,
         createdAt: productionBatch.createdAt,
@@ -510,6 +596,8 @@ export async function recordManufacturerProduction(
           unit: ownedProduct.unit,
           batchReference: existing.batchReference,
           quantity: existing.quantity,
+          reportedGoodOutputQuantity: existing.reportedGoodOutputQuantity,
+          reportedRejectedOutputQuantity: existing.reportedRejectedOutputQuantity,
           unitPrice: existing.unitPrice,
           totalValue: Math.round(existing.quantity * existing.unitPrice),
           vatRate: existing.vatRateBasisPoints / 10_000,
@@ -529,6 +617,8 @@ export async function recordManufacturerProduction(
         plannedQuantity: usage.plannedQuantity,
         actualQuantity: usage.actualQuantity,
         consumptionToleranceBasisPoints: usage.consumptionToleranceBasisPoints,
+        consumptionToleranceStandardId: usage.consumptionToleranceStandardId,
+        wasteQuantity: microsToDecimal(quantityToMicros(usage.wasteQuantity)),
       })));
     }
 
@@ -587,11 +677,15 @@ export async function recordManufacturerProduction(
         batchId: batch.id,
         batchReference: batch.batchReference,
         quantity: input.quantity,
+        reportedGoodOutputQuantity: input.goodOutputQuantity === undefined ? null : microsToDecimal(quantityToMicros(input.goodOutputQuantity)),
+        reportedRejectedOutputQuantity: input.rejectedOutputQuantity === undefined ? null : microsToDecimal(quantityToMicros(input.rejectedOutputQuantity)),
         unitPrice: input.unitPrice,
         totalValue,
         vatRateBasisPoints,
         potentialTax,
         recipeAttached: Boolean(input.recipeVersionId),
+        manufacturerReportedGoodOutputQuantity: input.goodOutputQuantity === undefined ? null : microsToDecimal(quantityToMicros(input.goodOutputQuantity)),
+        manufacturerReportedRejectedOutputQuantity: input.rejectedOutputQuantity === undefined ? null : microsToDecimal(quantityToMicros(input.rejectedOutputQuantity)),
         productionValidationStatus,
         materialCount: plannedMaterialUsage.length,
         source: action === 'INVENTORY_INCREASED' ? 'PRODUCTION' : undefined,

@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
-import { createManufacturerMaterialPlan, listManufacturerMaterialPlans, MaterialAccountingError } from '@/lib/material-accounting-service';
-import { productionMaterialPlanSchema } from '@/lib/validation/production.schema';
+import { cancelManufacturerMaterialPlan, createManufacturerMaterialPlan, listManufacturerMaterialPlans, MaterialAccountingError } from '@/lib/material-accounting-service';
+import { productionMaterialPlanCancelSchema, productionMaterialPlanSchema } from '@/lib/validation/production.schema';
 
 function json(body: unknown, status: number, requestId: string): NextResponse {
   return NextResponse.json(body, { status, headers: { 'x-request-id': requestId } });
@@ -43,5 +43,22 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (error instanceof MaterialAccountingError) return json({ error: error.message, code: error.code }, 409, requestId);
     console.error('[production-plans:create]', { requestId, errorName: error instanceof Error ? error.name : 'UnknownError' });
     return json({ error: 'Unable to save production plan.', requestId }, 500, requestId);
+  }
+}
+
+export async function DELETE(request: Request): Promise<NextResponse> {
+  const requestId = randomUUID();
+  try {
+    const manufacturer = await getManufacturer(request, requestId);
+    if (manufacturer instanceof NextResponse) return manufacturer;
+    let body: unknown;
+    try { body = await request.json(); } catch { return json({ error: 'Enter the plan and cancellation reason.' }, 400, requestId); }
+    const parsed = productionMaterialPlanCancelSchema.safeParse(body);
+    if (!parsed.success) return json({ error: parsed.error.issues[0]?.message ?? 'Enter the plan and cancellation reason.' }, 400, requestId);
+    return json({ result: await cancelManufacturerMaterialPlan(manufacturer, parsed.data) }, 200, requestId);
+  } catch (error) {
+    if (error instanceof MaterialAccountingError) return json({ error: error.message, code: error.code }, 409, requestId);
+    console.error('[production-plans:cancel]', { requestId, errorName: error instanceof Error ? error.name : 'UnknownError' });
+    return json({ error: 'Unable to cancel the production plan.', requestId }, 500, requestId);
   }
 }

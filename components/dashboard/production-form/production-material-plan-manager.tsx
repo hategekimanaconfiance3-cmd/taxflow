@@ -10,7 +10,7 @@ import { ClipboardList, Loader2 } from "lucide-react";
 
 interface Product { id: string; name: string; unit: string }
 interface Recipe { id: string; productId: string; version: number; outputQuantity: number; productUnit: string }
-interface Plan { id: string; productId: string; productName: string; recipeVersionId: string; recipeVersion: number; plannedOutputQuantity: string; status: string; createdAt: Date | string }
+interface Plan { id: string; productId: string; productName: string; recipeVersionId: string; recipeVersion: number; plannedOutputQuantity: string; status: string; reservationStatus: "active" | "missing"; createdAt: Date | string }
 
 export function ProductionMaterialPlanManager({ products, recipes, plans }: { products: Product[]; recipes: Recipe[]; plans: Plan[] }) {
   const router = useRouter();
@@ -19,6 +19,7 @@ export function ProductionMaterialPlanManager({ products, recipes, plans }: { pr
   const [recipeVersionId, setRecipeVersionId] = useState("");
   const [plannedOutputQuantity, setPlannedOutputQuantity] = useState("");
   const [feedback, setFeedback] = useState<{ text: string; error: boolean } | null>(null);
+  const [cancelNote, setCancelNote] = useState("");
   const requestKey = useRef<string | null>(null);
   const eligibleRecipes = recipes.filter((recipe) => recipe.productId === productId);
 
@@ -58,6 +59,33 @@ export function ProductionMaterialPlanManager({ products, recipes, plans }: { pr
     });
   }
 
+  function cancel(planId: string) {
+    const note = cancelNote.trim();
+    if (note.length < 5) {
+      setFeedback({ text: "Enter a cancellation reason with at least 5 characters.", error: true });
+      return;
+    }
+    startTransition(async () => {
+      try {
+        const response = await fetch("/api/production/plans", {
+          method: "DELETE",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ planId, note }),
+        });
+        const result = await response.json() as { error?: string };
+        if (!response.ok) {
+          setFeedback({ text: result.error ?? "Unable to release this reservation.", error: true });
+          return;
+        }
+        setFeedback({ text: "Plan cancelled and active material reservations released.", error: false });
+        setCancelNote("");
+        router.refresh();
+      } catch {
+        setFeedback({ text: "Could not cancel the plan. Check your connection and retry.", error: true });
+      }
+    });
+  }
+
   return (
     <Card>
       <CardHeader>
@@ -87,13 +115,19 @@ export function ProductionMaterialPlanManager({ products, recipes, plans }: { pr
           <Button type="submit" disabled={pending || !recipeVersionId}>{pending && <Loader2 className="animate-spin" data-icon="inline-start" />}Save plan</Button>
         </form>
         {feedback && <p role={feedback.error ? "alert" : "status"} className={feedback.error ? "text-sm text-destructive" : "text-sm text-emerald-700"}>{feedback.text}</p>}
+        {plans.some((plan) => plan.status === "planned") && <div className="max-w-xl space-y-1.5">
+          <Label htmlFor="material-plan-cancel-note">Cancellation reason (required to release a reservation)</Label>
+          <Input id="material-plan-cancel-note" value={cancelNote} onChange={(event) => setCancelNote(event.target.value)} maxLength={1000} />
+        </div>}
         <div className="space-y-2">
           <h3 className="font-medium">Recent plans</h3>
           {plans.length === 0 ? <p className="text-sm text-muted-foreground">No production plans are recorded.</p> : (
             <div className="divide-y rounded-md border">
               {plans.map((plan) => <div key={plan.id} className="flex flex-wrap items-center justify-between gap-2 p-3 text-sm">
-                <div><p className="font-medium">{plan.productName} · recipe version {plan.recipeVersion}</p><p className="text-xs text-muted-foreground">Planned output: {plan.plannedOutputQuantity} · {new Date(plan.createdAt).toLocaleDateString()}</p></div>
-                <span className="rounded-full border px-2 py-0.5 text-xs capitalize">{plan.status.replaceAll("_", " ")}</span>
+                <div><p className="font-medium">{plan.productName} · recipe version {plan.recipeVersion}</p><p className="text-xs text-muted-foreground">Planned output: {plan.plannedOutputQuantity} · reservation: {plan.reservationStatus} · {new Date(plan.createdAt).toLocaleDateString()}</p></div>
+                <div className="flex items-center gap-2"><span className="rounded-full border px-2 py-0.5 text-xs capitalize">{plan.status.replaceAll("_", " ")}</span>
+                  {plan.status === "planned" && <Button type="button" size="sm" variant="outline" disabled={pending} onClick={() => cancel(plan.id)}>Cancel and release</Button>}
+                </div>
               </div>)}
             </div>
           )}

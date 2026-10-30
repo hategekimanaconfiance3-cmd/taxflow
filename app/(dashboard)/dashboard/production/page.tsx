@@ -72,7 +72,7 @@ export default async function ProductionPage() {
         <ProductionForm products={products} recipes={recipes} plans={plans} vatRate={vatRate} />
         <ProductionRegister records={records} />
       </div>
-      <RecipeManager products={products.map(({ id, name, unit }) => ({ id, name, unit }))} />
+      <RecipeManager products={products.map(({ id, name, unit }) => ({ id, name, unit }))} recipes={recipes} />
       <ProductionMaterialPlanManager products={products.map(({ id, name, unit }) => ({ id, name, unit }))} recipes={recipes} plans={plans} />
       <ProductionMaterialAccountingPanel materials={accounting.materials} receipts={accounting.receipts} eligibleImports={accounting.eligibleImports} incomingTransactions={incomingTransactions} />
     </div>

@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { ClipboardCheck, Loader2, PackageCheck } from "lucide-react";
 
 interface Receipt {
@@ -18,6 +19,7 @@ interface Receipt {
   transactionId: string | null;
   supplierReference: string | null;
   evidenceReference: string;
+  lotReference: string | null;
   quantity: string;
   unit: string;
   submittedAt: Date | string;
@@ -32,6 +34,8 @@ interface Batch {
   batchReference: string;
   outputQuantity: number;
   outputUnit: string;
+  reportedGoodOutputQuantity: string | null;
+  reportedRejectedOutputQuantity: string | null;
   validationStatus: string;
   createdAt: Date | string;
   materials: Array<{ materialId: string; materialCode: string; unit: string; requiredQuantity: string; availableQuantity: string; shortage: string }>;
@@ -46,16 +50,31 @@ interface Batch {
   } | null;
 }
 
-function ReviewDecision({ endpoint, recordId, actionLabel }: { endpoint: string; recordId: string; actionLabel: string }) {
+function ReviewDecision({ endpoint, recordId, actionLabel, outputQuantity, outputUnit, reportedGoodOutputQuantity, reportedRejectedOutputQuantity }: {
+  endpoint: string;
+  recordId: string;
+  actionLabel: string;
+  outputQuantity?: number;
+  outputUnit?: string;
+  reportedGoodOutputQuantity?: string | null;
+  reportedRejectedOutputQuantity?: string | null;
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [note, setNote] = useState("");
   const [feedback, setFeedback] = useState("");
+  const [goodOutput, setGoodOutput] = useState(reportedGoodOutputQuantity ?? "");
+  const [rejectedOutput, setRejectedOutput] = useState(reportedRejectedOutputQuantity ?? "");
+  const [outputEvidenceReference, setOutputEvidenceReference] = useState("");
 
   function submit(decision: "verify" | "reject" | "release", event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (note.trim().length < 5) {
       setFeedback("Enter a review note with at least 5 characters.");
+      return;
+    }
+    if (decision === "release" && (goodOutput === "" || rejectedOutput === "" || !outputEvidenceReference.trim())) {
+      setFeedback("Enter independently verified good and rejected output and an evidence reference.");
       return;
     }
     startTransition(async () => {
@@ -64,7 +83,16 @@ function ReviewDecision({ endpoint, recordId, actionLabel }: { endpoint: string;
         const response = await fetch(endpoint, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ [idField]: recordId, decision, note: note.trim() }),
+          body: JSON.stringify({
+            [idField]: recordId,
+            decision,
+            note: note.trim(),
+            ...(decision === "release" ? {
+              goodOutputQuantity: Number(goodOutput),
+              rejectedOutputQuantity: Number(rejectedOutput),
+              outputEvidenceReference: outputEvidenceReference.trim(),
+            } : {}),
+          }),
         });
         const result = await response.json() as { error?: string };
         if (!response.ok) {
@@ -81,6 +109,12 @@ function ReviewDecision({ endpoint, recordId, actionLabel }: { endpoint: string;
 
   return (
     <form onSubmit={(event) => submit(actionLabel === "Release batch" ? "release" : "verify", event)} className="space-y-2">
+      {outputQuantity !== undefined && <div className="grid gap-2 rounded-md border p-3 sm:grid-cols-3">
+        <p className="text-sm text-muted-foreground sm:col-span-3">Independent output verification · total declared {outputQuantity} {outputUnit}</p>
+        <label className="space-y-1 text-xs">Verified good output<Input type="number" min="0" step="0.000001" value={goodOutput} onChange={(event) => setGoodOutput(event.target.value)} /></label>
+        <label className="space-y-1 text-xs">Rejected output<Input type="number" min="0" step="0.000001" value={rejectedOutput} onChange={(event) => setRejectedOutput(event.target.value)} /></label>
+        <label className="space-y-1 text-xs sm:col-span-3">Output evidence reference<Input value={outputEvidenceReference} onChange={(event) => setOutputEvidenceReference(event.target.value)} maxLength={500} placeholder="Inspection record or supporting evidence" /></label>
+      </div>}
       <Textarea aria-label="Review note" value={note} onChange={(event) => setNote(event.target.value)} placeholder="Document evidence reviewed and rationale" maxLength={1000} />
       {feedback && <p role="status" className="text-xs text-muted-foreground">{feedback}</p>}
       <div className="flex flex-wrap gap-2">
@@ -104,7 +138,7 @@ export function ProductionMaterialReviewQueue({ receipts, batches, canReviewBatc
           {receipts.length === 0 ? <p className="text-sm text-muted-foreground">No pending material receipts.</p> : <div className="divide-y">
             {receipts.map((receipt) => <article key={receipt.id} className="space-y-3 py-4 first:pt-0 last:pb-0">
               <div className="flex flex-wrap items-start justify-between gap-3">
-                <div><p className="font-medium">{receipt.manufacturerName ?? "Manufacturer"} · <span className="font-mono">{receipt.materialCode}</span></p><p className="text-sm text-muted-foreground">{receipt.origin.replaceAll("_", " ")} · {receipt.quantity} {receipt.unit} · {new Date(receipt.submittedAt).toLocaleString()}</p></div>
+                <div><p className="font-medium">{receipt.manufacturerName ?? "Manufacturer"} · <span className="font-mono">{receipt.materialCode}</span></p><p className="text-sm text-muted-foreground">{receipt.origin.replaceAll("_", " ")} · {receipt.quantity} {receipt.unit}{receipt.lotReference ? ` · lot ${receipt.lotReference}` : ""} · {new Date(receipt.submittedAt).toLocaleString()}</p></div>
                 <Badge variant="secondary">Pending verification</Badge>
               </div>
               <dl className="grid gap-2 text-sm sm:grid-cols-2">
@@ -159,7 +193,7 @@ export function ProductionMaterialReviewQueue({ receipts, batches, canReviewBatc
                     {batch.historyComparison.limitations.map((limitation) => <p key={limitation} className="text-muted-foreground">{limitation}</p>)}
                   </div>
                 </details>}
-                <ReviewDecision endpoint="/api/admin/production/material-accounting/batches" recordId={batch.id} actionLabel="Release batch" />
+                <ReviewDecision endpoint="/api/admin/production/material-accounting/batches" recordId={batch.id} actionLabel="Release batch" outputQuantity={batch.outputQuantity} outputUnit={batch.outputUnit} reportedGoodOutputQuantity={batch.reportedGoodOutputQuantity} reportedRejectedOutputQuantity={batch.reportedRejectedOutputQuantity} />
               </article>;
             })}
           </div>}
