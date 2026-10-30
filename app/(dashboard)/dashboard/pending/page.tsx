@@ -10,10 +10,7 @@ export default async function PendingPage() {
     getOutgoingTransactions(),
   ]);
 
-  const pendingIncoming = incoming.filter((t) => t.status === 'pending');
-  const pendingOutgoing = outgoing.filter((t) => t.status === 'pending');
-
   return (
-    <PendingPageClient incoming={pendingIncoming} outgoing={pendingOutgoing} />
+    <PendingPageClient incoming={incoming} outgoing={outgoing} />
   );
 }

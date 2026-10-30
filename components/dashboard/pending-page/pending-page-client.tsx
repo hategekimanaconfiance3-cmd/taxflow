@@ -225,10 +225,12 @@ export function PendingPageClient({ incoming, outgoing }: PendingPageClientProps
     return () => clearInterval(interval);
   }, [incoming, outgoing, router]);
 
-  // Filter pending items using the persisted reservation expiry time.
-  const pendingIncoming = incoming.filter((t) => t.status === 'pending' && isStillPending(t.expiresAt));
+  // The server expires stale transactions before loading them. Keep status as
+  // the source of truth here so a client clock/timestamp difference cannot hide
+  // a pending confirmation that the dashboard still reports as actionable.
+  const pendingIncoming = incoming.filter((t) => t.status === 'pending');
   const processedIncoming = incoming.filter((t) => t.status !== 'pending');
-  const pendingOutgoing = outgoing.filter((t) => t.status === 'pending' && isStillPending(t.expiresAt));
+  const pendingOutgoing = outgoing.filter((t) => t.status === 'pending');
   const processedOutgoing = outgoing.filter((t) => t.status !== 'pending');
 
   return (
