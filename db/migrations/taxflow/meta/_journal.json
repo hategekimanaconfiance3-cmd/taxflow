@@ -225,6 +225,20 @@
       "when": 1793400000004,
       "tag": "0031_payment_processing_constraints",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1793400000005,
+      "tag": "0032_production_finished_goods_lots",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1793400000006,
+      "tag": "0033_finished_goods_lifecycle",
+      "breakpoints": true
     }
   ]
 }

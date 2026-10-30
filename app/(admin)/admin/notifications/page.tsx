@@ -12,7 +12,8 @@ export default async function AdminNotificationsPage() {
   await requireRRASession();
   const cookieStore = await cookies();
   const savedLanguage = cookieStore.get('taxflow-language')?.value;
-  const lang: LangCode = isLangCode(savedLanguage) ? savedLanguage : 'en';
+  const languageCandidate = savedLanguage ?? 'en';
+  const lang: LangCode = isLangCode(languageCandidate) ? languageCandidate : 'en';
   const notifications = await getAdminNotifications();
   const unreadCount = notifications.filter((item) => !item.read).length;
 

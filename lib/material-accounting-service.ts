@@ -8,6 +8,15 @@ import {
   importDeclaration,
   productionBatch,
   productionBatchMaterialUsage,
+  productionFinishedGoodsLot,
+  productionRejectedGoodsLot,
+  productionFinishedGoodsAllocation,
+  productionFinishedGoodsAllocationEvent,
+  productionFinishedGoodsMovement,
+  productionFinishedGoodsReturn,
+  productionFinishedGoodsReturnInspection,
+  productionFinishedGoodsRework,
+  productionFinishedGoodsReworkDecision,
   productionMaterial,
   productionMaterialMovement,
   productionMaterialPlan,
@@ -971,9 +980,12 @@ export async function reviewProductionBatch(actorUserId: string, input: BatchRev
       .where(and(eq(stock.businessId, batch.manufacturerId), eq(stock.productId, batch.productId))).for('update').limit(1);
     const quantityAfter = updatedStock?.quantity ?? previousStock[0]?.quantity ?? 0;
     const quantityBefore = quantityAfter - goodOutputQuantity;
+    let finishedGoodsMovementId: string | undefined;
     if (goodOutputQuantity > 0) {
       if (!updatedStock) throw new Error('Finished-product inventory update returned no row.');
-      await tx.insert(stockMovement).values({ businessId: batch.manufacturerId, productId: batch.productId, quantityDelta: goodOutputQuantity, quantityBefore, quantityAfter, movementType: 'production', sourceType: 'production_batch', sourceId: batch.id, actorUserId, reason: 'Independently verified good output released from held production batch' });
+      const [movement] = await tx.insert(stockMovement).values({ businessId: batch.manufacturerId, productId: batch.productId, quantityDelta: goodOutputQuantity, quantityBefore, quantityAfter, movementType: 'production', sourceType: 'production_batch', sourceId: batch.id, actorUserId, reason: 'Independently verified good output released from held production batch' }).returning({ id: stockMovement.id });
+      if (!movement) throw new Error('Finished-product stock movement was not recorded.');
+      finishedGoodsMovementId = movement.id;
     }
 
     for (const reservation of reservationRows) {
@@ -992,11 +1004,49 @@ export async function reviewProductionBatch(actorUserId: string, input: BatchRev
       .where(and(eq(productionBatch.id, batch.id), eq(productionBatch.materialReviewStatus, 'pending')))
       .returning({ id: productionBatch.id });
     if (!updatedBatch) throw new MaterialAccountingError('CONCURRENT_REVIEW', 'Batch state changed concurrently; no posting was completed.');
+    let finishedGoodsLotId: string | undefined;
+    if (goodOutputMicros > BigInt(0)) {
+      if (!finishedGoodsMovementId) throw new Error('Finished-goods lot cannot be recorded without its stock movement.');
+      const [outputProduct] = await tx.select({ unit: product.unit }).from(product).where(eq(product.id, batch.productId)).limit(1);
+      if (!outputProduct) throw new MaterialAccountingError('PRODUCT_NOT_FOUND', 'Finished product was not found.');
+      const [finishedGoodsLot] = await tx.insert(productionFinishedGoodsLot).values({
+        manufacturerId: batch.manufacturerId,
+        productId: batch.productId,
+        productionBatchId: batch.id,
+        stockMovementId: finishedGoodsMovementId,
+        lotReference: batch.batchReference,
+        quantity: microsToDecimal(goodOutputMicros),
+        unit: outputProduct.unit,
+        evidenceReference: input.outputEvidenceReference,
+        verifiedByUserId: actorUserId,
+        verifiedAt: now,
+      }).returning({ id: productionFinishedGoodsLot.id });
+      if (!finishedGoodsLot) throw new Error('Verified finished-goods lot was not recorded.');
+      finishedGoodsLotId = finishedGoodsLot.id;
+    }
+    let rejectedGoodsLotId: string | undefined;
+    if (rejectedOutputMicros > BigInt(0)) {
+      const [outputProduct] = await tx.select({ unit: product.unit }).from(product).where(eq(product.id, batch.productId)).limit(1);
+      if (!outputProduct) throw new MaterialAccountingError('PRODUCT_NOT_FOUND', 'Finished product was not found.');
+      const [rejectedGoodsLot] = await tx.insert(productionRejectedGoodsLot).values({
+        manufacturerId: batch.manufacturerId,
+        productId: batch.productId,
+        productionBatchId: batch.id,
+        lotReference: `${batch.batchReference}-REJ`,
+        quantity: microsToDecimal(rejectedOutputMicros),
+        unit: outputProduct.unit,
+        evidenceReference: input.outputEvidenceReference,
+        verifiedByUserId: actorUserId,
+        verifiedAt: now,
+      }).returning({ id: productionRejectedGoodsLot.id });
+      if (!rejectedGoodsLot) throw new Error('Verified rejected-goods lot was not recorded.');
+      rejectedGoodsLotId = rejectedGoodsLot.id;
+    }
     if (batch.materialPlanId) {
       await tx.update(productionMaterialPlan).set({ status: 'completed' })
         .where(and(eq(productionMaterialPlan.id, batch.materialPlanId), eq(productionMaterialPlan.status, 'in_progress')));
     }
-    await tx.insert(auditLog).values({ userId: actorUserId, action: 'PRODUCTION_BATCH_MATERIAL_REVIEW_RELEASED', targetType: 'production_batch', targetId: batch.id, beforeState: { materialReviewStatus: 'pending', stockQuantity: quantityBefore, manufacturerReportedGoodOutputQuantity: batch.reportedGoodOutputQuantity, manufacturerReportedRejectedOutputQuantity: batch.reportedRejectedOutputQuantity }, afterState: { materialReviewStatus: 'released', stockQuantity: quantityAfter, verifiedGoodOutputQuantity: microsToDecimal(goodOutputMicros), verifiedRejectedOutputQuantity: microsToDecimal(rejectedOutputMicros) }, metadata: JSON.stringify({ manufacturerId: batch.manufacturerId, batchReference: batch.batchReference, outputProductId: batch.productId, totalOutputQuantity: batch.declaredQuantity, verifiedGoodOutputQuantity: goodOutputQuantity, rejectedOutputQuantity: microsToDecimal(rejectedOutputMicros), outputEvidenceReference: input.outputEvidenceReference, materialCount: usages.length, materialCodes: usages.map((usage) => usage.materialCode), sourceMovementIds: [...sourceMovementIds], decisionNote: input.note }) });
+    await tx.insert(auditLog).values({ userId: actorUserId, action: 'PRODUCTION_BATCH_MATERIAL_REVIEW_RELEASED', targetType: 'production_batch', targetId: batch.id, beforeState: { materialReviewStatus: 'pending', stockQuantity: quantityBefore, manufacturerReportedGoodOutputQuantity: batch.reportedGoodOutputQuantity, manufacturerReportedRejectedOutputQuantity: batch.reportedRejectedOutputQuantity }, afterState: { materialReviewStatus: 'released', stockQuantity: quantityAfter, verifiedGoodOutputQuantity: microsToDecimal(goodOutputMicros), verifiedRejectedOutputQuantity: microsToDecimal(rejectedOutputMicros), finishedGoodsLotId: finishedGoodsLotId ?? null, rejectedGoodsLotId: rejectedGoodsLotId ?? null }, metadata: JSON.stringify({ manufacturerId: batch.manufacturerId, batchReference: batch.batchReference, outputProductId: batch.productId, totalOutputQuantity: batch.declaredQuantity, verifiedGoodOutputQuantity: goodOutputQuantity, rejectedOutputQuantity: microsToDecimal(rejectedOutputMicros), finishedGoodsLotId: finishedGoodsLotId ?? null, rejectedGoodsLotId: rejectedGoodsLotId ?? null, outputEvidenceReference: input.outputEvidenceReference, materialCount: usages.length, materialCodes: usages.map((usage) => usage.materialCode), sourceMovementIds: [...sourceMovementIds], decisionNote: input.note }) });
     return { batchId: batch.id, manufacturerId: batch.manufacturerId, status: 'released', replayed: false };
   });
 
@@ -1029,6 +1079,30 @@ export async function getProductionBatchMaterialTraceability(batchId: string, ma
     )).limit(1);
   if (!batch) throw new MaterialAccountingError('NOT_FOUND', 'Production batch was not found.');
 
+  const [finishedGoodsLot] = await db.select({
+    id: productionFinishedGoodsLot.id,
+    lotReference: productionFinishedGoodsLot.lotReference,
+    quantity: productionFinishedGoodsLot.quantity,
+    unit: productionFinishedGoodsLot.unit,
+    evidenceReference: productionFinishedGoodsLot.evidenceReference,
+    verifiedAt: productionFinishedGoodsLot.verifiedAt,
+  }).from(productionFinishedGoodsLot)
+    .where(and(
+      eq(productionFinishedGoodsLot.productionBatchId, batch.id),
+      eq(productionFinishedGoodsLot.manufacturerId, batch.manufacturerId),
+    )).limit(1);
+  const [rejectedGoodsLot] = await db.select({
+    id: productionRejectedGoodsLot.id,
+    lotReference: productionRejectedGoodsLot.lotReference,
+    quantity: productionRejectedGoodsLot.quantity,
+    unit: productionRejectedGoodsLot.unit,
+    evidenceReference: productionRejectedGoodsLot.evidenceReference,
+    verifiedAt: productionRejectedGoodsLot.verifiedAt,
+  }).from(productionRejectedGoodsLot).where(and(
+    eq(productionRejectedGoodsLot.productionBatchId, batch.id),
+    eq(productionRejectedGoodsLot.manufacturerId, batch.manufacturerId),
+  )).limit(1);
+
   const usageRows = await db.select({
     usageId: productionBatchMaterialUsage.id,
     materialId: productionBatchMaterialUsage.materialId,
@@ -1043,6 +1117,66 @@ export async function getProductionBatchMaterialTraceability(batchId: string, ma
     .innerJoin(productionMaterial, eq(productionBatchMaterialUsage.materialId, productionMaterial.id))
     .leftJoin(productionMaterialMovement, eq(productionMaterialMovement.batchUsageId, productionBatchMaterialUsage.id))
     .where(eq(productionBatchMaterialUsage.productionBatchId, batch.id));
+
+  const lotEvents = finishedGoodsLot ? await db.select({
+    id: productionFinishedGoodsMovement.id,
+    eventType: productionFinishedGoodsMovement.eventType,
+    quantityDelta: productionFinishedGoodsMovement.quantityDelta,
+    sourceType: productionFinishedGoodsMovement.sourceType,
+    sourceId: productionFinishedGoodsMovement.sourceId,
+    reference: productionFinishedGoodsMovement.reference,
+    createdAt: productionFinishedGoodsMovement.createdAt,
+  }).from(productionFinishedGoodsMovement).where(and(
+    eq(productionFinishedGoodsMovement.lotId, finishedGoodsLot.id),
+    eq(productionFinishedGoodsMovement.manufacturerId, batch.manufacturerId),
+  )).orderBy(asc(productionFinishedGoodsMovement.createdAt)) : [];
+  const lotAllocations = finishedGoodsLot ? await db.select({
+    id: productionFinishedGoodsAllocation.id,
+    transactionId: productionFinishedGoodsAllocation.transactionId,
+    quantity: productionFinishedGoodsAllocation.quantity,
+    createdAt: productionFinishedGoodsAllocation.createdAt,
+  }).from(productionFinishedGoodsAllocation).where(and(
+    eq(productionFinishedGoodsAllocation.lotId, finishedGoodsLot.id),
+    eq(productionFinishedGoodsAllocation.manufacturerId, batch.manufacturerId),
+  )).orderBy(asc(productionFinishedGoodsAllocation.createdAt)) : [];
+  const allocationIds = lotAllocations.map((allocation) => allocation.id);
+  const allocationEvents = allocationIds.length ? await db.select({
+    allocationId: productionFinishedGoodsAllocationEvent.allocationId,
+    eventType: productionFinishedGoodsAllocationEvent.eventType,
+    quantity: productionFinishedGoodsAllocationEvent.quantity,
+    reference: productionFinishedGoodsAllocationEvent.reference,
+    createdAt: productionFinishedGoodsAllocationEvent.createdAt,
+  }).from(productionFinishedGoodsAllocationEvent)
+    .where(inArray(productionFinishedGoodsAllocationEvent.allocationId, allocationIds))
+    .orderBy(asc(productionFinishedGoodsAllocationEvent.createdAt)) : [];
+  const lotReturns = finishedGoodsLot ? await db.select({
+    id: productionFinishedGoodsReturn.id,
+    returnReference: productionFinishedGoodsReturn.returnReference,
+    quantity: productionFinishedGoodsReturn.quantity,
+    transactionId: productionFinishedGoodsReturn.transactionId,
+    createdAt: productionFinishedGoodsReturn.createdAt,
+    decision: productionFinishedGoodsReturnInspection.decision,
+    acceptedQuantity: productionFinishedGoodsReturnInspection.acceptedQuantity,
+    rejectedQuantity: productionFinishedGoodsReturnInspection.rejectedQuantity,
+  }).from(productionFinishedGoodsReturn)
+    .leftJoin(productionFinishedGoodsReturnInspection, eq(productionFinishedGoodsReturnInspection.returnId, productionFinishedGoodsReturn.id))
+    .where(and(
+      eq(productionFinishedGoodsReturn.lotId, finishedGoodsLot.id),
+      eq(productionFinishedGoodsReturn.manufacturerId, batch.manufacturerId),
+    )).orderBy(asc(productionFinishedGoodsReturn.createdAt)) : [];
+  const lotRework = await db.select({
+    id: productionFinishedGoodsRework.id,
+    quantity: productionFinishedGoodsRework.quantity,
+    reason: productionFinishedGoodsRework.reason,
+    createdAt: productionFinishedGoodsRework.createdAt,
+    decision: productionFinishedGoodsReworkDecision.decision,
+    reviewerUserId: productionFinishedGoodsReworkDecision.reviewerUserId,
+  }).from(productionFinishedGoodsRework)
+    .leftJoin(productionFinishedGoodsReworkDecision, eq(productionFinishedGoodsReworkDecision.reworkId, productionFinishedGoodsRework.id))
+    .where(and(
+      eq(productionFinishedGoodsRework.sourceBatchId, batch.id),
+      eq(productionFinishedGoodsRework.manufacturerId, batch.manufacturerId),
+    )).orderBy(asc(productionFinishedGoodsRework.createdAt));
 
   const usageIds = usageRows.map((row) => row.usageId);
   const allocationRows = usageIds.length ? await db.select({
@@ -1112,6 +1246,17 @@ export async function getProductionBatchMaterialTraceability(batchId: string, ma
       yieldToleranceStandardId: batch.yieldToleranceStandardId,
       status: batch.status,
       materialPlanId: batch.materialPlanId,
+      finishedGoodsLot: finishedGoodsLot ?? null,
+      rejectedGoodsLot: rejectedGoodsLot ?? null,
+      finishedGoodsLifecycle: {
+        movements: lotEvents,
+        allocations: lotAllocations.map((allocation) => ({
+          ...allocation,
+          events: allocationEvents.filter((event) => event.allocationId === allocation.id),
+        })),
+        returns: lotReturns,
+        rework: lotRework,
+      },
     },
     materials: usageRows.map((usage) => ({
       materialCode: usage.materialCode,

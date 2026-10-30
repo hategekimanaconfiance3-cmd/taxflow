@@ -1360,6 +1360,230 @@ export const productionBatch = pgTable(
   ],
 );
 
+// A released batch's independently verified good output is preserved as an
+// immutable finished-goods lot. This is forward-only evidence; historical
+// stock is not assigned invented lots.
+export const productionFinishedGoodsLot = pgTable(
+  'production_finished_goods_lot',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    productId: text('product_id').notNull().references(() => product.id),
+    productionBatchId: text('production_batch_id').notNull().references(() => productionBatch.id),
+    stockMovementId: text('stock_movement_id').notNull().references(() => stockMovement.id),
+    lotReference: text('lot_reference').notNull(),
+    quantity: numeric('quantity', { precision: 24, scale: 6, mode: 'string' }).notNull(),
+    unit: text('unit').notNull(),
+    evidenceReference: text('evidence_reference').notNull(),
+    verifiedByUserId: text('verified_by_user_id').notNull().references(() => user.id),
+    verifiedAt: timestamp('verified_at').notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('production_finished_goods_lot_batch_uniq').on(table.productionBatchId),
+    uniqueIndex('production_finished_goods_lot_movement_uniq').on(table.stockMovementId),
+    uniqueIndex('production_finished_goods_lot_manufacturer_ref_uniq').on(table.manufacturerId, table.lotReference),
+    index('production_finished_goods_lot_product_created_idx').on(table.manufacturerId, table.productId, table.createdAt),
+    check('production_finished_goods_lot_quantity_positive', sql`${table.quantity} > 0`),
+    check('production_finished_goods_lot_evidence_check', sql`length(trim(${table.evidenceReference})) >= 2`),
+  ],
+);
+
+// Rejected output receives a separate non-saleable provenance record only
+// when its production batch is independently released.
+export const productionRejectedGoodsLot = pgTable(
+  'production_rejected_goods_lot',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    productId: text('product_id').notNull().references(() => product.id),
+    productionBatchId: text('production_batch_id').notNull().references(() => productionBatch.id),
+    lotReference: text('lot_reference').notNull(),
+    quantity: numeric('quantity', { precision: 24, scale: 6, mode: 'string' }).notNull(),
+    unit: text('unit').notNull(),
+    evidenceReference: text('evidence_reference').notNull(),
+    verifiedByUserId: text('verified_by_user_id').notNull().references(() => user.id),
+    verifiedAt: timestamp('verified_at').notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('production_rejected_goods_lot_batch_uniq').on(table.productionBatchId),
+    uniqueIndex('production_rejected_goods_lot_manufacturer_ref_uniq').on(table.manufacturerId, table.lotReference),
+    check('production_rejected_goods_lot_quantity_positive', sql`${table.quantity} > 0`),
+    check('production_rejected_goods_lot_evidence_check', sql`length(trim(${table.evidenceReference})) >= 2`),
+  ],
+);
+
+// Finished-goods lifecycle evidence extends released lots without rewriting
+// the original production output or the aggregate stock ledger.
+export const productionFinishedGoodsWarehouse = pgTable(
+  'production_finished_goods_warehouse',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    code: text('code').notNull(),
+    name: text('name').notNull(),
+    createdByUserId: text('created_by_user_id').notNull().references(() => user.id),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('production_fg_warehouse_manufacturer_code_uniq').on(table.manufacturerId, table.code),
+    index('production_fg_warehouse_manufacturer_idx').on(table.manufacturerId),
+  ],
+);
+
+// Append-only lot movements. Reservation and inspection evidence are stored in
+// their own append-only tables and do not change the saleable balance.
+export const productionFinishedGoodsMovement = pgTable(
+  'production_finished_goods_movement',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    lotId: text('lot_id').notNull().references(() => productionFinishedGoodsLot.id),
+    warehouseId: text('warehouse_id').notNull().references(() => productionFinishedGoodsWarehouse.id),
+    eventType: text('event_type').notNull(),
+    quantityDelta: numeric('quantity_delta', { precision: 24, scale: 6, mode: 'string' }).notNull(),
+    sourceType: text('source_type').notNull(),
+    sourceId: text('source_id').notNull(),
+    idempotencyKey: text('idempotency_key').notNull(),
+    reference: text('reference'),
+    actorUserId: text('actor_user_id').notNull().references(() => user.id),
+    reason: text('reason'),
+    evidenceReference: text('evidence_reference'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('production_fg_movement_manufacturer_key_uniq').on(table.manufacturerId, table.idempotencyKey),
+    index('production_fg_movement_lot_created_idx').on(table.lotId, table.createdAt),
+    index('production_fg_movement_source_idx').on(table.sourceType, table.sourceId),
+    check('production_fg_movement_type_check', sql`${table.eventType} IN ('warehouse_assignment', 'dispatch', 'transfer_out', 'transfer_in', 'return_accepted', 'rework_consumed', 'rework_output', 'authorized_correction')`),
+    check('production_fg_movement_delta_check', sql`(${table.eventType} IN ('dispatch', 'transfer_out', 'rework_consumed') AND ${table.quantityDelta} < 0) OR (${table.eventType} IN ('warehouse_assignment', 'transfer_in', 'return_accepted', 'rework_output') AND ${table.quantityDelta} > 0) OR (${table.eventType} = 'authorized_correction' AND ${table.quantityDelta} <> 0)`),
+    check('production_fg_movement_reason_evidence_check', sql`${table.eventType} NOT IN ('authorized_correction') OR (length(trim(coalesce(${table.reason}, ''))) >= 5 AND length(trim(coalesce(${table.evidenceReference}, ''))) >= 2)`),
+  ],
+);
+
+export const productionFinishedGoodsAllocation = pgTable(
+  'production_finished_goods_allocation',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    lotId: text('lot_id').notNull().references(() => productionFinishedGoodsLot.id),
+    transactionId: text('transaction_id').notNull().references(() => transaction.id),
+    quantity: numeric('quantity', { precision: 24, scale: 6, mode: 'string' }).notNull(),
+    idempotencyKey: text('idempotency_key').notNull(),
+    actorUserId: text('actor_user_id').notNull().references(() => user.id),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('production_fg_allocation_manufacturer_key_uniq').on(table.manufacturerId, table.idempotencyKey),
+    index('production_fg_allocation_lot_created_idx').on(table.lotId, table.createdAt),
+    index('production_fg_allocation_transaction_idx').on(table.transactionId),
+    check('production_fg_allocation_quantity_check', sql`${table.quantity} > 0`),
+  ],
+);
+
+export const productionFinishedGoodsAllocationEvent = pgTable(
+  'production_finished_goods_allocation_event',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    allocationId: text('allocation_id').notNull().references(() => productionFinishedGoodsAllocation.id),
+    eventType: text('event_type').notNull(),
+    quantity: numeric('quantity', { precision: 24, scale: 6, mode: 'string' }).notNull(),
+    actorUserId: text('actor_user_id').notNull().references(() => user.id),
+    reference: text('reference'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('production_fg_allocation_event_allocation_idx').on(table.allocationId, table.createdAt),
+    check('production_fg_allocation_event_type_check', sql`${table.eventType} IN ('reserved', 'cancelled', 'dispatched')`),
+    check('production_fg_allocation_event_quantity_check', sql`${table.quantity} > 0`),
+  ],
+);
+
+export const productionFinishedGoodsReturn = pgTable(
+  'production_finished_goods_return',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    lotId: text('lot_id').notNull().references(() => productionFinishedGoodsLot.id),
+    transactionId: text('transaction_id').notNull().references(() => transaction.id),
+    returnReference: text('return_reference').notNull(),
+    quantity: numeric('quantity', { precision: 24, scale: 6, mode: 'string' }).notNull(),
+    reason: text('reason').notNull(),
+    evidenceReference: text('evidence_reference').notNull(),
+    idempotencyKey: text('idempotency_key').notNull(),
+    actorUserId: text('actor_user_id').notNull().references(() => user.id),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('production_fg_return_manufacturer_key_uniq').on(table.manufacturerId, table.idempotencyKey),
+    uniqueIndex('production_fg_return_manufacturer_ref_uniq').on(table.manufacturerId, table.returnReference),
+    index('production_fg_return_lot_created_idx').on(table.lotId, table.createdAt),
+    check('production_fg_return_quantity_check', sql`${table.quantity} > 0`),
+    check('production_fg_return_evidence_check', sql`length(trim(${table.evidenceReference})) >= 2 AND length(trim(${table.reason})) >= 5`),
+  ],
+);
+
+export const productionFinishedGoodsReturnInspection = pgTable(
+  'production_finished_goods_return_inspection',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    returnId: text('return_id').notNull().unique().references(() => productionFinishedGoodsReturn.id),
+    warehouseId: text('warehouse_id').notNull().references(() => productionFinishedGoodsWarehouse.id),
+    decision: text('decision').notNull(),
+    acceptedQuantity: numeric('accepted_quantity', { precision: 24, scale: 6, mode: 'string' }).notNull().default('0'),
+    rejectedQuantity: numeric('rejected_quantity', { precision: 24, scale: 6, mode: 'string' }).notNull().default('0'),
+    reason: text('reason').notNull(),
+    evidenceReference: text('evidence_reference').notNull(),
+    inspectorUserId: text('inspector_user_id').notNull().references(() => user.id),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    check('production_fg_return_inspection_decision_check', sql`${table.decision} IN ('accepted', 'rejected', 'partial')`),
+    check('production_fg_return_inspection_quantities_check', sql`${table.acceptedQuantity} >= 0 AND ${table.rejectedQuantity} >= 0`),
+    check('production_fg_return_inspection_decision_quantity_check', sql`(${table.decision} = 'accepted' AND ${table.rejectedQuantity} = 0) OR (${table.decision} = 'rejected' AND ${table.acceptedQuantity} = 0) OR (${table.decision} = 'partial' AND ${table.acceptedQuantity} > 0 AND ${table.rejectedQuantity} > 0)`),
+    check('production_fg_return_inspection_reason_check', sql`length(trim(${table.reason})) >= 5 AND length(trim(${table.evidenceReference})) >= 2`),
+  ],
+);
+
+export const productionFinishedGoodsRework = pgTable(
+  'production_finished_goods_rework',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    sourceRejectedLotId: text('source_rejected_lot_id').notNull().references(() => productionRejectedGoodsLot.id),
+    sourceBatchId: text('source_batch_id').notNull().references(() => productionBatch.id),
+    quantity: numeric('quantity', { precision: 24, scale: 6, mode: 'string' }).notNull(),
+    reason: text('reason').notNull(),
+    evidenceReference: text('evidence_reference').notNull(),
+    idempotencyKey: text('idempotency_key').notNull(),
+    actorUserId: text('actor_user_id').notNull().references(() => user.id),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('production_fg_rework_manufacturer_key_uniq').on(table.manufacturerId, table.idempotencyKey),
+    index('production_fg_rework_source_rejected_lot_idx').on(table.sourceRejectedLotId, table.createdAt),
+    check('production_fg_rework_quantity_check', sql`${table.quantity} > 0`),
+    check('production_fg_rework_evidence_check', sql`length(trim(${table.reason})) >= 5 AND length(trim(${table.evidenceReference})) >= 2`),
+  ],
+);
+
+export const productionFinishedGoodsReworkDecision = pgTable(
+  'production_finished_goods_rework_decision',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    reworkId: text('rework_id').notNull().unique().references(() => productionFinishedGoodsRework.id),
+    decision: text('decision').notNull(),
+    reason: text('reason').notNull(),
+    reviewerUserId: text('reviewer_user_id').notNull().references(() => user.id),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    check('production_fg_rework_decision_check', sql`${table.decision} IN ('approved', 'rejected')`),
+    check('production_fg_rework_decision_reason_check', sql`length(trim(${table.reason})) >= 5`),
+  ],
+);
+
 // Confidential manufacturer recipe data is stored outside the general
 // production batch read model. Recipe versions and their lines are immutable.
 export const productionMaterial = pgTable(
@@ -1832,6 +2056,10 @@ export const productionBatchRelations = relations(productionBatch, ({ one }) => 
   recipeVersion: one(productionRecipe, {
     fields: [productionBatch.recipeVersionId],
     references: [productionRecipe.id],
+  }),
+  finishedGoodsLot: one(productionFinishedGoodsLot, {
+    fields: [productionBatch.id],
+    references: [productionFinishedGoodsLot.productionBatchId],
   }),
 }));
 
