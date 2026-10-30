@@ -2,7 +2,8 @@ import { z } from 'zod';
 
 export const productRegistrationSchema = z.object({
   name: z.string().trim().min(1, 'Product name is required').max(160),
-  unit: z.enum(['kg', 'unit', 'liter', 'box', 'pack', 'ton']),
+  unit: z.string().trim().min(1, 'Product unit is required').max(32)
+    .regex(/^[\p{L}\p{N}][\p{L}\p{N} ./_-]*$/u, 'Enter a valid product unit.'),
   categoryCode: z.string().trim().max(64).optional().default(''),
 });
 

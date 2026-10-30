@@ -53,6 +53,7 @@ export function ProductionForm({ products, recipes, plans, vatRate }: Production
     const [showNewProduct, setShowNewProduct] = useState(false);
     const [newProductName, setNewProductName] = useState("");
     const [newProductUnit, setNewProductUnit] = useState("box");
+    const [newProductCustomUnit, setNewProductCustomUnit] = useState("");
     const [newProductCategory, setNewProductCategory] = useState("");
     const [selectedProductId, setSelectedProductId] = useState("");
     const [selectedRecipeId, setSelectedRecipeId] = useState("");
@@ -81,7 +82,7 @@ export function ProductionForm({ products, recipes, plans, vatRate }: Production
     async function handleCreateProduct() {
         const parsed = productRegistrationSchema.safeParse({
             name: newProductName,
-            unit: newProductUnit,
+            unit: newProductUnit === "custom" ? newProductCustomUnit : newProductUnit,
             categoryCode: newProductCategory,
         });
         if (!parsed.success) {
@@ -107,6 +108,8 @@ export function ProductionForm({ products, recipes, plans, vatRate }: Production
                     : [...current, body.product!]);
                 setSelectedProductId(body.product.id);
                 setNewProductName("");
+                setNewProductUnit("box");
+                setNewProductCustomUnit("");
                 setNewProductCategory("");
                 setShowNewProduct(false);
                 setMessage({ text: `Product registered · ${body.product.id}`, type: "success" });
@@ -223,8 +226,18 @@ export function ProductionForm({ products, recipes, plans, vatRate }: Production
                                         <SelectItem value="box">Box</SelectItem>
                                         <SelectItem value="pack">Pack</SelectItem>
                                         <SelectItem value="ton">Ton</SelectItem>
+                                        <SelectItem value="custom">Custom unit</SelectItem>
                                     </SelectContent>
                                 </Select>
+                                {newProductUnit === "custom" && (
+                                    <Input
+                                        aria-label="Custom product unit"
+                                        placeholder="e.g., 12kg"
+                                        value={newProductCustomUnit}
+                                        onChange={(event) => setNewProductCustomUnit(event.target.value)}
+                                        maxLength={32}
+                                    />
+                                )}
                             </div>
                             <div className="space-y-1.5">
                                 <Label htmlFor="new-product-category" className="text-xs">Category code (optional)</Label>
