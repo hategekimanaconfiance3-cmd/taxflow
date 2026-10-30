@@ -87,6 +87,43 @@ async function withTransactionRetry<T>(operation: () => Promise<T>): Promise<T> 
   }
 }
 
+function transactionActionFailure(error: unknown, action: 'confirm' | 'reject') {
+  const safeMessages = new Set([
+    'Transaction not found or already processed',
+    'Only the verified business owner can accept this order. Representatives may confirm receipts only.',
+    'The registered business owner must have a verified email, Taxpayer Identification Number, approved clearance, and active account.',
+    'This transaction already has an order acceptance record.',
+    'The transaction reservation does not match its commercial agreement; acceptance requires manual review.',
+    'Seller no longer has sufficient stock',
+    'The buyer confirmation window has expired. Reserved stock has been released.',
+  ]);
+
+  if (error instanceof Error && safeMessages.has(error.message)) {
+    return { success: false as const, error: error.message };
+  }
+
+  const reference = crypto.randomUUID();
+  console.error(`[TransactionAction:${action}:${reference}] Failed to process buyer decision`, {
+    errorName: error instanceof Error ? error.name : typeof error,
+    databaseCode: getDatabaseErrorCode(error),
+  });
+  return {
+    success: false as const,
+    error: `We could not ${action} this order. Contact support with reference ${reference}.`,
+  };
+}
+
+async function runBuyerDecision<T>(
+  action: 'confirm' | 'reject',
+  operation: () => Promise<T>,
+): Promise<{ ok: true; value: T } | { ok: false; result: ReturnType<typeof transactionActionFailure> }> {
+  try {
+    return { ok: true, value: await operation() };
+  } catch (error) {
+    return { ok: false, result: transactionActionFailure(error, action) };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Auto-expire stale pending transactions
 // ---------------------------------------------------------------------------
@@ -412,12 +449,12 @@ export async function confirmTransaction(transactionId: string) {
   await requireTraderSession();
 
   if (suspended) {
-    throw new Error(`Your account is ${clearanceStatus}. Cannot confirm transactions.`);
+    return { success: false as const, error: `Your account is ${clearanceStatus}. Cannot confirm transactions.` };
   }
 
   await expireStalePendingTransactions();
 
-  const confirmation = await withTransactionRetry(() => db.transaction(async (tx) => {
+  const confirmationResult = await runBuyerDecision('confirm', () => withTransactionRetry(() => db.transaction(async (tx) => {
     // Serialize concurrent confirmations by locking the transaction row first.
     const [lockedTxn] = await tx
       .select()
@@ -574,7 +611,9 @@ export async function confirmTransaction(transactionId: string) {
       link: '/dashboard/pending',
     }).returning();
     return { txn: lockedTxn, savedNotification, expired: false };
-  }));
+  })));
+  if (!confirmationResult.ok) return confirmationResult.result;
+  const confirmation = confirmationResult.value;
   const { txn } = confirmation;
 
   if (confirmation.expired) {
@@ -588,7 +627,7 @@ export async function confirmTransaction(transactionId: string) {
     } catch (error) {
       console.error('Expired reservation was released, but realtime notification delivery failed', error);
     }
-    throw new Error('The buyer confirmation window has expired. Reserved stock has been released.');
+    return { success: false as const, error: 'The buyer confirmation window has expired. Reserved stock has been released.' };
   }
 
   try {
@@ -611,7 +650,7 @@ export async function confirmTransaction(transactionId: string) {
     console.error('Transaction confirmed, but post-confirmation compliance alerting failed', error);
   }
 
-  return { success: true };
+  return { success: true as const };
 }
 
 // ---------------------------------------------------------------------------
@@ -622,7 +661,7 @@ export async function rejectTransaction(transactionId: string) {
   const session = await requireTraderSession();
   await expireStalePendingTransactions();
 
-  const rejection = await withTransactionRetry(() => db.transaction(async (tx) => {
+  const rejectionResult = await runBuyerDecision('reject', () => withTransactionRetry(() => db.transaction(async (tx) => {
     const [lockedTxn] = await tx
       .select()
       .from(transaction)
@@ -658,7 +697,9 @@ export async function rejectTransaction(transactionId: string) {
       message: `${session.user.name} rejected your sale.`, link: '/dashboard/pending',
     }).returning();
     return { txn: lockedTxn, savedNotification };
-  }));
+  })));
+  if (!rejectionResult.ok) return rejectionResult.result;
+  const rejection = rejectionResult.value;
   const { txn } = rejection;
 
   try {
@@ -672,7 +713,7 @@ export async function rejectTransaction(transactionId: string) {
     console.error('Transaction rejected, but realtime notification delivery failed', error);
   }
 
-  return { success: true };
+  return { success: true as const };
 }
 
 // ---------------------------------------------------------------------------

@@ -96,10 +96,12 @@ function ConfirmRejectActions({ transactionId }: { transactionId: string }) {
             try {
                 setError("");
                 if (action === "confirm") {
-                    await confirmTransaction(transactionId);
+                    const response = await confirmTransaction(transactionId);
+                    if (!response.success) throw new Error(response.error);
                     setResult("confirmed");
                 } else {
-                    await rejectTransaction(transactionId);
+                    const response = await rejectTransaction(transactionId);
+                    if (!response.success) throw new Error(response.error);
                     setResult("rejected");
                 }
                 router.refresh();
