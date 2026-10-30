@@ -1,6 +1,6 @@
 ﻿import { requireRRASession } from '@/lib/auth-guard';
 import db from '@/db/drizzle';
-import { user, vatRecord, taxPayment, auditLog, rraStaff, rraStaffRole } from '@/db/schema';
+import { user, vatRecord, taxPayment, auditLog, rraStaff } from '@/db/schema';
 import { sql, desc, gte } from 'drizzle-orm';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -124,6 +124,7 @@ export default async function SuperAdminOverviewPage() {
     : 100;
 
   const controlPlaneLinks = [
+    { label: 'Manufacturing Standards', href: '/admin/super/manufacturing/tolerances', icon: Scale, desc: 'Official tolerance versions and approvals' },
     { label: 'Admin Management', href: '/admin/super/admins', icon: UserCog, desc: 'Staff roles & access' },
     { label: 'Security Center', href: '/admin/super/security', icon: Lock, desc: 'Auth & permission audit' },
     { label: 'System Health', href: '/admin/super/system', icon: Server, desc: 'DB & app status' },

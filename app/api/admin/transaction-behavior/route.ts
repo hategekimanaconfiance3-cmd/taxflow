@@ -1,5 +1,5 @@
-import { auth } from "@/lib/auth";
-import { headers } from "next/headers";
+import { requireAnyRRAPermission } from "@/lib/auth-guard";
+import { hasRRAPermission } from "@/lib/rra-rbac";
 import db from "@/db/drizzle";
 import { transaction, user } from "@/db/schema";
 import { sql, desc } from "drizzle-orm";
@@ -26,8 +26,8 @@ export interface TransactionBehaviorData {
 }
 
 export async function GET() {
-    const session = await auth.api.getSession({ headers: await headers() });
-    if (!session?.user) return new Response("Unauthorized", { status: 401 });
+    const { staff } = await requireAnyRRAPermission("analytics.read", "reports.aggregate.read");
+    const canReadTraderTransactions = staff.clearanceRoles.some((role) => hasRRAPermission(role, "transaction.read"));
 
     try {
         const thirtyDaysAgo = new Date();
@@ -43,7 +43,7 @@ export async function GET() {
             .where(sql`${transaction.createdAt} >= ${thirtyDaysAgo}`)
             .groupBy(sql`EXTRACT(HOUR FROM ${transaction.createdAt})`),
 
-            db.select({
+            canReadTraderTransactions ? db.select({
                 businessId: transaction.sellerId,
                 businessName: user.businessName,
                 txCount: sql<number>`COUNT(*)`.as("txCount"),
@@ -54,7 +54,7 @@ export async function GET() {
             .where(sql`${transaction.createdAt} >= ${thirtyDaysAgo}`)
             .groupBy(transaction.sellerId, user.businessName)
             .orderBy(desc(sql`COUNT(*)`))
-            .limit(5),
+            .limit(5) : Promise.resolve([]),
 
             db.select({
                 total: sql<number>`COUNT(*)`.as("total"),

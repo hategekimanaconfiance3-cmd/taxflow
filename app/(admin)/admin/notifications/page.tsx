@@ -4,9 +4,15 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { getAdminNotifications } from '@/lib/actions/admin-notification.action';
 import { requireRRASession } from '@/lib/auth-guard';
+import { cookies } from 'next/headers';
+import { isLangCode, translate } from '@/lib/language';
+import type { LangCode } from '@/lib/language';
 
 export default async function AdminNotificationsPage() {
   await requireRRASession();
+  const cookieStore = await cookies();
+  const savedLanguage = cookieStore.get('taxflow-language')?.value;
+  const lang: LangCode = isLangCode(savedLanguage) ? savedLanguage : 'en';
   const notifications = await getAdminNotifications();
   const unreadCount = notifications.filter((item) => !item.read).length;
 
@@ -48,9 +54,9 @@ export default async function AdminNotificationsPage() {
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       {!item.read && <span className="h-2 w-2 shrink-0 rounded-full bg-blue-600" aria-label="Unread" />}
-                      <p className="text-sm font-medium">{item.title}</p>
+                      <p className="text-sm font-medium">{item.type === 'message_received' ? translate(item.title, lang) : item.title}</p>
                     </div>
-                    <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">{item.message}</p>
+                    <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">{item.type === 'message_received' ? translate(item.message, lang) : item.message}</p>
                   </div>
                   <time className="shrink-0 text-xs text-muted-foreground" dateTime={item.createdAt.toISOString()}>
                     {item.createdAt.toLocaleString()}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -37,19 +37,14 @@ const PAYMENT_IDEMPOTENCY_STORAGE_KEY = "taxflow-payment-idempotency-key";
 
 export function TaxPaymentForm({ outstanding }: TaxPaymentFormProps) {
     const router = useRouter();
-    const idempotencyKey = useRef<string | null>(null);
+    const [idempotencyKey, setIdempotencyKey] = useState<string | null>(null);
     const noTaxDue = outstanding <= 0;
 
-    // Build a schema whose max constraint is tied to current outstanding
-    const schema = useMemo(
-        () => createTaxPaymentSchema(Math.max(1, outstanding)),
-        [outstanding],
-    );
+    const schema = createTaxPaymentSchema();
 
     const form = useForm<TaxPaymentInput>({
         resolver: zodResolver(schema),
         defaultValues: {
-            amount: undefined as unknown as number,
             method: "mobile_money",
             reference: "",
         },
@@ -63,24 +58,23 @@ export function TaxPaymentForm({ outstanding }: TaxPaymentFormProps) {
     const onSubmit = async (values: TaxPaymentInput) => {
         try {
             const paymentRequestKey =
-                idempotencyKey.current ??
+                idempotencyKey ??
                 sessionStorage.getItem(PAYMENT_IDEMPOTENCY_STORAGE_KEY) ??
                 crypto.randomUUID();
-            idempotencyKey.current = paymentRequestKey;
+            setIdempotencyKey(paymentRequestKey);
             sessionStorage.setItem(PAYMENT_IDEMPOTENCY_STORAGE_KEY, paymentRequestKey);
-            await recordTaxPayment({
-                amount: values.amount,
+            const payment = await recordTaxPayment({
                 method: values.method,
                 reference: values.reference?.trim() || undefined,
             }, paymentRequestKey);
 
-            idempotencyKey.current = null;
+            setIdempotencyKey(null);
             sessionStorage.removeItem(PAYMENT_IDEMPOTENCY_STORAGE_KEY);
             form.reset();
             // Show success via root-level message
             form.setError("root", {
                 type: "success",
-                message: `Payment of ${values.amount.toLocaleString()} RWF submitted for RRA verification`,
+                message: `Payment ${payment.paymentReference}: full recorded outstanding balance of ${payment.amount.toLocaleString()} RWF submitted for settlement review`,
             });
             router.refresh();
         } catch (err) {
@@ -143,52 +137,13 @@ export function TaxPaymentForm({ outstanding }: TaxPaymentFormProps) {
                         onSubmit={form.handleSubmit(onSubmit)}
                         className="space-y-4"
                     >
-                        {/* Amount */}
-                        <FormField
-                            control={form.control}
-                            name="amount"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>Amount (RWF)</FormLabel>
-                                    <FormControl>
-                                        <Input
-                                            type="number"
-                                            placeholder="Enter payment amount"
-                                            disabled={noTaxDue}
-                                            min={1}
-                                            max={outstanding > 0 ? outstanding : undefined}
-                                            className="font-mono"
-                                            value={field.value ?? ""}
-                                            onChange={(e) => {
-                                                const val = e.target.value;
-                                                field.onChange(
-                                                    val === ""
-                                                        ? undefined
-                                                        : parseInt(val, 10),
-                                                );
-                                            }}
-                                        />
-                                    </FormControl>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
-
-                        {outstanding > 0 && (
-                            <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                className="text-xs h-6 px-2"
-                                onClick={() =>
-                                    form.setValue("amount", outstanding, {
-                                        shouldValidate: true,
-                                    })
-                                }
-                            >
-                                Pay full balance
-                            </Button>
-                        )}
+                <div className="rounded-md border bg-muted/30 px-3 py-3 text-sm">
+                    <p className="text-muted-foreground">Full payment request</p>
+                    <p className="mt-1 font-mono text-lg font-semibold">{outstanding.toLocaleString()} RWF</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                        TaxFlow recalculates the recorded outstanding balance on the server. Partial amounts are not accepted.
+                    </p>
+                </div>
 
                         {/* Payment Method */}
                         <FormField

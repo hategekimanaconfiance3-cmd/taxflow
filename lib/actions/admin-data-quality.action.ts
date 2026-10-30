@@ -3,7 +3,7 @@
 import { sql, eq } from "drizzle-orm";
 import db from "@/db/drizzle";
 import { user, transaction, stock, auditLog } from "@/db/schema";
-import { requireRRASession } from "@/lib/auth-guard";
+import { requireRRAPermission } from "@/lib/auth-guard";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -44,7 +44,7 @@ export type DataQualityMetrics = {
 // ---------------------------------------------------------------------------
 
 export async function getDataQualityMetrics(): Promise<DataQualityMetrics> {
-    await requireRRASession("super_admin", "compliance_officer", "audit_officer", "data_ai_analyst");
+    await requireRRAPermission("data_quality.read");
 
     // ── Trader Completeness ────────────────────────────────────────────
     const traders = await db

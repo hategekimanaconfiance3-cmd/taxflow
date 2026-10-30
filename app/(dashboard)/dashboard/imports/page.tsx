@@ -1,6 +1,7 @@
 import { requireApprovedClearance } from '@/lib/auth-guard';
 import { getProducts } from '@/lib/actions/stock.action';
 import { getImportDeclarations } from '@/lib/actions/import.action';
+import { listManufacturerMaterialAccounting } from '@/lib/material-accounting-service';
 import { ImportForm } from '@/components/dashboard/import-form/import-form';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -8,9 +9,15 @@ import { FileText, PackageCheck } from 'lucide-react';
 import { SubmitArrivalButton } from '@/components/dashboard/import-form/confirm-arrival-button';
 
 export default async function ImportsPage() {
-  await requireApprovedClearance();
+  const session = await requireApprovedClearance();
 
-  const [products, declarations] = await Promise.all([getProducts(), getImportDeclarations()]);
+  const [products, declarations, accounting] = await Promise.all([
+    getProducts(),
+    getImportDeclarations(),
+    session.user.role === 'manufacturer'
+      ? listManufacturerMaterialAccounting(session.user.id)
+      : Promise.resolve({ materials: [], receipts: [] }),
+  ]);
   const formProducts = products.map((p) => ({
     id: p.id,
     name: p.name,
@@ -26,7 +33,7 @@ export default async function ImportsPage() {
         </p>
       </div>
 
-      <ImportForm products={formProducts} />
+      <ImportForm products={formProducts} materials={accounting.materials.map(({ id, materialCode, name, unit }) => ({ id, materialCode, name, unit }))} />
 
       <Card>
         <CardHeader>
@@ -43,7 +50,9 @@ export default async function ImportsPage() {
           ) : (
             <div className="space-y-3">
               {declarations.map((declaration) => {
-                const statusLabel = declaration.status === 'submitted'
+                const statusLabel = declaration.isProductionMaterial && declaration.status === 'activated'
+                  ? 'Verified and added to material ledger'
+                  : declaration.status === 'submitted'
                   ? 'Awaiting RRA review'
                   : declaration.status === 'activated'
                     ? 'Approved and added to stock'

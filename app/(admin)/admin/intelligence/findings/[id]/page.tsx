@@ -6,17 +6,17 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { FindingReviewControls } from "@/components/admin/finding-review-controls";
 import { ProductionHistoryFindingEvidence } from "@/components/admin/production-history-finding-evidence";
 import { getFindingById } from "@/lib/actions/ai-finding.action";
-import { requireRRASession } from "@/lib/auth-guard";
+import { requireAnyRRAPermission } from "@/lib/auth-guard";
 import { hasRRAPermission } from "@/lib/rra-rbac";
 
 export default async function FindingDetailsPage({ params }: { params: Promise<{ id: string }> }) {
-  const { staff } = await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer", "data_ai_analyst");
+  const { staff } = await requireAnyRRAPermission("ai.findings.read", "investigation.case.manage", "compliance.followup.manage");
   const { id } = await params;
   const finding = await getFindingById(id);
   if (!finding) notFound();
 
   const canReadFormula = staff.clearanceRoles.some((role) => role !== "super_admin" && hasRRAPermission(role, "production.formula.read"));
-  const canReview = staff.clearanceRoles.some((role) => ["compliance_officer", "audit_officer", "audit_investigation_officer"].includes(role))
+  const canReview = staff.clearanceRoles.some((role) => hasRRAPermission(role, "compliance.followup.manage") || hasRRAPermission(role, "investigation.case.manage"))
     && (finding.findingType !== "production_discrepancy" || canReadFormula);
   let evidence: Record<string, unknown> | null = null;
   if (finding.evidenceRefs) {

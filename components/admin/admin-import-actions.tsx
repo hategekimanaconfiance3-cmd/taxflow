@@ -32,6 +32,7 @@ interface AdminImportActionsProps {
     actualQuantity: number;
     invoiceRef: string;
     supportingDoc: string;
+    materialCode?: string | null;
 }
 
 export function AdminImportActions({
@@ -41,6 +42,7 @@ export function AdminImportActions({
     actualQuantity,
     invoiceRef,
     supportingDoc,
+    materialCode,
 }: AdminImportActionsProps) {
     const router = useRouter();
     const [isPending, startTransition] = useTransition();
@@ -99,6 +101,7 @@ export function AdminImportActions({
                     <div className="text-xs text-muted-foreground">
                         <strong>{productName}</strong>
                     </div>
+                    {materialCode && <div className="text-xs font-mono text-muted-foreground">Protected material code: {materialCode}</div>}
                     <div className="text-xs font-mono">
                         Expected: {expectedQuantity.toLocaleString()} → Actual:{" "}
                         {actualQuantity.toLocaleString()}

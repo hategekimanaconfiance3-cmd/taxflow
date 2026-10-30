@@ -1,4 +1,4 @@
-import { requireRRASession } from '@/lib/auth-guard';
+import { requireRRAPermission } from '@/lib/auth-guard';
 import { getAuditLogs } from '@/lib/actions/admin.action';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -13,14 +13,10 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollText } from 'lucide-react';
 
 export default async function AdminAuditPage() {
-  await requireRRASession("audit_officer", "audit_investigation_officer", "super_admin");
+  await requireRRAPermission("audit.trail.read");
 
   let logs: Awaited<ReturnType<typeof getAuditLogs>> = [];
-  try {
-    logs = await getAuditLogs({ limit: 100 });
-  } catch {
-    // Insufficient role — show empty state
-  }
+  logs = await getAuditLogs({ limit: 100 });
 
   return (
     <div className="space-y-6">

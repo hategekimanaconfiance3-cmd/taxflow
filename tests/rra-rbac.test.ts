@@ -83,16 +83,22 @@ test("isRRARole returns false for trader roles and unknown strings", () => {
 // Super Admin does not bypass the separate taxpayer/formula confidentiality permissions.
 // ---------------------------------------------------------------------------
 
-test("super_admin has every defined permission except taxpayer search and confidential formulas", () => {
+test("super_admin has explicit permissions without inheriting manufacturing operations or restricted data access", () => {
+    const excluded = new Set<RRAPermission>([
+        "taxpayer.intelligence.search",
+        "production.formula.read",
+        "production.material.receipt.review",
+        "production.batch.review",
+        "production.material.adjust",
+    ]);
     for (const perm of RRA_PERMISSIONS) {
-        if (perm === "taxpayer.intelligence.search" || perm === "production.formula.read") continue;
+        if (excluded.has(perm)) continue;
         assert.ok(
             hasRRAPermission("super_admin", perm as RRAPermission),
             `super_admin should have permission: ${perm}`,
         );
     }
-    assert.equal(hasRRAPermission("super_admin", "taxpayer.intelligence.search"), false);
-    assert.equal(hasRRAPermission("super_admin", "production.formula.read"), false);
+    for (const perm of excluded) assert.equal(hasRRAPermission("super_admin", perm), false);
 });
 
 // ---------------------------------------------------------------------------
@@ -210,6 +216,14 @@ test("customs_import_officer cannot reconcile payments, manage staff, or read an
     assert.equal(hasRRAPermission("customs_import_officer", "investigation.case.manage"), false);
 });
 
+test("proposed compliance and investigation roles do not inherit legacy import permissions", () => {
+    assert.equal(hasRRAPermission("tax_compliance_officer", "imports.review"), false);
+    assert.equal(hasRRAPermission("audit_investigation_officer", "imports.read"), false);
+    assert.equal(hasRRAPermission("audit_investigation_officer", "imports.review"), false);
+    assert.equal(hasRRAPermission("customs_import_officer", "imports.read"), true);
+    assert.equal(hasRRAPermission("customs_import_officer", "imports.review"), true);
+});
+
 test("payments_reconciliation_officer cannot manage staff, investigations, or AI feedback", () => {
     assert.equal(hasRRAPermission("payments_reconciliation_officer", "staff.manage"), false);
     assert.equal(hasRRAPermission("payments_reconciliation_officer", "system.configure"), false);
@@ -261,12 +275,11 @@ test("legacy stock_officer has traceability and stock permissions only", () => {
 // isRRARoleAllowed — legacy guard alias compatibility
 // ---------------------------------------------------------------------------
 
-test("new roles satisfy legacy role guards via alias system", () => {
-    // New role → legacy guard alias
+test("only permission-equivalent proposed roles satisfy legacy role guards", () => {
     assert.ok(isRRARoleAllowed("product_traceability_officer", ["stock_officer"]));
-    assert.ok(isRRARoleAllowed("audit_investigation_officer", ["audit_officer"]));
-    assert.ok(isRRARoleAllowed("tax_compliance_officer", ["compliance_officer"]));
     assert.ok(isRRARoleAllowed("super_admin", ["super_admin"]));
+    assert.equal(isRRARoleAllowed("audit_investigation_officer", ["audit_officer"]), false);
+    assert.equal(isRRARoleAllowed("tax_compliance_officer", ["compliance_officer"]), false);
 });
 
 test("new roles do NOT satisfy unrelated legacy guards", () => {
@@ -382,5 +395,15 @@ test("only super_admin can manage staff accounts", () => {
         } else {
             assert.equal(has, false, `"${role}" should NOT have staff.manage`);
         }
+    }
+});
+
+test("only super_admin can govern official manufacturing tolerance standards", () => {
+    for (const role of RRA_ROLE_VALUES) {
+        assert.equal(
+            hasRRAPermission(role as RRARole, "production.tolerance.govern"),
+            role === "super_admin",
+            `Expected only super_admin to govern manufacturing tolerances; received ${role}`,
+        );
     }
 });

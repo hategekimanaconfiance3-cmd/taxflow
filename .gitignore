@@ -49,3 +49,5 @@ taxflow/
 !db/migrations/taxflow/
 !db/migrations/taxflow/*.sql
 .env*.local
+.env*
+!.env.example

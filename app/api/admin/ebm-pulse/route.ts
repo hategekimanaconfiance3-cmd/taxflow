@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server';
-import { requireRRASession } from '@/lib/auth-guard';
+import { requireAnyRRAPermission } from '@/lib/auth-guard';
 import db from '@/db/drizzle';
 import { transaction } from '@/db/schema';
 import { sql, gte, and } from 'drizzle-orm';
 
 export async function GET() {
   try {
-    await requireRRASession("super_admin", "compliance_officer", "audit_officer", "reporting_officer", "director_executive", "tax_compliance_officer", "audit_investigation_officer", "data_ai_analyst", "payments_reconciliation_officer", "product_traceability_officer", "customs_import_officer");
+    await requireAnyRRAPermission('transaction.read', 'analytics.read', 'reports.aggregate.read');
 
     const sixtyMinutesAgo = new Date(Date.now() - 60 * 60 * 1000);
 

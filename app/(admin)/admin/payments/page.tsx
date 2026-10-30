@@ -1,4 +1,5 @@
-import { requireRRASession } from "@/lib/auth-guard";
+import { requireRRAPermission } from "@/lib/auth-guard";
+import { hasRRAPermission } from "@/lib/rra-rbac";
 import { getAllPayments, getPaymentSummary } from "@/lib/actions/admin-payment.action";
 import { PaymentReviewQueue, type PendingPaymentReviewItem } from "@/components/admin/payment-review-queue";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,23 +12,14 @@ const money = (value: number) => `${Math.round(value).toLocaleString("en-RW")} R
 const VERIFY_ROLES = ["compliance_officer", "audit_officer", "payments_reconciliation_officer"] as const;
 
 export default async function AdminPaymentsPage() {
-  const { staff } = await requireRRASession(
-    "compliance_officer",
-    "audit_officer",
-    "reporting_officer",
-    "payments_reconciliation_officer",
-  );
+  const { staff } = await requireRRAPermission("payments.read");
   const [payments, summary] = await Promise.all([
     getAllPayments("all"),
     getPaymentSummary(),
   ]);
 
   const pending = payments.filter((payment) => payment.status === "pending") as PendingPaymentReviewItem[];
-
-  // Use clearanceRoles (the validated role array) — not clearanceLevel (a single raw DB string).
-  const canVerify = staff.clearanceRoles.some((role) =>
-    (VERIFY_ROLES as readonly string[]).includes(role),
-  );
+  const canVerify = staff.clearanceRoles.some((role) => hasRRAPermission(role, "payments.reconcile"));
 
   return (
     <div className="space-y-6">

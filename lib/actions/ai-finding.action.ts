@@ -5,7 +5,7 @@ import { z } from "zod";
 import { createHash } from "node:crypto";
 import db from "@/db/drizzle";
 import { aiAuditLog, aiFinding, auditLog, productionBatch, user } from "@/db/schema";
-import { requireRRAPermission, requireRRASession } from "@/lib/auth-guard";
+import { requireAnyRRAPermission, requireRRAPermission, requireRRASession } from "@/lib/auth-guard";
 import { reconcileAndCreateFindings } from "@/lib/ai/reconciliation";
 import { getProductionHistoryAnalysis } from "@/lib/ai/production-history-service";
 import { PRODUCTION_HISTORY_RULE_VERSION } from "@/lib/ai/production-history-baseline";
@@ -89,7 +89,7 @@ const updateFindingSchema = z.object({
 });
 
 export async function getFindingStats(): Promise<FindingStats> {
-  await requireRRASession("super_admin", "compliance_officer", "audit_officer", "audit_investigation_officer", "data_ai_analyst");
+  await requireAnyRRAPermission("ai.findings.read", "investigation.case.manage", "compliance.followup.manage");
 
   const [row] = await db
     .select({
@@ -120,7 +120,7 @@ export async function getFindingStats(): Promise<FindingStats> {
 }
 
 export async function getFindings(filters: FindingFilters = {}): Promise<AiFinding[]> {
-  const { staff } = await requireRRASession("super_admin", "compliance_officer", "audit_officer", "audit_investigation_officer", "data_ai_analyst");
+  const { staff } = await requireAnyRRAPermission("ai.findings.read", "investigation.case.manage", "compliance.followup.manage");
   const canReadFormula = staff.clearanceRoles.some((role) => role !== "super_admin" && hasRRAPermission(role, "production.formula.read"));
   const parsed = findingFiltersSchema.safeParse(filters);
   if (!parsed.success) throw new Error("Invalid finding filters.");
@@ -177,7 +177,7 @@ export async function getFindings(filters: FindingFilters = {}): Promise<AiFindi
 }
 
 export async function getFindingById(findingId: string): Promise<AiFinding | null> {
-  const { staff } = await requireRRASession("super_admin", "compliance_officer", "audit_officer", "audit_investigation_officer", "data_ai_analyst", "tax_compliance_officer");
+  const { staff } = await requireAnyRRAPermission("ai.findings.read", "investigation.case.manage", "compliance.followup.manage");
   const canReadFormula = staff.clearanceRoles.some((role) => role !== "super_admin" && hasRRAPermission(role, "production.formula.read"));
   const parsedId = z.string().trim().min(1).max(128).safeParse(findingId);
   if (!parsedId.success) return null;
@@ -223,7 +223,7 @@ export async function updateFindingStatus(
   newStatus: FindingStatus,
   note?: string,
 ): Promise<{ success: boolean; error?: string }> {
-  const { user: sessionUser, staff } = await requireRRASession("compliance_officer", "audit_officer", "audit_investigation_officer");
+  const { user: sessionUser, staff } = await requireAnyRRAPermission("compliance.followup.manage", "investigation.case.manage");
   const parsed = updateFindingSchema.safeParse({ findingId, newStatus, note });
   if (!parsed.success) return { success: false, error: "Invalid finding update." };
 

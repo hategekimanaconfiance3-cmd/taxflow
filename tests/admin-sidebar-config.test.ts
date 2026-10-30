@@ -1,22 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { getAdminSidebarItems } from "../lib/admin-sidebar-config";
+import { getAdminNavigationLinks, getAdminSidebarItems } from "../lib/admin-sidebar-config";
+import { hasRRAPermission, RRA_ROLE_VALUES } from "../lib/rra-rbac";
 
-test("Anomaly Detection navigation is visible to the same operational roles as its page", () => {
-  for (const role of [
-    "compliance_officer",
-    "tax_compliance_officer",
-    "audit_officer",
-    "audit_investigation_officer",
-    "data_ai_analyst",
-  ]) {
-    assert.ok(
-      getAdminSidebarItems(role).some((item) => item.href === "/admin/anomalies"),
-      `${role} should see the Anomaly Detection link`,
-    );
+test("Anomaly Detection navigation matches the detailed transaction permission", () => {
+  for (const role of RRA_ROLE_VALUES) {
+    const canReadTransactions = hasRRAPermission(role, "transaction.read");
+    const seesAnomalies = getAdminSidebarItems(role).some((item) => item.href === "/admin/anomalies");
+    assert.equal(seesAnomalies, canReadTransactions, `${role} anomaly navigation must match transaction.read`);
   }
-  assert.equal(getAdminSidebarItems("product_traceability_officer").some((item) => item.href === "/admin/anomalies"), false);
-  assert.equal(getAdminSidebarItems("super_admin").some((item) => item.href === "/admin/anomalies"), false);
 });
 
 test("Stock Control Administrators get only their dedicated stock-control navigation", () => {
@@ -25,4 +17,32 @@ test("Stock Control Administrators get only their dedicated stock-control naviga
   assert.equal(items.some((item) => item.href === "/admin/intelligence/unregistered"), false);
   assert.equal(items.some((item) => item.href === "/admin/settings"), false);
   assert.equal(items.some((item) => item.href === "/admin/support"), false);
+});
+
+test("admin command-search destinations are limited to the assigned roles", () => {
+  const superAdminLinks = getAdminNavigationLinks("super_admin");
+  assert.equal(superAdminLinks.some((item) => item.href === "/admin/traders"), false);
+  assert.equal(superAdminLinks.some((item) => item.href === "/admin/super"), true);
+
+  const customsLinks = getAdminNavigationLinks("customs_import_officer");
+  assert.equal(customsLinks.some((item) => item.href === "/admin/imports"), true);
+  assert.equal(customsLinks.some((item) => item.href === "/admin/super/admins"), false);
+
+  assert.deepEqual(getAdminNavigationLinks("unknown_role"), []);
+});
+
+test("Transactions navigation matches the explicit transaction.read permission", () => {
+  for (const role of RRA_ROLE_VALUES) {
+    const canReadTransactions = hasRRAPermission(role, "transaction.read");
+    const seesTransactions = getAdminSidebarItems(role).some((item) => item.href === "/admin/transactions");
+    assert.equal(seesTransactions, canReadTransactions, `${role} navigation must match transaction.read`);
+  }
+});
+
+test("Command Center navigation requires the explicit executive dashboard permission", () => {
+  for (const role of RRA_ROLE_VALUES) {
+    const canReadDashboard = hasRRAPermission(role, "dashboard.executive.read");
+    const seesDashboard = getAdminSidebarItems(role).some((item) => item.href === "/admin/dashboard/overview");
+    assert.equal(seesDashboard, canReadDashboard, `${role} navigation must match dashboard.executive.read`);
+  }
 });

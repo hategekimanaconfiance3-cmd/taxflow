@@ -30,29 +30,29 @@ export const RRA_PERMISSIONS = [
     "transaction.read", "audit.trail.read", "traceability.read", "stock.read",
     "imports.read", "imports.review", "payments.read", "payments.reconcile",
     "analytics.read", "ai.findings.read", "data_quality.read", "ai.assistant.use", "ai.feedback.review",
-    "stock.correction.review", "support.manage", "production.formula.read", "stock.threshold.read", "stock.threshold.manage.global",
+    "stock.correction.review", "support.manage", "communications.staff.use", "production.formula.read", "production.material.receipt.review", "production.batch.review", "production.material.adjust", "production.tolerance.govern", "stock.threshold.read", "stock.threshold.manage.global",
     "stock.threshold.manage.scoped", "stock.restock.read", "stock.restock.exception.review", "stock.restock.baseline.attest",
 ] as const;
 export type RRAPermission = (typeof RRA_PERMISSIONS)[number];
 
 const PROPOSED_ROLE_PERMISSIONS: Record<RRAProposedRole, readonly RRAPermission[]> = {
-    super_admin: ["staff.manage", "system.configure", "security.audit.read", "reports.aggregate.read", "dashboard.executive.read", "taxpayer.compliance.read", "tax.records.read", "investigation.case.manage", "transaction.read", "audit.trail.read", "traceability.read", "stock.read", "imports.read", "imports.review", "payments.read", "payments.reconcile", "analytics.read", "ai.findings.read", "data_quality.read", "ai.assistant.use", "ai.feedback.review", "stock.correction.review", "compliance.followup.manage", "support.manage", "supply_chain.summary.read", "stock.threshold.read", "stock.threshold.manage.global", "stock.threshold.manage.scoped", "stock.restock.read", "stock.restock.exception.review", "stock.restock.baseline.attest"],
-    director_executive: ["dashboard.executive.read", "reports.aggregate.read", "supply_chain.summary.read", "ai.assistant.use", "taxpayer.intelligence.search"],
-    tax_compliance_officer: ["taxpayer.intelligence.search", "taxpayer.compliance.read", "tax.records.read", "payments.read", "compliance.followup.manage", "support.manage", "ai.assistant.use"],
-    audit_investigation_officer: ["taxpayer.intelligence.search", "investigation.case.manage", "transaction.read", "audit.trail.read", "traceability.read", "production.formula.read", "ai.assistant.use"],
-    product_traceability_officer: ["taxpayer.intelligence.search", "traceability.read", "stock.read", "ai.assistant.use"],
-    customs_import_officer: ["taxpayer.intelligence.search", "imports.read", "imports.review", "ai.assistant.use"],
-    payments_reconciliation_officer: ["taxpayer.intelligence.search", "tax.records.read", "payments.read", "payments.reconcile", "ai.assistant.use"],
+    super_admin: ["staff.manage", "system.configure", "security.audit.read", "reports.aggregate.read", "dashboard.executive.read", "taxpayer.compliance.read", "tax.records.read", "investigation.case.manage", "transaction.read", "audit.trail.read", "traceability.read", "stock.read", "imports.read", "imports.review", "payments.read", "payments.reconcile", "analytics.read", "ai.findings.read", "data_quality.read", "ai.assistant.use", "ai.feedback.review", "stock.correction.review", "compliance.followup.manage", "support.manage", "communications.staff.use", "supply_chain.summary.read", "production.tolerance.govern", "stock.threshold.read", "stock.threshold.manage.global", "stock.threshold.manage.scoped", "stock.restock.read", "stock.restock.exception.review", "stock.restock.baseline.attest"],
+    director_executive: ["dashboard.executive.read", "reports.aggregate.read", "supply_chain.summary.read", "ai.assistant.use", "taxpayer.intelligence.search", "communications.staff.use"],
+    tax_compliance_officer: ["taxpayer.intelligence.search", "taxpayer.compliance.read", "tax.records.read", "payments.read", "compliance.followup.manage", "support.manage", "ai.assistant.use", "communications.staff.use"],
+    audit_investigation_officer: ["taxpayer.intelligence.search", "investigation.case.manage", "transaction.read", "audit.trail.read", "traceability.read", "production.formula.read", "ai.assistant.use", "communications.staff.use"],
+    product_traceability_officer: ["taxpayer.intelligence.search", "traceability.read", "stock.read", "ai.assistant.use", "communications.staff.use"],
+    customs_import_officer: ["taxpayer.intelligence.search", "imports.read", "imports.review", "production.material.receipt.review", "ai.assistant.use", "communications.staff.use"],
+    payments_reconciliation_officer: ["taxpayer.intelligence.search", "tax.records.read", "payments.read", "payments.reconcile", "ai.assistant.use", "communications.staff.use"],
     data_ai_analyst: ["taxpayer.intelligence.search", "analytics.read", "ai.findings.read", "data_quality.read", "reports.aggregate.read", "ai.assistant.use", "ai.feedback.review"],
-    stock_control_admin: ["stock.threshold.read", "stock.threshold.manage.scoped", "stock.restock.read", "stock.restock.exception.review", "stock.restock.baseline.attest"],
+    stock_control_admin: ["stock.threshold.read", "stock.threshold.manage.scoped", "stock.restock.read", "stock.restock.exception.review", "stock.restock.baseline.attest", "production.material.receipt.review", "production.batch.review", "production.material.adjust"],
 };
 
 const LEGACY_ROLE_PERMISSIONS: Record<(typeof LEGACY_RRA_ROLES)[number], readonly RRAPermission[]> = {
-    compliance_officer: ["taxpayer.intelligence.search", "taxpayer.compliance.read", "tax.records.read", "payments.read", "compliance.followup.manage", "imports.review", "support.manage", "ai.assistant.use"],
-    audit_officer: ["taxpayer.intelligence.search", "investigation.case.manage", "transaction.read", "audit.trail.read", "traceability.read", "production.formula.read", "imports.read", "imports.review", "ai.assistant.use"],
-    stock_officer: ["taxpayer.intelligence.search", "traceability.read", "stock.read", "ai.assistant.use"],
-    correction_officer: ["taxpayer.intelligence.search", "stock.read", "stock.correction.review"],
-    reporting_officer: ["taxpayer.intelligence.search", "reports.aggregate.read", "analytics.read", "tax.records.read", "payments.read", "ai.assistant.use"],
+    compliance_officer: ["taxpayer.intelligence.search", "taxpayer.compliance.read", "tax.records.read", "payments.read", "compliance.followup.manage", "imports.review", "support.manage", "ai.assistant.use", "communications.staff.use"],
+    audit_officer: ["taxpayer.intelligence.search", "investigation.case.manage", "transaction.read", "audit.trail.read", "traceability.read", "production.formula.read", "imports.read", "imports.review", "ai.assistant.use", "communications.staff.use"],
+    stock_officer: ["taxpayer.intelligence.search", "traceability.read", "stock.read", "ai.assistant.use", "communications.staff.use"],
+    correction_officer: ["taxpayer.intelligence.search", "stock.read", "stock.correction.review", "communications.staff.use"],
+    reporting_officer: ["taxpayer.intelligence.search", "reports.aggregate.read", "analytics.read", "tax.records.read", "payments.read", "ai.assistant.use", "communications.staff.use"],
 };
 
 export const RRA_ROLE_PERMISSIONS: Record<RRARole | "super_admin", readonly RRAPermission[]> = {
@@ -64,8 +64,7 @@ export const RRA_ROLE_PERMISSIONS: Record<RRARole | "super_admin", readonly RRAP
 /** Compatibility for old route checks; super_admin is deliberately not an all-role bypass. */
 const LEGACY_GUARD_ALIASES: Partial<Record<RRAProposedRole, readonly string[]>> = {
     super_admin: ["super_admin"],
-    tax_compliance_officer: ["compliance_officer"],
-    audit_investigation_officer: ["audit_officer"],
+    // Product traceability has the exact same legacy stock-read permission set.
     product_traceability_officer: ["stock_officer"],
 };
 

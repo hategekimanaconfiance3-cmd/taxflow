@@ -6,37 +6,23 @@
 // Auth: RRA staff session required (same cookie as admin panel).
 // ---------------------------------------------------------------------------
 
-import { auth } from "@/lib/auth";
-import { headers } from "next/headers";
-import { ADMIN_SIDEBAR_GROUPS } from "@/lib/admin-sidebar-config";
+import { getAdminNavigationLinks } from "@/lib/admin-sidebar-config";
+import { requireRRASession } from "@/lib/auth-guard";
 import type { NextRequest } from "next/server";
-
-// Flat list of all navigation items (label, href, keywords)
-const NAV_INDEX = ADMIN_SIDEBAR_GROUPS.flatMap((g) =>
-    g.items.flatMap((item) => [
-        { label: item.label, href: item.href, group: g.label ?? "Overview" },
-        ...(item.children?.map((child) => ({
-            label: child.label,
-            href: child.href,
-            group: item.label,
-        })) ?? []),
-    ])
-);
+import { z } from "zod";
 
 // Naive keyword match — returns up to 4 most relevant links
-function findLinks(query: string): Array<{ label: string; href: string }> {
+function findLinks(query: string, allowedLinks: Array<{ label: string; href: string }>): Array<{ label: string; href: string }> {
     const q = query.toLowerCase().trim();
     if (!q) return [];
 
-    const scored = NAV_INDEX.map((item) => {
+    const scored = allowedLinks.map((item) => {
         const label = item.label.toLowerCase();
-        const group = item.group.toLowerCase();
         const href = item.href.toLowerCase();
         let score = 0;
         if (label === q) score += 100;
         else if (label.startsWith(q)) score += 60;
         else if (label.includes(q)) score += 40;
-        if (group.includes(q)) score += 20;
         if (href.includes(q)) score += 10;
         // Partial word match
         const words = q.split(/\s+/);
@@ -72,14 +58,8 @@ function buildAnswer(query: string, links: Array<{ label: string; href: string }
 }
 
 export async function POST(request: NextRequest) {
-    // Auth check — must be an active session
-    const session = await auth.api.getSession({ headers: await headers() });
-    if (!session?.user) {
-        return new Response("Unauthorized", { status: 401 });
-    }
-    if (session.user.isActive === false) {
-        return new Response("Forbidden", { status: 403 });
-    }
+    // Require an active RRA staff account and search only its role-filtered navigation.
+    const { staff } = await requireRRASession();
 
     let body: unknown;
     try {
@@ -88,20 +68,15 @@ export async function POST(request: NextRequest) {
         return Response.json({ error: "Invalid JSON" }, { status: 400 });
     }
 
-    if (
-        typeof body !== "object" ||
-        body === null ||
-        typeof (body as Record<string, unknown>).query !== "string"
-    ) {
-        return Response.json({ error: "Missing query" }, { status: 400 });
-    }
+    const parsed = z.object({ query: z.string().trim().max(200) }).safeParse(body);
+    if (!parsed.success) return Response.json({ error: "Invalid query" }, { status: 400 });
 
-    const query = ((body as Record<string, unknown>).query as string).slice(0, 200).trim();
+    const query = parsed.data.query;
     if (!query) {
         return Response.json({ answer: "", links: [] });
     }
 
-    const links = findLinks(query);
+    const links = findLinks(query, getAdminNavigationLinks(staff.clearanceRoles));
     const answer = buildAnswer(query, links);
 
     return Response.json({ answer, links });

@@ -1,7 +1,7 @@
-import { requireRRASession } from '@/lib/auth-guard';
+import { requireRRAPermission } from '@/lib/auth-guard';
 import { getFindingStats, getFindings } from '@/lib/actions/ai-finding.action';
 import { computeAllRiskScores } from '@/lib/ai/risk-scoring';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -30,7 +30,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { IntelligenceActionButtons } from '@/components/admin/intelligence-action-buttons';
-import { hasRRAPermission } from '@/lib/rra-rbac';
+import { hasRRAPermission, isRRARoleAllowed } from '@/lib/rra-rbac';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -90,7 +90,7 @@ export default async function IntelligenceHubPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  const { staff } = await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer", "data_ai_analyst");
+  const { staff } = await requireRRAPermission("ai.findings.read");
   const params = await searchParams;
   const activeTab = params.tab ?? 'all';
 
@@ -316,8 +316,8 @@ export default async function IntelligenceHubPage({
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {/* Server action buttons live in a client component */}
           <IntelligenceActionButtons
-            canRunReconciliation={['stock_officer', 'compliance_officer', 'audit_officer', 'product_traceability_officer', 'tax_compliance_officer', 'audit_investigation_officer'].includes(staff.clearanceLevel)}
-            canRunDataQuality={['compliance_officer', 'audit_officer', 'tax_compliance_officer', 'audit_investigation_officer', 'data_ai_analyst'].includes(staff.clearanceLevel)}
+            canRunReconciliation={staff.clearanceRoles.some((role) => isRRARoleAllowed(role, ['stock_officer', 'compliance_officer', 'audit_officer']))}
+            canRunDataQuality={staff.clearanceRoles.some((role) => hasRRAPermission(role, 'data_quality.read'))}
             canRunProductionHistory={staff.clearanceRoles.some((role) => role !== 'super_admin' && hasRRAPermission(role, 'production.formula.read'))}
           />
 

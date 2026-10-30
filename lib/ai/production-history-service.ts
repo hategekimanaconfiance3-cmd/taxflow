@@ -114,6 +114,7 @@ export async function getProductionHistoryAnalysis(input: ProductionHistoryQuery
       materialName: productionMaterial.confidentialName,
       unit: productionMaterial.unit,
       recipeQuantity: productionRecipeMaterial.quantity,
+      consumptionToleranceBasisPoints: productionRecipeMaterial.consumptionToleranceBasisPoints,
     }).from(productionRecipeMaterial)
       .innerJoin(productionMaterial, and(
         eq(productionRecipeMaterial.materialId, productionMaterial.id),
@@ -127,19 +128,21 @@ export async function getProductionHistoryAnalysis(input: ProductionHistoryQuery
       plannedQuantity: productionBatchMaterialUsage.plannedQuantity,
       actualQuantity: productionBatchMaterialUsage.actualQuantity,
       materialId: productionBatchMaterialUsage.materialId,
+      consumptionToleranceBasisPoints: productionBatchMaterialUsage.consumptionToleranceBasisPoints,
     }).from(productionBatchMaterialUsage)
       .where(inArray(productionBatchMaterialUsage.productionBatchId, allBatchIds))
       .limit(25_500),
   ]);
   const boundedEvidenceIncomplete = recipeLines.length >= 500 || usageRows.length >= 25_500;
 
-  const usageByBatch = new Map<string, Map<string, { plannedQuantity: number; actualQuantity: number; materialId: string }>>();
+  const usageByBatch = new Map<string, Map<string, { plannedQuantity: number; actualQuantity: number; materialId: string; consumptionToleranceBasisPoints: number | null }>>();
   for (const usage of usageRows) {
     const batchUsage = usageByBatch.get(usage.batchId) ?? new Map();
     batchUsage.set(usage.recipeMaterialId, {
       plannedQuantity: usage.plannedQuantity,
       actualQuantity: usage.actualQuantity,
       materialId: usage.materialId,
+      consumptionToleranceBasisPoints: usage.consumptionToleranceBasisPoints,
     });
     usageByBatch.set(usage.batchId, batchUsage);
   }
@@ -153,6 +156,7 @@ export async function getProductionHistoryAnalysis(input: ProductionHistoryQuery
       materialName: line.materialName,
       unit: line.unit,
       recipeQuantity: line.recipeQuantity,
+      consumptionToleranceBasisPoints: line.consumptionToleranceBasisPoints,
       plannedQuantity: null,
       actualQuantity: null,
     });
@@ -176,7 +180,12 @@ export async function getProductionHistoryAnalysis(input: ProductionHistoryQuery
     materials: (linesByRecipe.get(row.recipeVersionId) ?? []).map((line) => {
       const matchingUsage = usageByBatch.get(row.id)?.get(line.recipeMaterialId);
       const batchUsage = matchingUsage?.materialId === line.materialId ? matchingUsage : undefined;
-      return { ...line, plannedQuantity: batchUsage?.plannedQuantity ?? null, actualQuantity: batchUsage?.actualQuantity ?? null };
+      return {
+        ...line,
+        plannedQuantity: batchUsage?.plannedQuantity ?? null,
+        actualQuantity: batchUsage?.actualQuantity ?? null,
+        consumptionToleranceBasisPoints: batchUsage?.consumptionToleranceBasisPoints ?? line.consumptionToleranceBasisPoints,
+      };
     }),
   });
 

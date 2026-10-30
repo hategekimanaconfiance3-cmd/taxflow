@@ -113,7 +113,7 @@ export async function requireRRASession(...allowedRoles: RRARole[]) {
   const clearanceRoles = [...new Set(assignedRoles.filter(isRRARole))];
   if (clearanceRoles.length === 0) {
     // Unrecognized clearance level — log and redirect.
-    void logAccessDenial(session.user.id, {
+    await logAccessDenial(session.user.id, {
       action: 'ACCESS_DENIED_UNKNOWN_ROLE',
       targetType: 'rra_staff',
       metadata: { clearanceLevel: staff.clearanceLevel, assignedRoles },
@@ -127,7 +127,7 @@ export async function requireRRASession(...allowedRoles: RRARole[]) {
 
     if (!hasAccess) {
       // Log the denial — role is valid but insufficient for this resource.
-      void logAccessDenial(session.user.id, {
+      await logAccessDenial(session.user.id, {
         action: 'ACCESS_DENIED_INSUFFICIENT_ROLE',
         targetType: 'rra_guard',
         metadata: {
@@ -149,14 +149,23 @@ export async function requireRRASession(...allowedRoles: RRARole[]) {
  * @param permission - The required permission key from RRA_PERMISSIONS
  */
 export async function requireRRAPermission(permission: RRAPermission) {
+  return requireAnyRRAPermission(permission);
+}
+
+/** Require at least one explicitly assigned permission from the provided set. */
+export async function requireAnyRRAPermission(...permissions: RRAPermission[]) {
+  if (permissions.length === 0) {
+    throw new Error('At least one RRA permission is required.');
+  }
+
   const rraSession = await requireRRASession();
-  if (!rraSession.staff.clearanceRoles.some((role) => hasRRAPermission(role, permission))) {
-    void logAccessDenial(rraSession.user.id, {
+  if (!rraSession.staff.clearanceRoles.some((role) => permissions.some((permission) => hasRRAPermission(role, permission)))) {
+    await logAccessDenial(rraSession.user.id, {
       action: 'ACCESS_DENIED_MISSING_PERMISSION',
       targetType: 'rra_permission',
       metadata: {
         userRoles: rraSession.staff.clearanceRoles,
-        requiredPermission: permission,
+        requiredAnyPermission: permissions,
       },
     });
     redirect('/admin/dashboard');

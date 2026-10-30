@@ -8,6 +8,7 @@ export interface ProductionHistoryUsage {
   materialName: string;
   unit: string;
   recipeQuantity: number;
+  consumptionToleranceBasisPoints: number | null;
   plannedQuantity: number | null;
   actualQuantity: number | null;
 }
@@ -125,20 +126,20 @@ export function analyzeProductionHistoryBatch(
   )];
 
   for (const material of candidate.materials) {
-    const observedUsageRatio = material.plannedQuantity && material.plannedQuantity > 0 && material.actualQuantity !== null
-      ? material.actualQuantity / material.plannedQuantity
+    const observedUsageRatio = candidate.actualOutputQuantity > 0 && material.actualQuantity !== null
+      ? material.actualQuantity / candidate.actualOutputQuantity
       : null;
     metrics.push(compareMetric(
       `material_usage:${material.materialCode}`,
       `Material usage — ${material.materialName}`,
-      material.unit,
+      `${material.unit} per output unit`,
       observedUsageRatio,
-      0,
+      material.consumptionToleranceBasisPoints ?? 0,
       relevantBaseline,
       (row) => {
         const historicalMaterial = row.materials.find((item) => item.materialId === material.materialId);
-        return historicalMaterial?.plannedQuantity && historicalMaterial.plannedQuantity > 0 && historicalMaterial.actualQuantity !== null
-          ? historicalMaterial.actualQuantity / historicalMaterial.plannedQuantity
+        return historicalMaterial && historicalMaterial.actualQuantity !== null && row.actualOutputQuantity > 0
+          ? historicalMaterial.actualQuantity / row.actualOutputQuantity
           : null;
       },
     ));

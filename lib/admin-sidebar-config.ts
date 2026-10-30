@@ -24,7 +24,7 @@ import {
     Database,
     Target,
     Megaphone,
-    Ticket,
+    MessageSquare,
     FileText,
     LayoutGrid,
     BarChart3,
@@ -85,6 +85,7 @@ export const ROLE_LABELS: Record<RRARole, string> = {
     stock_officer: "Stock Monitoring Officer",
     correction_officer: "Correction Officer",
     reporting_officer: "Reporting & Analytics Officer",
+    stock_control_admin: "Stock Control Administrator",
 };
 
 export const ROLE_COLORS: Record<RRARole, string> = {
@@ -101,6 +102,7 @@ export const ROLE_COLORS: Record<RRARole, string> = {
     stock_officer: "bg-blue-500/10 text-blue-600 border-blue-200",
     correction_officer: "bg-emerald-500/10 text-emerald-600 border-emerald-200",
     reporting_officer: "bg-cyan-500/10 text-cyan-600 border-cyan-200",
+    stock_control_admin: "bg-emerald-500/10 text-emerald-700 border-emerald-200",
 };
 
 // ---------------------------------------------------------------------------
@@ -138,7 +140,7 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 label: "Command Center",
                 href: "/admin/dashboard/overview",
                 icon: LayoutDashboard,
-                allowedRoles: ALL,
+                allowedRoles: ["super_admin", "director_executive"],
                 children: [
                     {
                         label: "Overview",
@@ -177,8 +179,8 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 icon: ArrowLeftRight,
                 allowedRoles: [
                     "super_admin",
-                    "compliance_officer",
                     "audit_officer",
+                    "audit_investigation_officer",
                 ],
             },
             {
@@ -190,6 +192,12 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                     "audit_officer",
                     "customs_import_officer",
                 ],
+            },
+            {
+                label: "Manufacturing Material Review",
+                href: "/admin/production/material-accounting",
+                icon: Package,
+                allowedRoles: ["customs_import_officer", "stock_control_admin"],
             },
             {
                 label: "Supply Chain",
@@ -261,6 +269,7 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                     "compliance_officer",
                     "audit_officer",
                     "reporting_officer",
+                    "tax_compliance_officer",
                     "payments_reconciliation_officer",
                 ],
             },
@@ -325,7 +334,8 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                     "super_admin",
                     "compliance_officer",
                     "audit_officer",
-                    "data_ai_analyst",
+                    "tax_compliance_officer",
+                    "audit_investigation_officer",
                 ],
             },
             {
@@ -400,11 +410,8 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 icon: Activity,
                 allowedRoles: [
                     "super_admin",
-                    "compliance_officer",
                     "audit_officer",
-                    "tax_compliance_officer",
                     "audit_investigation_officer",
-                    "data_ai_analyst",
                 ],
             },
             {
@@ -436,10 +443,10 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 allowedRoles: ["compliance_officer", "tax_compliance_officer"],
             },
             {
-                label: "Support Tickets",
-                href: "/admin/support",
-                icon: Ticket,
-                allowedRoles: ALL,
+                label: "Messages",
+                href: "/admin/messages",
+                icon: MessageSquare,
+                allowedRoles: ["super_admin", "director_executive", "tax_compliance_officer", "audit_investigation_officer", "product_traceability_officer", "customs_import_officer", "payments_reconciliation_officer", "compliance_officer", "audit_officer", "stock_officer", "correction_officer", "reporting_officer"],
             },
         ],
     },
@@ -555,7 +562,7 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
 
 /**
  * Filter sidebar groups by role.
- * Super Admin sees everything. Other roles see only their allowed items.
+ * Each role sees only explicitly allowed items; there is no implicit admin bypass.
  */
 export function getAdminSidebarGroups(roles: string | string[]): AdminSidebarGroup[] {
     const assignedRoles = Array.isArray(roles) ? roles : [roles];
@@ -583,4 +590,14 @@ export function getAdminSidebarGroups(roles: string | string[]): AdminSidebarGro
  */
 export function getAdminSidebarItems(roles: string | string[]): AdminSidebarItem[] {
     return getAdminSidebarGroups(roles).flatMap((g) => g.items);
+}
+
+/** Navigation destinations available to the supplied active RRA role set. */
+export function getAdminNavigationLinks(roles: string | string[]): Array<{ label: string; href: string }> {
+    return getAdminSidebarGroups(roles).flatMap((group) =>
+        group.items.flatMap((item) => [
+            { label: item.label, href: item.href },
+            ...(item.children ?? []).map((child) => ({ label: child.label, href: child.href })),
+        ]),
+    );
 }

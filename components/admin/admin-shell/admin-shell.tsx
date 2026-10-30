@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { getAdminSidebarGroups, ROLE_LABELS, ROLE_COLORS, type RRARole } from '@/lib/admin-sidebar-config';
+import { hasRRAPermission, isRRARole } from '@/lib/rra-rbac';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -22,6 +23,7 @@ import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport } from 'ai';
 import { LANGS, translate, type LangCode } from '@/lib/language';
 import { useLanguagePreference } from '@/lib/use-language';
+import { useSocket } from '@/lib/socket-client';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -79,15 +81,27 @@ function LangSelector({ value, onChange }: { value: LangCode; onChange: (l: Lang
 // ---------------------------------------------------------------------------
 // Notification Bell
 // ---------------------------------------------------------------------------
-function NotificationBell({ href }: { href: string }) {
+function NotificationBell({ href, userId }: { href: string; userId: string }) {
   const [count, setCount] = useState(0);
 
-  useEffect(() => {
+  const fetchCount = useCallback(() => {
     fetch('/api/admin/notification-count')
       .then((r) => r.ok ? r.json() : { count: 0 })
       .then((d) => setCount(d.count ?? 0))
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    fetchCount();
+    const interval = window.setInterval(fetchCount, 30_000);
+    window.addEventListener('focus', fetchCount);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', fetchCount);
+    };
+  }, [fetchCount]);
+
+  useSocket(userId, { notification: fetchCount });
 
   return (
     <Tooltip>
@@ -100,8 +114,11 @@ function NotificationBell({ href }: { href: string }) {
         >
           <Bell className="h-4 w-4" />
           {count > 0 && (
-            <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-blue-500 ring-2 ring-background" />
+            <span aria-hidden="true" className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[9px] font-semibold leading-none text-white ring-2 ring-background">
+              {count > 99 ? '99+' : count}
+            </span>
           )}
+          <span className="sr-only">{count > 0 ? `${count} unread notifications` : 'No unread notifications'}</span>
         </Link>
       </TooltipTrigger>
       <TooltipContent side="bottom">
@@ -263,6 +280,7 @@ function AIPanel({ onClose }: { onClose: () => void }) {
 // AdminShell Props
 // ---------------------------------------------------------------------------
 interface AdminShellProps {
+  userId: string;
   userName: string;
   staffId: string;
   clearanceLevel: string;
@@ -273,9 +291,12 @@ interface AdminShellProps {
 // ---------------------------------------------------------------------------
 // AdminShell
 // ---------------------------------------------------------------------------
-export function AdminShell({ userName, staffId, clearanceLevel, clearanceRoles, children }: AdminShellProps) {
+export function AdminShell({ userId, userName, staffId, clearanceLevel, clearanceRoles, children }: AdminShellProps) {
   const pathname = usePathname();
   const groups = getAdminSidebarGroups(clearanceRoles.length ? clearanceRoles : [clearanceLevel]);
+  const effectiveRoles = clearanceRoles.length ? clearanceRoles : [clearanceLevel];
+  const canUseAssistant = effectiveRoles.some((role) => isRRARole(role) && hasRRAPermission(role, 'ai.assistant.use'));
+  const canUseSupport = effectiveRoles.some((role) => isRRARole(role) && hasRRAPermission(role, 'communications.staff.use'));
 
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState<string | null>(null);
@@ -687,9 +708,9 @@ export function AdminShell({ userName, staffId, clearanceLevel, clearanceRoles, 
               <Link href="/admin/profile" onClick={() => setIsAccountMenuOpen(false)} className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
                 <User className="h-3.5 w-3.5" /> Profile
               </Link>
-              <Link href="/admin/support" onClick={() => setIsAccountMenuOpen(false)} className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
+              {canUseSupport && <Link href="/admin/support" onClick={() => setIsAccountMenuOpen(false)} className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
                 <HelpCircle className="h-3.5 w-3.5" /> Help & Support
-              </Link>
+              </Link>}
             </div>
             <Separator className="opacity-60" />
             <div className="py-1">
@@ -717,9 +738,9 @@ export function AdminShell({ userName, staffId, clearanceLevel, clearanceRoles, 
           <Link href="/admin/profile" className="flex min-h-10 items-center gap-2.5 rounded-md px-3 text-sm text-muted-foreground hover:bg-accent hover:text-foreground">
             <User className="h-4 w-4" /> Profile
           </Link>
-          <Link href="/admin/support" className="flex min-h-10 items-center gap-2.5 rounded-md px-3 text-sm text-muted-foreground hover:bg-accent hover:text-foreground">
+          {canUseSupport && <Link href="/admin/support" className="flex min-h-10 items-center gap-2.5 rounded-md px-3 text-sm text-muted-foreground hover:bg-accent hover:text-foreground">
             <HelpCircle className="h-4 w-4" /> Help & Support
-          </Link>
+          </Link>}
           <button
             type="button"
             onClick={handleSignOut}
@@ -797,7 +818,7 @@ export function AdminShell({ userName, staffId, clearanceLevel, clearanceRoles, 
             {/* Right side controls */}
             <div className="flex items-center gap-1">
               {/* Notification Bell */}
-              <NotificationBell href="/admin/notifications" />
+              <NotificationBell href="/admin/notifications" userId={userId} />
 
               <Separator orientation="vertical" className="h-5 mx-1" />
 
@@ -805,7 +826,7 @@ export function AdminShell({ userName, staffId, clearanceLevel, clearanceRoles, 
               <LangSelector value={lang} onChange={setLang} />
 
               {/* Ask AI button — hidden while panel is open */}
-              {!isAiOpen && <Button
+              {canUseAssistant && !isAiOpen && <Button
                 variant="outline"
                 size="sm"
                 onClick={openAI}
