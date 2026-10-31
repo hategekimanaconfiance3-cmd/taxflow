@@ -279,6 +279,8 @@ test("legacy correction_officer retains stock correction but no taxpayer, financ
     assert.equal(hasRRAPermission("correction_officer", "tax.records.read"), false);
     assert.equal(hasRRAPermission("correction_officer", "payments.read"), false);
     assert.equal(hasRRAPermission("correction_officer", "staff.manage"), false);
+    assert.equal(hasRRAPermission("correction_officer", "ai.assistant.use"), true);
+    assert.equal(hasRRAPermission("correction_officer", "ai.feedback.review"), false);
 });
 
 // ---------------------------------------------------------------------------

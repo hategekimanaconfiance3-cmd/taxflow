@@ -51,7 +51,7 @@ const LEGACY_ROLE_PERMISSIONS: Record<(typeof LEGACY_RRA_ROLES)[number], readonl
     compliance_officer: ["taxpayer.intelligence.search", "taxpayer.compliance.read", "tax.records.read", "payments.read", "compliance.followup.manage", "imports.review", "support.manage", "ai.assistant.use", "communications.staff.use"],
     audit_officer: ["taxpayer.intelligence.search", "investigation.case.manage", "transaction.read", "audit.trail.read", "traceability.read", "production.formula.read", "imports.read", "imports.review", "ai.assistant.use", "communications.staff.use"],
     stock_officer: ["taxpayer.intelligence.search", "traceability.read", "stock.read", "ai.assistant.use", "communications.staff.use"],
-    correction_officer: ["taxpayer.intelligence.search", "stock.read", "stock.correction.review", "communications.staff.use"],
+    correction_officer: ["taxpayer.intelligence.search", "stock.read", "stock.correction.review", "communications.staff.use", "ai.assistant.use"],
     reporting_officer: ["taxpayer.intelligence.search", "reports.aggregate.read", "analytics.read", "tax.records.read", "payments.read", "ai.assistant.use", "communications.staff.use"],
 };
 

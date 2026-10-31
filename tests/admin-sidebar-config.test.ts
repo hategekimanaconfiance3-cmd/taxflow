@@ -26,6 +26,13 @@ test("Stock Overview navigation matches its existing route access without broade
   assert.equal(getAdminNavigationLinks("super_admin").some((item) => item.href === "/admin/stock"), false);
 });
 
+test("Correction Officers can navigate to AI Assistant without gaining Intelligence Hub access", () => {
+  const links = getAdminNavigationLinks("correction_officer");
+  assert.ok(links.some((item) => item.href === "/admin/intelligence/assistant"));
+  assert.equal(links.some((item) => item.href === "/admin/intelligence"), false);
+  assert.equal(links.some((item) => item.href === "/admin/intelligence/findings"), false);
+});
+
 test("admin command-search destinations are limited to the assigned roles", () => {
   const superAdminLinks = getAdminNavigationLinks("super_admin");
   assert.equal(superAdminLinks.some((item) => item.href === "/admin/traders"), false);

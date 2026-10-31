@@ -406,6 +406,12 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 ],
             },
             {
+                label: "AI Assistant",
+                href: "/admin/intelligence/assistant",
+                icon: Brain,
+                allowedRoles: ["correction_officer"],
+            },
+            {
                 label: "Anomaly Detection",
                 href: "/admin/anomalies",
                 icon: Activity,
