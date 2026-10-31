@@ -1,6 +1,6 @@
 "use server";
 
-import { eq, desc, and, or, sql, gte, inArray } from "drizzle-orm";
+import { eq, desc, and, or, sql, gte, inArray, notInArray } from "drizzle-orm";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { generateText } from "ai";
 import { randomUUID } from "node:crypto";
@@ -381,6 +381,7 @@ export async function getAllDisputes() {
         .from(dispute)
         .innerJoin(filer, eq(dispute.filedById, filer.id))
         .innerJoin(counterparty, eq(dispute.counterpartyId, counterparty.id))
+        .where(notInArray(dispute.status, ["resolved", "dismissed"]))
         .orderBy(desc(dispute.createdAt));
 }
 

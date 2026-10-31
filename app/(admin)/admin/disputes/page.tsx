@@ -27,7 +27,7 @@ export default async function AdminDisputesPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           {disputes.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No disputes to review.</p>
+            <p className="text-sm text-muted-foreground">No active disputes to review.</p>
           ) : (
             disputes.map((dispute) => (
               <div
