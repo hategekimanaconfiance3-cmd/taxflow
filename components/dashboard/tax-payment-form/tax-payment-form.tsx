@@ -19,6 +19,7 @@ import { Loader2, CreditCard, CheckCircle, Info, RefreshCw, ShieldCheck } from "
 type ProviderName = "mtn_mobile_money" | "airtel_money" | "bank_gateway";
 
 interface TaxPaymentFormProps {
+    simulatorEnabled: boolean;
     obligations: {
         id: string; taxType: string; periodKey: string; assessmentReference: string | null;
         dueDate: Date | null; currency: string; outstandingAmount: string; isSupportedForPayment: boolean;
@@ -46,7 +47,7 @@ function providerLabel(provider: string | null): string {
     return providers.find((item) => item.id === provider)?.label ?? "Payment submitted for review";
 }
 
-export function TaxPaymentForm({ obligations, payments }: TaxPaymentFormProps) {
+export function TaxPaymentForm({ obligations, payments, simulatorEnabled }: TaxPaymentFormProps) {
     const router = useRouter();
     const [providerName, setProviderName] = useState<ProviderName>("mtn_mobile_money");
     const [idempotencyKey, setIdempotencyKey] = useState<string | null>(null);
@@ -74,6 +75,11 @@ export function TaxPaymentForm({ obligations, payments }: TaxPaymentFormProps) {
             setIdempotencyKey(null);
             sessionStorage.removeItem(PAYMENT_IDEMPOTENCY_STORAGE_KEY);
             const initiation = await initiateSimulatedTaxPayment(payment.id, providerName);
+            if ("error" in initiation) {
+                setNotice(initiation.error);
+                router.refresh();
+                return;
+            }
             setWorkingPaymentId(payment.id);
             setNotice(`${selected.label} accepted the simulated request (${initiation.responseCode}). No money moved. Complete the simulation step below.`);
             form.reset({ obligationId: payable[0]?.id ?? "", method: selected.method, reference: "" });
@@ -106,6 +112,10 @@ export function TaxPaymentForm({ obligations, payments }: TaxPaymentFormProps) {
         setNotice(null);
         try {
             const result = await initiateSimulatedTaxPayment(paymentId, providerName);
+            if ("error" in result) {
+                setNotice(result.error);
+                return;
+            }
             setNotice(`${providerLabel(result.provider)} returned ${result.status} (${result.responseCode}). No money moved.`);
             router.refresh();
         } catch (error) {
@@ -123,7 +133,7 @@ export function TaxPaymentForm({ obligations, payments }: TaxPaymentFormProps) {
                 </CardHeader>
                 <CardContent className="space-y-4">
                     <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-950">
-                        <strong>SIMULATED PAYMENT ENVIRONMENT.</strong> No actual payment is sent and no real mobile money PIN is requested or stored.
+                        {simulatorEnabled ? <><strong>SIMULATED PAYMENT ENVIRONMENT.</strong> No actual payment is sent and no real mobile money PIN is requested or stored.</> : <><strong>SIMULATED PROVIDERS ARE DISABLED.</strong> This deployment cannot initiate or retry simulated payments. No money will be moved.</>}
                     </div>
                     {(rootError || notice) && <div role="status" className={`rounded-md border px-3 py-2 text-sm ${rootError ? "border-red-200 bg-red-50 text-red-700" : "border-blue-200 bg-blue-50 text-blue-800"}`}>{rootError?.message ?? notice}</div>}
                     {payable.length === 0 && <div className="flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-3 text-sm text-blue-700"><Info className="h-4 w-4 shrink-0" /><span>No authorized RWF obligation is currently available for payment.</span></div>}
@@ -132,7 +142,7 @@ export function TaxPaymentForm({ obligations, payments }: TaxPaymentFormProps) {
                             <FormField control={form.control} name="obligationId" render={({ field }) => (
                                 <FormItem>
                                     <FormLabel>Official assessment and tax period</FormLabel>
-                                    <Select value={field.value} onValueChange={field.onChange} disabled={payable.length === 0}>
+                                    <Select value={field.value} onValueChange={field.onChange} disabled={!simulatorEnabled || payable.length === 0}>
                                         <FormControl><SelectTrigger><SelectValue placeholder="Choose a payable assessment" /></SelectTrigger></FormControl>
                                         <SelectContent>{payable.map((obligation) => <SelectItem key={obligation.id} value={obligation.id}>{obligation.taxType} · {obligation.periodKey} · {formatExactAmount(obligation.outstandingAmount)} {obligation.currency}</SelectItem>)}</SelectContent>
                                     </Select>
@@ -150,12 +160,12 @@ export function TaxPaymentForm({ obligations, payments }: TaxPaymentFormProps) {
                                 <Select value={providerName} onValueChange={(value) => {
                                     const selected = providers.find((item) => item.id === value);
                                     if (selected) { setProviderName(selected.id); form.setValue("method", selected.method); }
-                                }} disabled={busy || payable.length === 0}>
+                                }} disabled={!simulatorEnabled || busy || payable.length === 0}>
                                     <SelectTrigger id="payment-simulator"><SelectValue /></SelectTrigger>
                                     <SelectContent>{providers.map((item) => <SelectItem key={item.id} value={item.id}>{item.label}</SelectItem>)}</SelectContent>
                                 </Select>
                             </div>
-                            <Button type="submit" disabled={payable.length === 0 || busy || !selectedObligationId} className="w-full gap-2">
+                            <Button type="submit" disabled={!simulatorEnabled || payable.length === 0 || busy || !selectedObligationId} className="w-full gap-2">
                                 {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
                                 Initiate simulated full payment
                             </Button>
@@ -181,11 +191,11 @@ export function TaxPaymentForm({ obligations, payments }: TaxPaymentFormProps) {
                                 <p className="text-xs">{payment.workflowStatus.replaceAll("_", " ")}</p>
                                 {payment.receiptNumber && <p className="text-xs text-emerald-700">Verified receipt · {payment.receiptNumber}</p>}
                             </div>
-                            {awaitingAuthorization && <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void authorize(payment.id)}>
+                            {simulatorEnabled && awaitingAuthorization && <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void authorize(payment.id)}>
                                 {busy && workingPaymentId === payment.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
                                 Complete simulated authorization
                             </Button>}
-                            {initiationCanRetry && <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void retryInitiation(payment.id)}>
+                            {simulatorEnabled && initiationCanRetry && <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void retryInitiation(payment.id)}>
                                 {busy && workingPaymentId === payment.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
                                 Retry simulator initiation
                             </Button>}

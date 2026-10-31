@@ -75,7 +75,11 @@ export default async function PaymentsPage() {
       </Card>
 
       {/* Payment form */}
-      <TaxPaymentForm obligations={obligations} payments={payments} />
+      <TaxPaymentForm
+        obligations={obligations}
+        payments={payments}
+        simulatorEnabled={process.env.NODE_ENV !== 'production' && process.env.PAYMENT_PROVIDER_MODE === 'simulation'}
+      />
     </div>
   );
 }

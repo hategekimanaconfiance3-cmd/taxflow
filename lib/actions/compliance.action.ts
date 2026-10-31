@@ -17,6 +17,8 @@ import { getSimulatedProvider, type SimulatedProviderName, type SimulationScenar
 import { reconcileProviderCallback } from '@/lib/payment-engine/reconcile';
 
 const CRITICAL_THRESHOLD = 0.8; // 80% — also notify RRA admins
+const simulatedProvidersEnabled = (): boolean =>
+  process.env.NODE_ENV !== 'production' && process.env.PAYMENT_PROVIDER_MODE === 'simulation';
 const simulatedPaymentLifetimeMs = (): number => {
   const minutes = Number.parseInt(process.env.PAYMENT_SIM_MAX_DURATION_MINUTES ?? '15', 10);
   return Math.max(1, Math.min(24 * 60, Number.isFinite(minutes) ? minutes : 15)) * 60_000;
@@ -63,6 +65,9 @@ export async function recordTaxPayment(data: {
   reference?: string;
 }, idempotencyKey: string): Promise<typeof taxPayment.$inferSelect> {
   const session = await requireTraderSession();
+  if (!simulatedProvidersEnabled()) {
+    throw new Error('Simulated payment actions are disabled in this environment.');
+  }
   const parsed = taxPaymentSubmissionSchema.safeParse({ ...data, idempotencyKey });
   if (!parsed.success) {
     throw new Error('Payment details are invalid. Please review them and try again.');
@@ -193,8 +198,11 @@ export async function recordTaxPayment(data: {
 }
 
 /** Initiates a clearly labelled sandbox request. Live MTN, Airtel, and bank adapters are not configured. */
-export async function initiateSimulatedTaxPayment(paymentId: string, providerName: SimulatedProviderName, scenario?: SimulationScenario): Promise<{ provider: SimulatedProviderName; providerReference: string; status: string; responseCode: string }> {
+export async function initiateSimulatedTaxPayment(paymentId: string, providerName: SimulatedProviderName, scenario?: SimulationScenario): Promise<{ provider: SimulatedProviderName; providerReference: string; status: string; responseCode: string } | { error: string }> {
   const session = await requireTraderSession();
+  if (!simulatedProvidersEnabled()) {
+    return { error: 'Simulated payment actions are disabled in this environment. No payment was initiated.' };
+  }
   const parsed = simulatedPaymentInitiationSchema.safeParse({ paymentId, provider: providerName, scenario });
   if (!parsed.success) throw new Error('Simulated payment details are invalid.');
   paymentId = parsed.data.paymentId;
@@ -288,6 +296,9 @@ export async function initiateSimulatedTaxPayment(paymentId: string, providerNam
 /** Completes the explicit mock authorization step; accepts no PIN or secret from the taxpayer. */
 export async function authorizeSimulatedTaxPayment(paymentId: string): Promise<{ status: string; message: string }> {
   const session = await requireTraderSession();
+  if (!simulatedProvidersEnabled()) {
+    throw new Error('Simulated payment actions are disabled in this environment.');
+  }
   const parsed = simulatedPaymentAuthorizationSchema.safeParse({ paymentId });
   if (!parsed.success) throw new Error('Simulated payment reference is invalid.');
   paymentId = parsed.data.paymentId;
