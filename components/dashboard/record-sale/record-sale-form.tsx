@@ -3,7 +3,6 @@
 import { useState, useTransition, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { createRetailSale } from "@/lib/actions/transaction.action";
-import { formatRWF } from "@/components/dashboard/stat-card/stat-card";
 import { PriceRangeBar } from "@/components/dashboard/price-range-bar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -60,6 +59,7 @@ export function RecordSaleForm({ inventory, customers, vatRate }: RecordSaleForm
     const [message, setMessage] = useState<{
         text: string;
         type: "success" | "error";
+        invoiceIds?: string[];
     } | null>(null);
 
     // Track which products have prices below AI floor
@@ -141,19 +141,22 @@ export function RecordSaleForm({ inventory, customers, vatRate }: RecordSaleForm
         startTransition(async () => {
             try {
                 setMessage(null);
+                const invoiceIds: string[] = [];
                 for (const item of activeItems) {
-                    await createRetailSale({
+                    const completedSale = await createRetailSale({
                         productId: item.productId,
                         quantity: item.quantityToSell,
                         unitPrice: item.unitPrice,
                         customerName: customerName.trim(),
                         ...(customerId ? { customerId } : {}),
                     });
+                    invoiceIds.push(completedSale.invoiceId);
                 }
 
                 setMessage({
                     text: `Sale of ${activeItems.length} product(s) to ${customerName} completed`,
                     type: "success",
+                    invoiceIds,
                 });
 
                 // Optimistic update: deduct sold quantities from available stock
@@ -196,7 +199,12 @@ export function RecordSaleForm({ inventory, customers, vatRate }: RecordSaleForm
                             : "bg-red-50 text-red-700 border border-red-200"
                             }`}
                     >
-                        {message.text}
+                        <div>{message.text}</div>
+                        {message.invoiceIds?.map((invoiceId) => (
+                            <a key={invoiceId} className="ml-1 inline-block font-medium underline underline-offset-2" href={`/dashboard/invoices/${invoiceId}`}>
+                                View invoice
+                            </a>
+                        ))}
                     </div>
                 )}
 

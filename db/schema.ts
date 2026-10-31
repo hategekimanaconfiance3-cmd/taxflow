@@ -528,6 +528,43 @@ export const transactionItem = pgTable(
   (table) => [index('txn_item_txn_idx').on(table.transactionId)],
 );
 
+// Issued sales invoices are immutable snapshots of a completed TaxFlow sale.
+// Recipient email and delivery attempts are deliberately stored separately.
+export const salesInvoice = pgTable(
+  'sales_invoice',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    invoiceNumber: text('invoice_number').notNull().unique(),
+    transactionId: text('transaction_id').notNull().unique().references(() => transaction.id),
+    sellerId: text('seller_id').notNull().references(() => user.id),
+    buyerId: text('buyer_id').references(() => user.id),
+    snapshot: jsonb('snapshot').$type<Record<string, unknown>>().notNull(),
+    issuedAt: timestamp('issued_at').defaultNow().notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('sales_invoice_seller_issued_idx').on(table.sellerId, table.issuedAt),
+    index('sales_invoice_buyer_issued_idx').on(table.buyerId, table.issuedAt),
+  ],
+);
+
+export const salesInvoiceEmailDelivery = pgTable(
+  'sales_invoice_email_delivery',
+  {
+    invoiceId: text('invoice_id').primaryKey().references(() => salesInvoice.id),
+    status: text('status').notNull().default('pending'),
+    attemptCount: integer('attempt_count').notNull().default(0),
+    lastAttemptAt: timestamp('last_attempt_at'),
+    providerMessageId: text('provider_message_id'),
+    lastErrorCode: text('last_error_code'),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => [
+    check('sales_invoice_email_status_check', sql`${table.status} IN ('pending', 'sending', 'sent', 'failed', 'not_available')`),
+    check('sales_invoice_email_attempt_count_check', sql`${table.attemptCount} >= 0`),
+  ],
+);
+
 // ---------------------------------------------------------------------------
 // VAT Records
 // ---------------------------------------------------------------------------

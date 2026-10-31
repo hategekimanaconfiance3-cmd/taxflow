@@ -74,13 +74,14 @@ export default async function TransactionsPage() {
                 <TableHead className="text-right">Amount</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Type / payment</TableHead>
+                <TableHead>Invoice</TableHead>
                 <TableHead>Date</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {allTransactions.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={8} className="text-center py-8 text-muted-foreground text-sm">
+                  <TableCell colSpan={9} className="text-center py-8 text-muted-foreground text-sm">
                     No transactions yet.
                   </TableCell>
                 </TableRow>
@@ -120,6 +121,13 @@ export default async function TransactionsPage() {
                     ) : (
                       <span className="text-xs capitalize text-muted-foreground">{txn.paymentStatus}</span>
                     )}
+                  </TableCell>
+                  <TableCell>
+                    {txn.invoiceId ? (
+                      <a className="text-xs font-medium text-primary underline-offset-4 hover:underline" href={`/dashboard/invoices/${txn.invoiceId}`}>
+                        View invoice
+                      </a>
+                    ) : <span className="text-xs text-muted-foreground">—</span>}
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">
                     {txn.createdAt ? new Date(txn.createdAt).toLocaleDateString() : '—'}

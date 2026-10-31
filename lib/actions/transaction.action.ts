@@ -2,7 +2,7 @@
 
 import { eq, and, or, asc, desc, lt, sql } from 'drizzle-orm';
 import db from '@/db/drizzle';
-import { transaction, stock, stockMovement, stockReservation, vatRecord, product, user, auditLog, notification, customer, b2bOrderAcceptance } from '@/db/schema';
+import { transaction, stock, stockMovement, stockReservation, vatRecord, product, user, auditLog, notification, customer, b2bOrderAcceptance, salesInvoice } from '@/db/schema';
 import {
   requireTraderSession,
   requireApprovedClearance,
@@ -17,6 +17,8 @@ import { getSystemConfig } from '@/lib/actions/system-config.action';
 import { validatePriceFloor } from '@/lib/ai/price-suggestion';
 import { calculateVat } from '@/lib/intelligence/tax-engine';
 import { assertVerifiedBusinessOwner } from '@/lib/b2b-authorization';
+import { createSalesInvoiceForTransaction } from '@/lib/sales-invoice-service';
+import { attemptSalesInvoiceEmail } from '@/lib/sales-invoice-delivery';
 
 type ReservationReleaseStatus = 'released' | 'expired' | 'cancelled';
 
@@ -553,11 +555,12 @@ export async function confirmTransaction(transactionId: string) {
     });
 
     // 5. Update transaction status
+    const confirmedAt = new Date();
     const confirmed = await tx
       .update(transaction)
       .set({
         status: 'confirmed',
-        confirmedAt: new Date(),
+        confirmedAt,
       })
       .where(and(eq(transaction.id, lockedTxn.id), eq(transaction.status, 'pending')))
       .returning({ id: transaction.id });
@@ -565,6 +568,11 @@ export async function confirmTransaction(transactionId: string) {
     if (confirmed.length !== 1) {
       throw new Error('Transaction was already processed');
     }
+
+    const [confirmedTransaction] = await tx.select().from(transaction)
+      .where(eq(transaction.id, lockedTxn.id)).limit(1);
+    if (!confirmedTransaction) throw new Error('Confirmed transaction could not be reloaded.');
+    const issuedInvoice = await createSalesInvoiceForTransaction(tx, confirmedTransaction, session.user.id, confirmedAt);
 
     await tx.insert(auditLog).values({
       userId: session.user.id,
@@ -610,7 +618,7 @@ export async function confirmTransaction(transactionId: string) {
       message: `${session.user.name} accepted your order for ${lockedTxn.quantity} units. Dispatch and receipt are recorded separately.`,
       link: '/dashboard/pending',
     }).returning();
-    return { txn: lockedTxn, savedNotification, expired: false };
+    return { txn: lockedTxn, savedNotification, expired: false, invoiceId: issuedInvoice.id };
   })));
   if (!confirmationResult.ok) return confirmationResult.result;
   const confirmation = confirmationResult.value;
@@ -643,6 +651,15 @@ export async function confirmTransaction(transactionId: string) {
     console.error('Transaction confirmed, but realtime notification delivery failed', error);
   }
 
+  try {
+    if (confirmation.invoiceId) await attemptSalesInvoiceEmail(confirmation.invoiceId, session.user.id);
+  } catch (error) {
+    console.error('Transaction confirmed and invoice saved, but buyer email delivery could not be attempted', {
+      transactionId: txn.id,
+      code: error instanceof Error ? error.name : 'unknown_error',
+    });
+  }
+
   // Compliance alert auto-detection — check both seller and buyer
   try {
     await checkAndAlertCompliance(session.user.id);
@@ -650,7 +667,7 @@ export async function confirmTransaction(transactionId: string) {
     console.error('Transaction confirmed, but post-confirmation compliance alerting failed', error);
   }
 
-  return { success: true as const };
+  return { success: true as const, invoiceId: confirmation.invoiceId };
 }
 
 // ---------------------------------------------------------------------------
@@ -935,13 +952,24 @@ export async function createRetailSale(data: {
       }),
     });
 
-    return txn;
+    const issuedInvoice = await createSalesInvoiceForTransaction(tx, txn, session.user.id, new Date());
+
+    return { txn, invoiceId: issuedInvoice.id };
   });
+
+  try {
+    await attemptSalesInvoiceEmail(result.invoiceId, session.user.id);
+  } catch (error) {
+    console.error('Retail sale completed and invoice saved, but buyer email delivery could not be attempted', {
+      transactionId: result.txn.id,
+      code: error instanceof Error ? error.name : 'unknown_error',
+    });
+  }
 
   // Compliance alert auto-detection for retailer
   await checkAndAlertCompliance(session.user.id);
 
-  return result;
+  return { ...result.txn, invoiceId: result.invoiceId };
 }
 
 // ---------------------------------------------------------------------------
@@ -972,11 +1000,14 @@ export async function getOutgoingTransactions() {
       createdAt: transaction.createdAt,
       confirmedAt: transaction.confirmedAt,
       expiresAt: stockReservation.expiresAt,
+      invoiceId: salesInvoice.id,
+      invoiceNumber: salesInvoice.invoiceNumber,
     })
     .from(transaction)
     .leftJoin(user, eq(transaction.buyerId, user.id))
     .innerJoin(product, eq(transaction.productId, product.id))
     .leftJoin(stockReservation, eq(stockReservation.transactionId, transaction.id))
+    .leftJoin(salesInvoice, eq(salesInvoice.transactionId, transaction.id))
     .where(eq(transaction.sellerId, session.user.id))
     .orderBy(desc(transaction.createdAt));
   return rows.map((row) => ({
@@ -1008,11 +1039,14 @@ export async function getIncomingTransactions() {
       paymentStatus: transaction.paymentStatus,
       createdAt: transaction.createdAt,
       expiresAt: stockReservation.expiresAt,
+      invoiceId: salesInvoice.id,
+      invoiceNumber: salesInvoice.invoiceNumber,
     })
     .from(transaction)
     .innerJoin(user, eq(transaction.sellerId, user.id))
     .innerJoin(product, eq(transaction.productId, product.id))
     .leftJoin(stockReservation, eq(stockReservation.transactionId, transaction.id))
+    .leftJoin(salesInvoice, eq(salesInvoice.transactionId, transaction.id))
     .where(eq(transaction.buyerId, session.user.id))
     .orderBy(desc(transaction.createdAt));
   return rows.map((row) => ({

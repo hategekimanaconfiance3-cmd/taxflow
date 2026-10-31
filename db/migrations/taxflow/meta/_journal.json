@@ -197,6 +197,13 @@
       "when": 1793440000000,
       "tag": "0027_taxpayer_correction_management",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1793440000001,
+      "tag": "0028_sales_invoices",
+      "breakpoints": true
     }
   ]
 }

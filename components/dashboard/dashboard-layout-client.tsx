@@ -343,24 +343,28 @@ export function DashboardLayoutClient({
     <DashboardLayoutContext.Provider
       value={{ isSidebarCollapsed, isAiOpen, lang, sidebarW, openAI, closeAI, expandSidebar, setLang }}
     >
-      <DashboardSidebar role={role} businessName={businessName} userName={userName} />
+      <div className="print:hidden">
+        <DashboardSidebar role={role} businessName={businessName} userName={userName} />
+      </div>
 
       <div
-        className="flex min-h-screen min-w-0 flex-col transition-[padding] duration-300 lg:pl-[var(--sidebar-width)] xl:pr-[var(--ai-panel-width)]"
+        className="flex min-h-screen min-w-0 flex-col transition-[padding] duration-300 lg:pl-[var(--sidebar-width)] xl:pr-[var(--ai-panel-width)] print:!pl-0 print:!pr-0"
         style={{
           '--sidebar-width': `${sidebarW}px`,
           '--ai-panel-width': isAiOpen ? `${AI_PANEL_W}px` : '0px',
         } as React.CSSProperties}
       >
-        <DashboardTopbar role={role} businessName={businessName} userId={userId} />
+        <div className="print:hidden">
+          <DashboardTopbar role={role} businessName={businessName} userId={userId} />
+        </div>
         <main className="min-w-0 flex-1">
-          <div className="min-w-0 p-3 sm:p-4 lg:p-6">{children}</div>
+          <div className="min-w-0 p-3 sm:p-4 lg:p-6 print:p-0">{children}</div>
         </main>
       </div>
 
       {isAiOpen && (
         <div
-          className="fixed inset-0 z-40 flex w-full max-w-full flex-col border-l bg-background shadow-2xl animate-in slide-in-from-right-4 fade-in duration-200 sm:inset-y-0 sm:left-auto sm:right-0 sm:w-[420px] lg:w-[420px]"
+          className="fixed inset-0 z-40 flex w-full max-w-full flex-col border-l bg-background shadow-2xl animate-in slide-in-from-right-4 fade-in duration-200 print:hidden sm:inset-y-0 sm:left-auto sm:right-0 sm:w-[420px] lg:w-[420px]"
         >
           <AIPanel onClose={closeAI} role={role} />
         </div>

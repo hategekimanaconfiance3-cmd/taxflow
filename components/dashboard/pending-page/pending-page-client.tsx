@@ -89,6 +89,7 @@ function ConfirmRejectActions({ transactionId }: { transactionId: string }) {
     const router = useRouter();
     const [isPending, startTransition] = useTransition();
     const [result, setResult] = useState<"confirmed" | "rejected" | null>(null);
+    const [invoiceId, setInvoiceId] = useState<string | null>(null);
     const [error, setError] = useState("");
 
     function handleAction(action: "confirm" | "reject") {
@@ -98,6 +99,7 @@ function ConfirmRejectActions({ transactionId }: { transactionId: string }) {
                 if (action === "confirm") {
                     const response = await confirmTransaction(transactionId);
                     if (!response.success) throw new Error(response.error);
+                    setInvoiceId(response.invoiceId ?? null);
                     setResult("confirmed");
                 } else {
                     const response = await rejectTransaction(transactionId);
@@ -122,6 +124,9 @@ function ConfirmRejectActions({ transactionId }: { transactionId: string }) {
                     }`}
             >
                 {result === "confirmed" ? "✓ Order accepted" : "✕ Rejected"}
+                {result === "confirmed" && invoiceId && (
+                    <a className="ml-2 underline underline-offset-2" href={`/dashboard/invoices/${invoiceId}`}>View invoice</a>
+                )}
             </span>
         );
     }

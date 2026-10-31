@@ -15,6 +15,7 @@ interface ConfirmActionsProps {
 export function ConfirmActions({ transactionId }: ConfirmActionsProps) {
     const [isPending, startTransition] = useTransition();
     const [result, setResult] = useState<"confirmed" | "rejected" | null>(null);
+    const [invoiceId, setInvoiceId] = useState<string | null>(null);
     const [error, setError] = useState("");
 
     function handleAction(action: "confirm" | "reject") {
@@ -24,6 +25,7 @@ export function ConfirmActions({ transactionId }: ConfirmActionsProps) {
                 if (action === "confirm") {
                     const response = await confirmTransaction(transactionId);
                     if (!response.success) throw new Error(response.error);
+                    setInvoiceId(response.invoiceId ?? null);
                     setResult("confirmed");
                 } else {
                     const response = await rejectTransaction(transactionId);
@@ -47,6 +49,9 @@ export function ConfirmActions({ transactionId }: ConfirmActionsProps) {
                     }`}
             >
                 {result === "confirmed" ? "✓ Order accepted" : "✕ Rejected"}
+                {result === "confirmed" && invoiceId && (
+                    <a className="ml-2 underline underline-offset-2" href={`/dashboard/invoices/${invoiceId}`}>View invoice</a>
+                )}
             </span>
         );
     }
