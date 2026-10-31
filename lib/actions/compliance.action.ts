@@ -245,24 +245,14 @@ export async function verifyTaxPayment(input: unknown) {
       .limit(1);
     if (!lockedTrader) throw new Error('Taxpayer account was not found.');
 
-    const vatTotals = await tx
-      .select({
-        vatType: vatRecord.vatType,
-        total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`.as('total'),
-      })
-      .from(vatRecord)
-      .where(and(eq(vatRecord.businessId, existing.businessId), eq(vatRecord.isFrozen, false)))
-      .groupBy(vatRecord.vatType);
-    const outputVat = Number(vatTotals.find((row) => row.vatType === 'output')?.total) || 0;
-    const inputVat = Number(vatTotals.find((row) => row.vatType === 'input')?.total) || 0;
-    const [paidRow] = await tx
-      .select({ total: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)::float8`.as('total') })
-      .from(taxPayment)
-      .where(and(eq(taxPayment.businessId, existing.businessId), eq(taxPayment.status, 'confirmed')));
-    const outstanding = Math.max(0, outputVat - inputVat - (Number(paidRow?.total) || 0));
     let exceptionReason: string | null = null;
-    if (existing.amount !== outstanding || settledAmount !== existing.amount) {
-      exceptionReason = 'Settlement amount does not match the full current recorded outstanding balance.';
+    // The request amount is the server-calculated full balance snapshot from
+    // submission time. VAT records can change while a payment is pending, so
+    // comparing against today's balance incorrectly rejects valid settlement
+    // evidence for an already-created request. The verified amount must still
+    // exactly match that immutable request amount (no partial payment).
+    if (settledAmount !== existing.amount) {
+      exceptionReason = 'Settlement amount does not match the full payment request amount.';
     } else if ((existing.method === 'cash' && evidenceType !== 'official_cash_receipt')
       || (existing.method === 'bank_transfer' && evidenceType !== 'bank_settlement')
       || (existing.method === 'mobile_money' && evidenceType !== 'provider_settlement')) {
