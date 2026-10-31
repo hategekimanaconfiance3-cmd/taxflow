@@ -19,6 +19,13 @@ test("Stock Control Administrators get only their dedicated stock-control naviga
   assert.equal(items.some((item) => item.href === "/admin/support"), false);
 });
 
+test("Stock Overview navigation matches its existing route access without broadening roles", () => {
+  const correctionOfficerLinks = getAdminNavigationLinks("correction_officer");
+  assert.ok(correctionOfficerLinks.some((item) => item.href === "/admin/stock"));
+  assert.equal(getAdminNavigationLinks("stock_control_admin").some((item) => item.href === "/admin/stock"), false);
+  assert.equal(getAdminNavigationLinks("super_admin").some((item) => item.href === "/admin/stock"), false);
+});
+
 test("admin command-search destinations are limited to the assigned roles", () => {
   const superAdminLinks = getAdminNavigationLinks("super_admin");
   assert.equal(superAdminLinks.some((item) => item.href === "/admin/traders"), false);

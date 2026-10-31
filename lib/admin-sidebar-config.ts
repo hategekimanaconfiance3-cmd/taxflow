@@ -230,6 +230,7 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 allowedRoles: [
                     "stock_officer",
                     "audit_officer",
+                    "correction_officer",
                     "product_traceability_officer",
                     "audit_investigation_officer",
                 ],
