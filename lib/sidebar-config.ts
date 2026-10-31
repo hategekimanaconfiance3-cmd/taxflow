@@ -86,6 +86,12 @@ export const SIDEBAR_GROUPS: SidebarGroup[] = [
                 roles: "all",
             },
             {
+                label: "Correction Requests",
+                href: "/dashboard/corrections",
+                icon: ClipboardList,
+                roles: "all",
+            },
+            {
                 label: "AI Assistant",
                 href: "/dashboard/assistant",
                 icon: Brain,

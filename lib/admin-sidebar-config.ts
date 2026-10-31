@@ -174,6 +174,12 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 allowedRoles: TAXPAYER_SEARCH_ROLES,
             },
             {
+                label: "Taxpayer Corrections",
+                href: "/admin/corrections",
+                icon: UserCheck,
+                allowedRoles: ["correction_officer", "super_admin"],
+            },
+            {
                 label: "Transactions",
                 href: "/admin/transactions",
                 icon: ArrowLeftRight,
