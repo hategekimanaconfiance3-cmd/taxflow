@@ -3,7 +3,7 @@
 import { useEffect, type ReactNode } from 'react';
 import { isLangCode, LANG_STORAGE_KEY, translateWithContext, type LangCode } from '@/lib/language';
 
-const ATTRIBUTES_TO_TRANSLATE = ['placeholder', 'title', 'aria-label'] as const;
+const ATTRIBUTES_TO_TRANSLATE = ['placeholder', 'title', 'aria-label', 'alt'] as const;
 type TranslationState = { source: string; translated: string };
 
 /** Applies the shared language catalog to static and dynamically rendered UI copy. */
