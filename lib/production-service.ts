@@ -391,6 +391,7 @@ export async function recordManufacturerProduction(
       vatRateBasisPoints: productionBatch.vatRateBasisPoints,
       recipeVersionId: productionBatch.recipeVersionId,
       recipeInputHash: productionBatch.recipeInputHash,
+      notes: productionBatch.notes,
       productionValidationStatus: productionBatch.productionValidationStatus,
       status: productionBatch.status,
       createdAt: productionBatch.createdAt,
@@ -399,7 +400,8 @@ export async function recordManufacturerProduction(
       .limit(1);
     if (priorBatch) {
       if (priorBatch.productId !== input.productId || priorBatch.quantity !== input.quantity
-        || priorBatch.unitPrice !== input.unitPrice || priorBatch.recipeInputHash !== recipeInputHash) {
+        || priorBatch.unitPrice !== input.unitPrice || priorBatch.recipeInputHash !== recipeInputHash
+        || priorBatch.notes !== (input.notes?.trim() || null)) {
         return { ok: false as const, code: 'DUPLICATE_REQUEST' as const };
       }
       const replayVatRate = priorBatch.vatRateBasisPoints / 10_000;
@@ -530,8 +532,13 @@ export async function recordManufacturerProduction(
         consumptionToleranceBasisPoints,
         consumptionToleranceStandardId,
       }));
-    } else if (input.actualMaterials?.length) {
-      return { ok: false as const, code: 'MATERIAL_USAGE_MISMATCH' as const };
+    } else {
+      if (input.actualMaterials?.length) return { ok: false as const, code: 'MATERIAL_USAGE_MISMATCH' as const };
+      const [existingRecipe] = await tx.select({ id: productionRecipe.id })
+        .from(productionRecipe)
+        .where(and(eq(productionRecipe.manufacturerId, manufacturerId), eq(productionRecipe.productId, input.productId)))
+        .limit(1);
+      if (existingRecipe) return { ok: false as const, code: 'RECIPE_REQUIRED' as const };
     }
 
     const [batch] = await tx.insert(productionBatch).values({
@@ -554,7 +561,7 @@ export async function recordManufacturerProduction(
       status: input.recipeVersionId ? 'held_material_review' : 'recorded',
       periodStart: now,
       periodEnd: now,
-      notes: null,
+      notes: input.notes?.trim() || null,
     }).onConflictDoNothing({ target: productionBatch.idempotencyKey }).returning({
       id: productionBatch.id,
       batchReference: productionBatch.batchReference,
@@ -570,6 +577,7 @@ export async function recordManufacturerProduction(
         vatRateBasisPoints: productionBatch.vatRateBasisPoints,
         recipeVersionId: productionBatch.recipeVersionId,
         recipeInputHash: productionBatch.recipeInputHash,
+        notes: productionBatch.notes,
         reportedGoodOutputQuantity: productionBatch.reportedGoodOutputQuantity,
         reportedRejectedOutputQuantity: productionBatch.reportedRejectedOutputQuantity,
         productionValidationStatus: productionBatch.productionValidationStatus,
@@ -582,7 +590,8 @@ export async function recordManufacturerProduction(
         )).limit(1);
 
       if (!existing || existing.productId !== input.productId || existing.quantity !== input.quantity
-        || existing.unitPrice !== input.unitPrice || existing.recipeInputHash !== recipeInputHash) {
+        || existing.unitPrice !== input.unitPrice || existing.recipeInputHash !== recipeInputHash
+        || existing.notes !== (input.notes?.trim() || null)) {
         return { ok: false as const, code: 'DUPLICATE_REQUEST' as const };
       }
 
@@ -683,6 +692,7 @@ export async function recordManufacturerProduction(
         totalValue,
         vatRateBasisPoints,
         potentialTax,
+        notes: input.notes?.trim() || null,
         recipeAttached: Boolean(input.recipeVersionId),
         manufacturerReportedGoodOutputQuantity: input.goodOutputQuantity === undefined ? null : microsToDecimal(quantityToMicros(input.goodOutputQuantity)),
         manufacturerReportedRejectedOutputQuantity: input.rejectedOutputQuantity === undefined ? null : microsToDecimal(quantityToMicros(input.rejectedOutputQuantity)),

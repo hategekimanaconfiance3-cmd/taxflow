@@ -16,6 +16,7 @@ import {
 import { formatRWF } from "@/components/dashboard/stat-card/stat-card";
 import { productionEntrySchema, productRegistrationSchema } from "@/lib/validation/production.schema";
 import { Plus, Save, Loader2 } from "lucide-react";
+import { assessMaterialVariance, calculateMaterialDifference, calculatePlannedMaterialQuantity } from "@/lib/production-confidentiality";
 
 interface Product {
     id: string;
@@ -62,17 +63,30 @@ export function ProductionForm({ products, recipes, plans, vatRate }: Production
     const [plannedOutputQuantity, setPlannedOutputQuantity] = useState("");
     const [goodOutputQuantity, setGoodOutputQuantity] = useState("");
     const [rejectedOutputQuantity, setRejectedOutputQuantity] = useState("");
+    const [productionNotes, setProductionNotes] = useState("");
     const [quantity, setQuantity] = useState("");
     const [unitPrice, setUnitPrice] = useState("");
     const [message, setMessage] = useState<{ text: string; type: "success" | "error" } | null>(null);
     const idempotencyKey = useRef<string | null>(null);
     const selectedRecipe = recipes.find((recipe) => recipe.id === selectedRecipeId && recipe.productId === selectedProductId);
     const selectedPlan = plans.find((plan) => plan.id === selectedPlanId && plan.status === "planned");
+    const productRecipes = recipes.filter((recipe) => recipe.productId === selectedProductId);
+    const recipeRequired = productRecipes.length > 0;
 
     const qty = Number(quantity) || 0;
     const price = Number(unitPrice) || 0;
     const totalValue = Math.round(qty * price);
     const potentialTax = Math.round(totalValue * vatRate);
+    const recipeSubmissionIncomplete = recipeRequired && !selectedRecipe
+        || Boolean(selectedRecipe && (
+            !selectedPlan
+            || goodOutputQuantity === ""
+            || rejectedOutputQuantity === ""
+            || selectedRecipe.materials.some((material) => !actualMaterialQuantities[material.recipeMaterialId]?.trim())
+            || selectedRecipe.materials.some((material) => actualMaterialQuantities[material.recipeMaterialId]?.trim()
+                && Number(actualMaterialQuantities[material.recipeMaterialId]) === 0
+                && !productionNotes.trim())
+        ));
 
     function resetSubmissionKey() {
         idempotencyKey.current = null;
@@ -118,6 +132,10 @@ export function ProductionForm({ products, recipes, plans, vatRate }: Production
     }
 
     async function handleRecordProduction() {
+        if (recipeRequired && !selectedRecipe) {
+            setMessage({ text: "This product has an approved recipe. Select its recipe and reserved material plan to report production.", type: "error" });
+            return;
+        }
         if (selectedRecipe && !selectedPlan) {
             setMessage({ text: "Create and select a reserved material plan before recording recipe-backed production.", type: "error" });
             return;
@@ -131,6 +149,7 @@ export function ProductionForm({ products, recipes, plans, vatRate }: Production
             quantity: qty,
             unitPrice: price,
             idempotencyKey: idempotencyKey.current ?? crypto.randomUUID(),
+            notes: productionNotes,
             ...(selectedPlan ? { materialPlanId: selectedPlan.id } : {}),
             ...(selectedRecipe ? {
                 recipeVersionId: selectedRecipe.id,
@@ -178,6 +197,7 @@ export function ProductionForm({ products, recipes, plans, vatRate }: Production
                 setPlannedOutputQuantity("");
                 setGoodOutputQuantity("");
                 setRejectedOutputQuantity("");
+                setProductionNotes("");
                 resetSubmissionKey();
                 router.refresh();
             } catch {
@@ -190,7 +210,7 @@ export function ProductionForm({ products, recipes, plans, vatRate }: Production
         <Card>
             <CardHeader className="pb-4">
                 <CardTitle className="flex items-center justify-between text-base font-semibold">
-                    <span>1. Production Entry</span>
+                    <span>Production report</span>
                     <Button variant="outline" size="sm" onClick={() => setShowNewProduct(!showNewProduct)} disabled={isPending}>
                         <Plus className="mr-1 h-3.5 w-3.5" />
                         {showNewProduct ? "Cancel" : "New Product"}
@@ -238,6 +258,8 @@ export function ProductionForm({ products, recipes, plans, vatRate }: Production
                     </div>
                 )}
 
+                <section aria-labelledby="production-information-title" className="space-y-3">
+                    <h3 id="production-information-title" className="text-sm font-semibold">1. Production information</h3>
                 <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
                     <div className="space-y-3">
                         {plans.some((plan) => plan.status === "planned") && (
@@ -265,7 +287,7 @@ export function ProductionForm({ products, recipes, plans, vatRate }: Production
                             </div>
                         )}
                         <div className="space-y-1.5">
-                            <Label className="text-xs">Product Name</Label>
+                            <Label className="text-xs">Finished product</Label>
                             <Select value={selectedProductId} onValueChange={(value) => { setSelectedProductId(value); setSelectedRecipeId(""); setSelectedPlanId(""); setActualMaterialQuantities({}); setPlannedOutputQuantity(""); resetSubmissionKey(); }}>
                                 <SelectTrigger><SelectValue placeholder="Select your registered product" /></SelectTrigger>
                                 <SelectContent>
@@ -298,16 +320,20 @@ export function ProductionForm({ products, recipes, plans, vatRate }: Production
                         </div>
                     </div>
                 </div>
+                </section>
 
-                {recipes.some((recipe) => recipe.productId === selectedProductId) && (
-                    <div className="space-y-3 rounded-lg border border-dashed p-4">
+                {productRecipes.length > 0 && (
+                    <section aria-labelledby="materials-consumed-title" className="space-y-3 rounded-lg border p-4">
+                        <div>
+                            <h3 id="materials-consumed-title" className="text-sm font-semibold">2. Materials consumed</h3>
+                            <p className="mt-1 text-xs text-muted-foreground">Recipe materials and units are fixed from the selected immutable version. Planned quantities are calculated from its reserved plan; enter what was actually used.</p>
+                        </div>
                         <div className="space-y-1.5">
-                            <Label>Confidential production recipe (optional)</Label>
-                            <Select value={selectedRecipeId || "none"} onValueChange={(value) => { setSelectedRecipeId(value === "none" ? "" : value); setSelectedPlanId(""); setActualMaterialQuantities({}); setPlannedOutputQuantity(""); resetSubmissionKey(); }}>
-                                <SelectTrigger><SelectValue placeholder="Record without a recipe" /></SelectTrigger>
+                            <Label>Approved recipe version</Label>
+                            <Select value={selectedRecipeId} onValueChange={(value) => { setSelectedRecipeId(value); setSelectedPlanId(""); setActualMaterialQuantities({}); setPlannedOutputQuantity(""); resetSubmissionKey(); }}>
+                                <SelectTrigger><SelectValue placeholder="Select the recipe version for this product" /></SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="none">No recipe evidence</SelectItem>
-                                    {recipes.filter((recipe) => recipe.productId === selectedProductId).map((recipe) => (
+                                    {productRecipes.map((recipe) => (
                                         <SelectItem key={recipe.id} value={recipe.id}>Version {recipe.version} · {recipe.materials.length} materials</SelectItem>
                                     ))}
                                 </SelectContent>
@@ -317,38 +343,77 @@ export function ProductionForm({ products, recipes, plans, vatRate }: Production
                             <div className="space-y-3">
                                 <p className="text-xs text-muted-foreground">Recipe-backed batches require a reserved material plan and remain held until authorized review. Only verified good output becomes saleable stock; rejects are recorded separately.</p>
                                 <div className="max-w-sm space-y-1.5">
-                                    <Label htmlFor="planned-output-quantity">Planned finished output ({selectedRecipe.productUnit})</Label>
-                                    <Input id="planned-output-quantity" type="number" min="0.0001" step="any" value={plannedOutputQuantity} disabled={Boolean(selectedPlan)} onChange={(event) => { setPlannedOutputQuantity(event.target.value); resetSubmissionKey(); }} />
+                                    <Label htmlFor="planned-output-quantity">Planned output ({selectedRecipe.productUnit})</Label>
+                                    <Input id="planned-output-quantity" value={plannedOutputQuantity} readOnly aria-readonly="true" className="bg-muted" />
                                 </div>
-                                <div className="grid gap-2 sm:grid-cols-2">
-                                    <div className="space-y-1"><Label htmlFor="good-output">Manufacturer-reported good output ({selectedRecipe.productUnit})</Label><Input id="good-output" type="number" min="0" step="any" value={goodOutputQuantity} onChange={(event) => { setGoodOutputQuantity(event.target.value); resetSubmissionKey(); }} /></div>
-                                    <div className="space-y-1"><Label htmlFor="rejected-output">Manufacturer-reported rejected output ({selectedRecipe.productUnit})</Label><Input id="rejected-output" type="number" min="0" step="any" value={rejectedOutputQuantity} onChange={(event) => { setRejectedOutputQuantity(event.target.value); resetSubmissionKey(); }} /></div>
+                                <div className="overflow-x-auto rounded-md border">
+                                    <table className="w-full min-w-[760px] text-left text-sm">
+                                        <thead className="bg-muted/50 text-xs text-muted-foreground">
+                                            <tr><th scope="col" className="p-2.5">Material</th><th scope="col" className="p-2.5">Unit</th><th scope="col" className="p-2.5">Planned</th><th scope="col" className="p-2.5">Actual used</th><th scope="col" className="p-2.5">Difference</th><th scope="col" className="p-2.5">Recorded waste</th><th scope="col" className="p-2.5">Standard</th></tr>
+                                        </thead>
+                                        <tbody className="divide-y">
+                                            {selectedRecipe.materials.map((material) => {
+                                                const planned = Number(plannedOutputQuantity) > 0
+                                                    ? calculatePlannedMaterialQuantity(Number(plannedOutputQuantity), selectedRecipe.outputQuantity, material.quantity)
+                                                    : 0;
+                                                const actualText = actualMaterialQuantities[material.recipeMaterialId] ?? "";
+                                                const actual = Number(actualText);
+                                                const hasActual = actualText.trim() !== "" && Number.isFinite(actual) && actual >= 0;
+                                                const difference = hasActual ? calculateMaterialDifference(actual, planned) : null;
+                                                const assessment = hasActual && planned > 0 && material.consumptionToleranceBasisPoints !== null
+                                                    ? assessMaterialVariance(planned, actual, material.consumptionToleranceBasisPoints)
+                                                    : null;
+                                                const differenceLabel = difference === null ? "—" : `${difference > 0 ? "+" : ""}${difference.toLocaleString(undefined, { maximumFractionDigits: 6 })} ${material.unit}`;
+                                                return (
+                                                    <tr key={material.recipeMaterialId}>
+                                                        <th scope="row" className="p-2.5 font-medium">{material.name}<span className="ml-1 block font-mono text-xs font-normal text-muted-foreground">{material.materialCode}</span></th>
+                                                        <td className="p-2.5 text-muted-foreground">{material.unit}</td>
+                                                        <td className="p-2.5 tabular-nums text-muted-foreground">{planned.toLocaleString(undefined, { maximumFractionDigits: 6 })} {material.unit}</td>
+                                                        <td className="p-2.5"><Label className="sr-only" htmlFor={`actual-material-${material.recipeMaterialId}`}>Actual {material.name} used in {material.unit}</Label><Input id={`actual-material-${material.recipeMaterialId}`} type="number" min="0" step="0.000001" value={actualText} onChange={(event) => { setActualMaterialQuantities((current) => ({ ...current, [material.recipeMaterialId]: event.target.value })); resetSubmissionKey(); }} className="min-w-28" /></td>
+                                                        <td className={`p-2.5 tabular-nums ${difference === null ? "text-muted-foreground" : difference === 0 ? "text-foreground" : "text-amber-700"}`}>{differenceLabel}</td>
+                                                        <td className="p-2.5"><Label className="sr-only" htmlFor={`waste-material-${material.recipeMaterialId}`}>Recorded {material.name} waste in {material.unit}</Label><Input id={`waste-material-${material.recipeMaterialId}`} type="number" min="0" step="0.000001" value={materialWasteQuantities[material.recipeMaterialId] ?? "0"} onChange={(event) => { setMaterialWasteQuantities((current) => ({ ...current, [material.recipeMaterialId]: event.target.value })); resetSubmissionKey(); }} className="min-w-24" /></td>
+                                                        <td className="p-2.5 text-xs">{material.consumptionToleranceBasisPoints === null
+                                                            ? <span className="text-amber-700">Review required · no approved standard</span>
+                                                            : !hasActual ? <span className="text-muted-foreground">Enter actual use</span>
+                                                                : assessment?.status === "within_tolerance" ? <span className="text-emerald-700">Within approved standard</span>
+                                                                    : <span className="text-amber-700">Review required · {calculateMaterialDifference(actual, planned) < 0 ? "below" : "above"} range</span>}</td>
+                                                    </tr>
+                                                );
+                                            })}
+                                        </tbody>
+                                    </table>
                                 </div>
-                                <p className="text-xs text-muted-foreground">Good output plus rejected output must equal total actual output. No rework or waste conversion is assumed.</p>
-                                {selectedRecipe.materials.map((material) => {
-                                    const planned = Number(plannedOutputQuantity) > 0 ? Number(plannedOutputQuantity) * material.quantity / selectedRecipe.outputQuantity : 0;
-                                    return (
-                                        <div key={material.recipeMaterialId} className="grid gap-2 rounded-md bg-muted/40 p-3 sm:grid-cols-2">
-                                            <div>
-                                                <p className="text-sm font-medium">{material.name} <span className="font-mono text-xs text-muted-foreground">({material.materialCode})</span></p>
-                                                <p className="text-xs text-muted-foreground">Planned for this batch: {planned.toLocaleString()} {material.unit}</p>
-                                            </div>
-                                            <div className="space-y-1"><Label htmlFor={`actual-material-${material.recipeMaterialId}`}>Actual used ({material.unit})</Label><Input id={`actual-material-${material.recipeMaterialId}`} type="number" min="0" step="any" value={actualMaterialQuantities[material.recipeMaterialId] ?? ""} onChange={(event) => { setActualMaterialQuantities((current) => ({ ...current, [material.recipeMaterialId]: event.target.value })); resetSubmissionKey(); }} /><Label htmlFor={`waste-material-${material.recipeMaterialId}`}>Recorded waste from this material ({material.unit})</Label><Input id={`waste-material-${material.recipeMaterialId}`} type="number" min="0" step="any" value={materialWasteQuantities[material.recipeMaterialId] ?? "0"} onChange={(event) => { setMaterialWasteQuantities((current) => ({ ...current, [material.recipeMaterialId]: event.target.value })); resetSubmissionKey(); }} /></div>
-                                        </div>
-                                    );
-                                })}
+                                <div className="space-y-2">
+                                    <h3 className="text-sm font-semibold">3. Finished-goods output</h3>
+                                    <div className="grid gap-3 sm:grid-cols-2">
+                                    <div className="space-y-1"><Label htmlFor="good-output">Reported good output ({selectedRecipe.productUnit})</Label><Input id="good-output" type="number" min="0" step="0.000001" value={goodOutputQuantity} onChange={(event) => { setGoodOutputQuantity(event.target.value); resetSubmissionKey(); }} /></div>
+                                    <div className="space-y-1"><Label htmlFor="rejected-output">Reported rejected output ({selectedRecipe.productUnit})</Label><Input id="rejected-output" type="number" min="0" step="0.000001" value={rejectedOutputQuantity} onChange={(event) => { setRejectedOutputQuantity(event.target.value); resetSubmissionKey(); }} /></div>
+                                    </div>
+                                </div>
+                                <p className="text-xs text-muted-foreground">Reported good output plus rejected output must equal actual total output. Stock remains held until an authorized reviewer verifies and releases the batch.</p>
                                 <div className="rounded-md bg-muted/40 p-3 text-xs text-muted-foreground">
-                                    <p>Official yield standard: {selectedRecipe.yieldToleranceBasisPoints === null ? "unavailable; this batch requires review" : `${(selectedRecipe.yieldToleranceBasisPoints / 100).toFixed(2)}% deviation · version ${selectedRecipe.yieldToleranceStandardId}`}</p>
-                                    {selectedRecipe.materials.map((material) => <p key={material.recipeMaterialId}>{material.name} standard: {material.consumptionToleranceBasisPoints === null ? "unavailable; this batch requires review" : `${(material.consumptionToleranceBasisPoints / 100).toFixed(2)}% deviation · version ${material.consumptionToleranceStandardId}`}</p>)}
+                                    <p>Yield standard: {selectedRecipe.yieldToleranceBasisPoints === null ? "Review required · no approved standard" : `${(selectedRecipe.yieldToleranceBasisPoints / 100).toFixed(2)}% · version ${selectedRecipe.yieldToleranceStandardId}`}</p>
+                                    <p className="mt-1">Recipe version {selectedRecipe.version} · {selectedRecipe.materials.length} required material lines. Required recipe materials cannot be removed; report zero use with an explanation in production notes.</p>
+                                </div>
+                                <div className="rounded-md bg-muted/40 p-3 text-xs text-muted-foreground">
+                                    <p className="font-semibold">5. Review summary</p>
+                                    <p>{selectedPlan ? `${selectedPlan.productName} · reserved plan · planned output ${selectedPlan.plannedOutputQuantity} ${selectedRecipe.productUnit}` : "Select a reserved plan"} · batch reference is generated on submission.</p>
+                                    <p>{selectedRecipe.materials.length} recipe materials · {selectedRecipe.materials.filter((material) => actualMaterialQuantities[material.recipeMaterialId]?.trim()).length}/{selectedRecipe.materials.length} actual entries completed · missing approved standards and out-of-range differences require independent review.</p>
                                 </div>
                             </div>
                         )}
-                    </div>
+                    </section>
                 )}
 
-                <Button onClick={handleRecordProduction} disabled={isPending || !selectedProductId || qty <= 0 || !Number.isInteger(price) || !Number.isFinite(qty * price) || Boolean(selectedRecipe && (!selectedPlan || goodOutputQuantity === "" || rejectedOutputQuantity === ""))} className="gap-2">
+                {selectedRecipe && <section aria-labelledby="production-notes-title" className="space-y-2">
+                    <h3 id="production-notes-title" className="text-sm font-semibold">4. Production notes</h3>
+                    <Label htmlFor="production-notes" className="sr-only">Production notes</Label>
+                    <textarea id="production-notes" value={productionNotes} onChange={(event) => { setProductionNotes(event.target.value); resetSubmissionKey(); }} maxLength={2_000} rows={3} placeholder="Record production differences or explain any material reported with zero use." className="w-full rounded-md border bg-background px-3 py-2 text-sm shadow-sm" />
+                </section>}
+
+                <Button onClick={handleRecordProduction} disabled={isPending || !selectedProductId || qty <= 0 || !Number.isInteger(price) || !Number.isFinite(qty * price) || recipeSubmissionIncomplete} className="gap-2">
                     {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                    Save Production
+                    {selectedRecipe ? "Submit for verification" : "Save production"}
                 </Button>
             </CardContent>
         </Card>

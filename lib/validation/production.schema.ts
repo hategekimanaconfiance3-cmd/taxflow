@@ -1,5 +1,10 @@
 import { z } from 'zod';
 
+const productionQuantity = z.number().finite().min(0).max(1_000_000_000)
+  .refine((value) => Number.isSafeInteger(Math.round(value * 1_000_000))
+    && Math.abs(value - Math.round(value * 1_000_000) / 1_000_000) < 1e-9,
+  'Use no more than 6 decimal places.');
+
 export const productRegistrationSchema = z.object({
   name: z.string().trim().min(1, 'Product name is required').max(160),
   unit: z.enum(['kg', 'unit', 'liter', 'box', 'pack', 'ton']),
@@ -13,13 +18,14 @@ export const productionEntrySchema = z.object({
   idempotencyKey: z.string().uuid(),
   materialPlanId: z.string().trim().min(1).max(128).optional(),
   recipeVersionId: z.string().trim().min(1).max(128).optional(),
-  plannedOutputQuantity: z.number().finite().positive().max(1_000_000_000).optional(),
-  goodOutputQuantity: z.number().finite().min(0).max(1_000_000_000).optional(),
-  rejectedOutputQuantity: z.number().finite().min(0).max(1_000_000_000).optional(),
+  plannedOutputQuantity: productionQuantity.positive().optional(),
+  goodOutputQuantity: productionQuantity.optional(),
+  rejectedOutputQuantity: productionQuantity.optional(),
+  notes: z.string().trim().max(2_000).optional(),
   actualMaterials: z.array(z.object({
     recipeMaterialId: z.string().trim().min(1).max(128),
-    actualQuantity: z.number().finite().min(0).max(1_000_000_000),
-    wasteQuantity: z.number().finite().min(0).max(1_000_000_000).default(0),
+    actualQuantity: productionQuantity,
+    wasteQuantity: productionQuantity.default(0),
   }).strict()).max(100).optional(),
 }).refine((entry) => Number.isSafeInteger(Math.round(entry.quantity * entry.unitPrice)), {
   message: 'Production value is outside the supported range',
@@ -33,6 +39,10 @@ export const productionEntrySchema = z.object({
     && entry.materialPlanId === undefined, {
   message: 'Select a recipe and reserved material plan, then record planned output, actual materials, good output, and rejects together.',
   path: ['actualMaterials'],
+}).refine((entry) => !(entry.actualMaterials ?? []).some((item) => item.actualQuantity === 0)
+  || Boolean(entry.notes?.trim()), {
+  message: 'Add a production note explaining any recipe material reported with zero consumption.',
+  path: ['notes'],
 }).refine((entry) => new Set(entry.actualMaterials?.map((item) => item.recipeMaterialId)).size === (entry.actualMaterials?.length ?? 0), {
   message: 'A recipe material can only be entered once.',
   path: ['actualMaterials'],
@@ -49,7 +59,8 @@ export const productionEntrySchema = z.object({
 }).strict();
 
 const accountingQuantity = z.number().finite().positive().max(1_000_000_000)
-  .refine((value) => Number.isSafeInteger(Math.round(value * 1_000_000)), 'Use no more than 6 decimal places.');
+  .refine((value) => Number.isSafeInteger(Math.round(value * 1_000_000))
+    && Math.abs(value - Math.round(value * 1_000_000) / 1_000_000) < 1e-9, 'Use no more than 6 decimal places.');
 
 export const productionMaterialPlanSchema = z.object({
   productId: z.string().trim().min(1).max(128),
@@ -124,7 +135,9 @@ export const productionMaterialAdjustmentSchema = z.object({
 const recipeMaterialInputSchema = z.object({
   name: z.string().trim().min(1).max(120),
   unit: z.string().trim().min(1).max(32),
-  quantity: z.number().finite().positive().max(1_000_000_000),
+  quantity: z.number().finite().positive().max(1_000_000_000)
+    .refine((value) => Number.isSafeInteger(Math.round(value * 1_000_000))
+      && Math.abs(value - Math.round(value * 1_000_000) / 1_000_000) < 1e-9, 'Use no more than 6 decimal places.'),
 }).strict();
 
 export const productionRecipeSchema = z.object({

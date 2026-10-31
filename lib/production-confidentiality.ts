@@ -1,3 +1,5 @@
+import { multiplyQuantities, microsToDecimal, quantityToMicros } from '@/lib/material-accounting';
+
 export type MaterialValidationStatus = 'within_tolerance' | 'review_required';
 
 export function calculatePlannedMaterialQuantity(
@@ -9,9 +11,19 @@ export function calculatePlannedMaterialQuantity(
     || batchOutputQuantity <= 0 || recipeOutputQuantity <= 0 || recipeMaterialQuantity <= 0) {
     throw new Error('Production quantities must be finite and positive.');
   }
-  const planned = batchOutputQuantity * recipeMaterialQuantity / recipeOutputQuantity;
+  const plannedMicros = multiplyQuantities(
+    quantityToMicros(batchOutputQuantity),
+    quantityToMicros(recipeMaterialQuantity),
+    quantityToMicros(recipeOutputQuantity),
+  );
+  const planned = Number(microsToDecimal(plannedMicros));
   if (!Number.isFinite(planned) || planned <= 0) throw new Error('Calculated material quantity is outside the supported range.');
   return planned;
+}
+
+export function calculateMaterialDifference(actualQuantity: number, plannedQuantity: number): number {
+  const differenceMicros = quantityToMicros(actualQuantity) - quantityToMicros(plannedQuantity);
+  return Number(microsToDecimal(differenceMicros));
 }
 
 export function assessMaterialVariance(
@@ -24,10 +36,15 @@ export function assessMaterialVariance(
     || !Number.isInteger(toleranceBasisPoints) || toleranceBasisPoints < 0 || toleranceBasisPoints > 10_000) {
     throw new Error('Material validation inputs are invalid.');
   }
-  const variance = Math.abs(actualQuantity - plannedQuantity) / plannedQuantity * 10_000;
+  const plannedMicros = quantityToMicros(plannedQuantity);
+  const actualMicros = quantityToMicros(actualQuantity);
+  const differenceMicros = actualMicros >= plannedMicros
+    ? actualMicros - plannedMicros
+    : plannedMicros - actualMicros;
+  const varianceBasisPoints = Number((differenceMicros * BigInt(10_000) + plannedMicros / BigInt(2)) / plannedMicros);
   return {
-    status: variance <= toleranceBasisPoints ? 'within_tolerance' : 'review_required',
-    varianceBasisPoints: Math.round(variance),
+    status: varianceBasisPoints <= toleranceBasisPoints ? 'within_tolerance' : 'review_required',
+    varianceBasisPoints,
   };
 }
 
