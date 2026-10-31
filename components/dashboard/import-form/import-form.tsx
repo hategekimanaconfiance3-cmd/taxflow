@@ -35,6 +35,13 @@ export function ImportForm({ products, materials }: ImportFormProps) {
     } | null>(null);
     const selectedProduct = products.find((product) => product.id === productId);
     const selectedMaterial = materials.find((material) => material.id === productionMaterialId);
+    const compatibleMaterials = materials.filter((material) => {
+        const materialUnit = material.unit.trim().toLocaleLowerCase("en-US");
+        return products.some((product) =>
+            (!selectedProduct || product.id === selectedProduct.id) &&
+            product.unit.trim().toLocaleLowerCase("en-US") === materialUnit,
+        );
+    });
     const unitsMismatch = Boolean(
         selectedProduct &&
         selectedMaterial &&
@@ -173,12 +180,16 @@ export function ImportForm({ products, materials }: ImportFormProps) {
                             <SelectTrigger><SelectValue placeholder="Ordinary product import" /></SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="none">Ordinary product import</SelectItem>
-                                {materials.map((material) => (
+                                {compatibleMaterials.map((material) => (
                                     <SelectItem key={material.id} value={material.id}>{material.name} · {material.materialCode} ({material.unit})</SelectItem>
                                 ))}
                             </SelectContent>
                         </Select>
-                        {productionMaterialId && <p className="text-xs text-muted-foreground">RRA inspection will post the verified quantity to your confidential material ledger and will not add it to ordinary product inventory. The customs product unit must match the material unit.</p>}
+                        {compatibleMaterials.length === 0 ? (
+                            <p className="text-xs text-muted-foreground">No confidential materials match a registered product unit, so they are hidden here. Ask an authorized user to correct the material unit; existing ledger history is preserved.</p>
+                        ) : productionMaterialId ? (
+                            <p className="text-xs text-muted-foreground">RRA inspection will post the verified quantity to your confidential material ledger and will not add it to ordinary product inventory. The customs product unit must match the material unit.</p>
+                        ) : null}
                     </div>
                 )}
 
