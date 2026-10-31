@@ -604,11 +604,33 @@ export async function resolveDispute(
             throw new Error("This transaction has separate B2B fulfillment evidence. Dispute financial resolution is disabled until the fulfillment-aware stock and VAT disposition workflow is completed.");
         }
 
-        const frozenRecords = await tx
+        const transactionVatRecords = await tx
             .select()
             .from(vatRecord)
-            .where(and(eq(vatRecord.transactionId, txn.id), eq(vatRecord.isFrozen, true)));
-        if (frozenRecords.length === 0) throw new Error("Frozen VAT records are missing; dispute requires manual review.");
+            .where(eq(vatRecord.transactionId, txn.id))
+            .for("update");
+        if (transactionVatRecords.length === 0) {
+            throw new Error("VAT records are missing; dispute requires manual review.");
+        }
+
+        const frozenRecords = transactionVatRecords.filter((record) => record.isFrozen);
+        const unfrozenRecords = transactionVatRecords.filter((record) => !record.isFrozen);
+        if (frozenRecords.length > 0 && unfrozenRecords.length > 0) {
+            throw new Error("VAT record freeze state is inconsistent; dispute requires manual review.");
+        }
+
+        // Older demo/imported dispute rows were inserted directly and did not
+        // run fileDispute's VAT-freeze update. Freeze those rows within this
+        // same locked decision transaction, then apply the selected decision.
+        // This keeps the VAT disposition atomic and auditable without changing
+        // the normal filing or review permissions.
+        const vatFreezeRecoveredForDecision = frozenRecords.length === 0;
+        const decisionVatRecords = vatFreezeRecoveredForDecision ? unfrozenRecords : frozenRecords;
+        if (vatFreezeRecoveredForDecision) {
+            await tx.update(vatRecord)
+                .set({ isFrozen: true })
+                .where(and(eq(vatRecord.transactionId, txn.id), eq(vatRecord.isFrozen, false)));
+        }
 
         let financialEffect: Record<string, number | string> = {};
         if (data.action === "undo_transaction") {
@@ -652,14 +674,14 @@ export async function resolveDispute(
         }
 
         if (data.action === "undo_transaction" || data.action === "uphold_dispute") {
-            await tx.insert(vatRecord).values(frozenRecords.map((record) => ({
+            await tx.insert(vatRecord).values(decisionVatRecords.map((record) => ({
                 transactionId: txn.id,
                 businessId: record.businessId,
                 vatType: record.vatType,
                 amount: -record.amount,
                 period: record.period,
             })));
-            financialEffect = { vatReversed: frozenRecords.reduce((sum, record) => sum + record.amount, 0) };
+            financialEffect = { vatReversed: decisionVatRecords.reduce((sum, record) => sum + record.amount, 0) };
         }
 
         if (data.action === "adjust_amount") {
@@ -716,6 +738,7 @@ export async function resolveDispute(
                 resolution: data.resolution.trim(),
                 resolvedBy: staff.staffId,
                 referenceNumber: existingDispute.referenceNumber,
+                vatFreezeRecoveredForDecision,
                 ...financialEffect,
             }),
         });
@@ -728,7 +751,8 @@ export async function resolveDispute(
             "This dispute has already been finalized",
             "Disputed transaction not found",
             "This transaction has separate B2B fulfillment evidence. Dispute financial resolution is disabled until the fulfillment-aware stock and VAT disposition workflow is completed.",
-            "Frozen VAT records are missing; dispute requires manual review.",
+            "VAT records are missing; dispute requires manual review.",
+            "VAT record freeze state is inconsistent; dispute requires manual review.",
             "Transaction cannot be undone because the buyer no longer has the purchased stock.",
         ]);
         if (error instanceof Error && knownMessages.has(error.message)) {
