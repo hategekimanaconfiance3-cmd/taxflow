@@ -27,6 +27,7 @@ const STATUS_COLORS: Record<string, string> = {
  */
 export default async function AdminVatVerificationPage() {
   await requireRRASession(
+    "super_admin",
     "compliance_officer",
     "audit_officer",
     "tax_compliance_officer",
