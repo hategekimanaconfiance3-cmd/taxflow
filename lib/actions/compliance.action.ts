@@ -36,17 +36,24 @@ export async function getTaxComplianceStatus(userId?: string) {
 // Record Tax Payment
 // ---------------------------------------------------------------------------
 
-export async function recordTaxPayment(data: {
-  method: 'mobile_money' | 'bank_transfer' | 'cash';
-  reference?: string;
-}, idempotencyKey: string): Promise<typeof taxPayment.$inferSelect> {
+export type RecordTaxPaymentResult =
+  | { success: true; payment: typeof taxPayment.$inferSelect }
+  | { success: false; error: string; reference?: string };
+
+export async function recordTaxPayment(rawData: unknown, idempotencyKey: unknown): Promise<RecordTaxPaymentResult> {
   const session = await requireTraderSession();
-  const parsed = taxPaymentSubmissionSchema.safeParse({ ...data, idempotencyKey });
+  const parsed = taxPaymentSubmissionSchema.safeParse({
+    ...(typeof rawData === 'object' && rawData !== null && !Array.isArray(rawData) ? rawData : {}),
+    idempotencyKey,
+  });
   if (!parsed.success) {
-    throw new Error('Payment details are invalid. Please review them and try again.');
+    return { success: false, error: parsed.error.issues[0]?.message ?? 'Payment details are invalid. Please review them and try again.' };
   }
   const paymentInput = parsed.data;
-  const payment = await db.transaction(async (tx) => {
+  const correlationId = crypto.randomUUID();
+  let payment: typeof taxPayment.$inferSelect;
+  try {
+  payment = await db.transaction(async (tx) => {
     // Serialize payment requests and reviewer settlement against one taxpayer row.
     const [lockedBusiness] = await tx.select({ id: user.id }).from(user)
       .where(eq(user.id, session.user.id)).for('update').limit(1);
@@ -150,8 +157,31 @@ export async function recordTaxPayment(data: {
 
     return createdPayment;
   });
+  } catch (error) {
+    const knownMessages = new Set([
+      'Taxpayer account was not found.',
+      'This payment request key was already used for different payment details.',
+      'No recorded VAT balance is currently outstanding. Payment request was not created.',
+      'A payment is already awaiting settlement review. Wait for its result before submitting another request.',
+      'Payment retry could not be reconciled. Please contact support.',
+    ]);
+    if (error instanceof Error && knownMessages.has(error.message)) {
+      return { success: false, error: error.message };
+    }
+    console.error('Tax payment submission failed', {
+      userId: session.user.id,
+      correlationId,
+      errorName: error instanceof Error ? error.name : typeof error,
+      databaseCode: error && typeof error === 'object' && 'code' in error ? String(error.code) : undefined,
+    });
+    return {
+      success: false,
+      error: 'The payment request could not be recorded. No payment was confirmed. Contact support with the reference below.',
+      reference: correlationId,
+    };
+  }
 
-  return payment;
+  return { success: true, payment };
 }
 
 // ---------------------------------------------------------------------------

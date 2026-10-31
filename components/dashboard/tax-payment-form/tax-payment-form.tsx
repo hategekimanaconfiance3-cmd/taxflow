@@ -63,10 +63,17 @@ export function TaxPaymentForm({ outstanding }: TaxPaymentFormProps) {
                 crypto.randomUUID();
             setIdempotencyKey(paymentRequestKey);
             sessionStorage.setItem(PAYMENT_IDEMPOTENCY_STORAGE_KEY, paymentRequestKey);
-            const payment = await recordTaxPayment({
+            const result = await recordTaxPayment({
                 method: values.method,
                 reference: values.reference?.trim() || undefined,
             }, paymentRequestKey);
+            if (!result.success) {
+                setError("root", {
+                    message: result.reference ? `${result.error} Support reference: ${result.reference}` : result.error,
+                });
+                return;
+            }
+            const { payment } = result;
 
             setIdempotencyKey(null);
             sessionStorage.removeItem(PAYMENT_IDEMPOTENCY_STORAGE_KEY);
@@ -78,11 +85,11 @@ export function TaxPaymentForm({ outstanding }: TaxPaymentFormProps) {
             });
             router.refresh();
         } catch (err) {
+            console.error("Tax payment submission request failed in the client", {
+                errorName: err instanceof Error ? err.name : typeof err,
+            });
             setError("root", {
-                message:
-                    err instanceof Error
-                        ? err.message
-                        : "Failed to record payment",
+                message: "The payment request could not be recorded. No payment was confirmed. Please try again or contact support if the problem continues.",
             });
         }
     };
