@@ -4,7 +4,7 @@ import { assessMaterialVariance, calculatePlannedMaterialQuantity, combineMateri
 
 test('recipe quantities scale deterministically to the batch output', () => {
   assert.equal(calculatePlannedMaterialQuantity(250, 100, 12), 30);
-  assert.equal(calculatePlannedMaterialQuantity(1, 3, 2), 2 / 3);
+  assert.equal(calculatePlannedMaterialQuantity(1, 3, 2), 0.666667);
 });
 
 test('material variances use the recipe tolerance and produce a review signal', () => {

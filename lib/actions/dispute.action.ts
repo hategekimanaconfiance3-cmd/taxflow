@@ -1,10 +1,11 @@
 "use server";
 
-import { eq, desc, and, or, sql, gte, inArray } from "drizzle-orm";
+import { eq, desc, and, or, sql, gte, inArray, notInArray } from "drizzle-orm";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { generateText } from "ai";
 import { randomUUID } from "node:crypto";
 import { headers } from "next/headers";
+import { z } from "zod";
 import db from "@/db/drizzle";
 import { auditLog, b2bOrderAcceptance, dispute, notification, product, stock, stockMovement, transaction, user, vatRecord } from "@/db/schema";
 import { requireAnyRRAPermission, requireTraderSession } from "@/lib/auth-guard";
@@ -380,6 +381,7 @@ export async function getAllDisputes() {
         .from(dispute)
         .innerJoin(filer, eq(dispute.filedById, filer.id))
         .innerJoin(counterparty, eq(dispute.counterpartyId, counterparty.id))
+        .where(notInArray(dispute.status, ["resolved", "dismissed"]))
         .orderBy(desc(dispute.createdAt));
 }
 
@@ -392,6 +394,17 @@ export type RRADisputeAction =
     | "adjust_amount"
     | "uphold_dispute"
     | "dismiss";
+
+const disputeResolutionSchema = z.object({
+    action: z.enum(["undo_transaction", "adjust_amount", "uphold_dispute", "dismiss"]),
+    resolution: z.string().trim().min(1, "Resolution notes are required").max(6000),
+    officialNote: z.string().trim().min(1, "An official communication to both parties is required").max(6000),
+    adjustedUnitPrice: z.number().int().positive().optional(),
+}).strict();
+
+export type ResolveDisputeResult =
+    | { success: true }
+    | { success: false; error: string; reference?: string };
 
 const ACTION_LABELS: Record<RRADisputeAction, string> = {
     undo_transaction: "Transaction Undone",
@@ -549,31 +562,24 @@ export async function generateDisputeAiAssistance(rawInput: DisputeAiAssistanceI
 
 export async function resolveDispute(
     disputeId: string,
-    data: {
-        action: RRADisputeAction;
-        resolution: string;
-        officialNote: string;
-        adjustedUnitPrice?: number;
-    },
-) {
+    rawData: unknown,
+): Promise<ResolveDisputeResult> {
     const { staff, ...session } = await requireAnyRRAPermission("compliance.followup.manage", "investigation.case.manage");
-
-    if (!data.resolution?.trim()) {
-        throw new Error("Resolution notes are required");
+    const parsed = disputeResolutionSchema.safeParse(rawData);
+    if (!parsed.success) {
+        return { success: false, error: parsed.error.issues[0]?.message ?? "Check the decision details and try again." };
     }
-
-    if (!data.officialNote?.trim()) {
-        throw new Error("An official communication to both parties is required");
-    }
-
-    const validActions: RRADisputeAction[] = ["undo_transaction", "adjust_amount", "uphold_dispute", "dismiss"];
-    if (!validActions.includes(data.action)) throw new Error("Invalid dispute resolution action");
+    const data = parsed.data;
     if (data.action === "adjust_amount" && (!Number.isSafeInteger(data.adjustedUnitPrice) || (data.adjustedUnitPrice ?? 0) <= 0)) {
-        throw new Error("A positive whole-number adjusted unit price is required");
+        return { success: false, error: "A positive whole-number adjusted unit price is required." };
     }
 
+    const correlationId = randomUUID();
+    let existingDispute: typeof dispute.$inferSelect;
+    let partyIds: string[];
+    try {
     const config = data.action === "adjust_amount" ? await getSystemConfig() : null;
-    const { existingDispute, partyIds } = await db.transaction(async (tx) => {
+    ({ existingDispute, partyIds } = await db.transaction(async (tx) => {
         const [existingDispute] = await tx
             .select()
             .from(dispute)
@@ -599,11 +605,33 @@ export async function resolveDispute(
             throw new Error("This transaction has separate B2B fulfillment evidence. Dispute financial resolution is disabled until the fulfillment-aware stock and VAT disposition workflow is completed.");
         }
 
-        const frozenRecords = await tx
+        const transactionVatRecords = await tx
             .select()
             .from(vatRecord)
-            .where(and(eq(vatRecord.transactionId, txn.id), eq(vatRecord.isFrozen, true)));
-        if (frozenRecords.length === 0) throw new Error("Frozen VAT records are missing; dispute requires manual review.");
+            .where(eq(vatRecord.transactionId, txn.id))
+            .for("update");
+        if (transactionVatRecords.length === 0) {
+            throw new Error("VAT records are missing; dispute requires manual review.");
+        }
+
+        const frozenRecords = transactionVatRecords.filter((record) => record.isFrozen);
+        const unfrozenRecords = transactionVatRecords.filter((record) => !record.isFrozen);
+        if (frozenRecords.length > 0 && unfrozenRecords.length > 0) {
+            throw new Error("VAT record freeze state is inconsistent; dispute requires manual review.");
+        }
+
+        // Older demo/imported dispute rows were inserted directly and did not
+        // run fileDispute's VAT-freeze update. Freeze those rows within this
+        // same locked decision transaction, then apply the selected decision.
+        // This keeps the VAT disposition atomic and auditable without changing
+        // the normal filing or review permissions.
+        const vatFreezeRecoveredForDecision = frozenRecords.length === 0;
+        const decisionVatRecords = vatFreezeRecoveredForDecision ? unfrozenRecords : frozenRecords;
+        if (vatFreezeRecoveredForDecision) {
+            await tx.update(vatRecord)
+                .set({ isFrozen: true })
+                .where(and(eq(vatRecord.transactionId, txn.id), eq(vatRecord.isFrozen, false)));
+        }
 
         let financialEffect: Record<string, number | string> = {};
         if (data.action === "undo_transaction") {
@@ -647,14 +675,14 @@ export async function resolveDispute(
         }
 
         if (data.action === "undo_transaction" || data.action === "uphold_dispute") {
-            await tx.insert(vatRecord).values(frozenRecords.map((record) => ({
+            await tx.insert(vatRecord).values(decisionVatRecords.map((record) => ({
                 transactionId: txn.id,
                 businessId: record.businessId,
                 vatType: record.vatType,
                 amount: -record.amount,
                 period: record.period,
             })));
-            financialEffect = { vatReversed: frozenRecords.reduce((sum, record) => sum + record.amount, 0) };
+            financialEffect = { vatReversed: decisionVatRecords.reduce((sum, record) => sum + record.amount, 0) };
         }
 
         if (data.action === "adjust_amount") {
@@ -711,19 +739,56 @@ export async function resolveDispute(
                 resolution: data.resolution.trim(),
                 resolvedBy: staff.staffId,
                 referenceNumber: existingDispute.referenceNumber,
+                vatFreezeRecoveredForDecision,
                 ...financialEffect,
             }),
         });
 
         return { existingDispute, partyIds };
-    });
+    }));
+    } catch (error) {
+        const knownMessages = new Set([
+            "Dispute not found",
+            "This dispute has already been finalized",
+            "Disputed transaction not found",
+            "This transaction has separate B2B fulfillment evidence. Dispute financial resolution is disabled until the fulfillment-aware stock and VAT disposition workflow is completed.",
+            "VAT records are missing; dispute requires manual review.",
+            "VAT record freeze state is inconsistent; dispute requires manual review.",
+            "Transaction cannot be undone because the buyer no longer has the purchased stock.",
+        ]);
+        if (error instanceof Error && knownMessages.has(error.message)) {
+            return { success: false, error: error.message };
+        }
+        console.error("RRA dispute decision failed", {
+            userId: session.user.id,
+            disputeId,
+            correlationId,
+            errorName: error instanceof Error ? error.name : typeof error,
+            databaseCode: error && typeof error === "object" && "code" in error ? String(error.code) : undefined,
+        });
+        return {
+            success: false,
+            error: "The decision could not be issued. No changes were committed. Contact support with the reference below.",
+            reference: correlationId,
+        };
+    }
 
     for (const partyId of partyIds) {
-        emitToUser(partyId, "dispute:resolved", {
-            disputeId,
-            action: data.action,
-            referenceNumber: existingDispute.referenceNumber,
-        });
+        try {
+            emitToUser(partyId, "dispute:resolved", {
+                disputeId,
+                action: data.action,
+                referenceNumber: existingDispute.referenceNumber,
+            });
+        } catch (error) {
+            // The financial decision is already committed. A realtime outage
+            // must not make the UI report that the decision itself failed.
+            console.error("Dispute decision notification delivery failed", {
+                disputeId,
+                correlationId,
+                errorName: error instanceof Error ? error.name : typeof error,
+            });
+        }
     }
 
     return { success: true };

@@ -174,6 +174,12 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 allowedRoles: TAXPAYER_SEARCH_ROLES,
             },
             {
+                label: "Taxpayer Corrections",
+                href: "/admin/corrections",
+                icon: UserCheck,
+                allowedRoles: ["correction_officer", "super_admin"],
+            },
+            {
                 label: "Transactions",
                 href: "/admin/transactions",
                 icon: ArrowLeftRight,
@@ -230,6 +236,7 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 allowedRoles: [
                     "stock_officer",
                     "audit_officer",
+                    "correction_officer",
                     "product_traceability_officer",
                     "audit_investigation_officer",
                 ],
@@ -405,6 +412,12 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 ],
             },
             {
+                label: "AI Assistant",
+                href: "/admin/intelligence/assistant",
+                icon: Brain,
+                allowedRoles: ["correction_officer"],
+            },
+            {
                 label: "Anomaly Detection",
                 href: "/admin/anomalies",
                 icon: Activity,
@@ -422,6 +435,8 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                     "super_admin",
                     "compliance_officer",
                     "audit_officer",
+                    "tax_compliance_officer",
+                    "audit_investigation_officer",
                 ],
             },
             {

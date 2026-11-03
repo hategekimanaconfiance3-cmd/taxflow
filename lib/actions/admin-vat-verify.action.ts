@@ -30,6 +30,7 @@ export type VatDiscrepancy = {
 
 export async function getVatVerification(): Promise<VatDiscrepancy[]> {
     await requireRRASession(
+        "super_admin",
         "compliance_officer",
         "audit_officer",
         "tax_compliance_officer",

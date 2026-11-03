@@ -271,6 +271,18 @@ test("legacy stock_officer has traceability and stock permissions only", () => {
     assert.equal(hasRRAPermission("stock_officer", "payments.reconcile"), false);
 });
 
+test("legacy correction_officer retains stock correction but no taxpayer, financial, or staff authority", () => {
+    assert.ok(hasRRAPermission("correction_officer", "taxpayer.intelligence.search"));
+    assert.ok(hasRRAPermission("correction_officer", "stock.read"));
+    assert.ok(hasRRAPermission("correction_officer", "stock.correction.review"));
+    assert.equal(hasRRAPermission("correction_officer", "taxpayer.compliance.read"), false);
+    assert.equal(hasRRAPermission("correction_officer", "tax.records.read"), false);
+    assert.equal(hasRRAPermission("correction_officer", "payments.read"), false);
+    assert.equal(hasRRAPermission("correction_officer", "staff.manage"), false);
+    assert.equal(hasRRAPermission("correction_officer", "ai.assistant.use"), true);
+    assert.equal(hasRRAPermission("correction_officer", "ai.feedback.review"), false);
+});
+
 // ---------------------------------------------------------------------------
 // isRRARoleAllowed — legacy guard alias compatibility
 // ---------------------------------------------------------------------------

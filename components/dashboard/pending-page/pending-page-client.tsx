@@ -89,6 +89,7 @@ function ConfirmRejectActions({ transactionId }: { transactionId: string }) {
     const router = useRouter();
     const [isPending, startTransition] = useTransition();
     const [result, setResult] = useState<"confirmed" | "rejected" | null>(null);
+    const [invoiceId, setInvoiceId] = useState<string | null>(null);
     const [error, setError] = useState("");
 
     function handleAction(action: "confirm" | "reject") {
@@ -96,10 +97,13 @@ function ConfirmRejectActions({ transactionId }: { transactionId: string }) {
             try {
                 setError("");
                 if (action === "confirm") {
-                    await confirmTransaction(transactionId);
+                    const response = await confirmTransaction(transactionId);
+                    if (!response.success) throw new Error(response.error);
+                    setInvoiceId(response.invoiceId ?? null);
                     setResult("confirmed");
                 } else {
-                    await rejectTransaction(transactionId);
+                    const response = await rejectTransaction(transactionId);
+                    if (!response.success) throw new Error(response.error);
                     setResult("rejected");
                 }
                 router.refresh();
@@ -120,6 +124,9 @@ function ConfirmRejectActions({ transactionId }: { transactionId: string }) {
                     }`}
             >
                 {result === "confirmed" ? "✓ Order accepted" : "✕ Rejected"}
+                {result === "confirmed" && invoiceId && (
+                    <a className="ml-2 underline underline-offset-2" href={`/dashboard/invoices/${invoiceId}`}>View invoice</a>
+                )}
             </span>
         );
     }
@@ -225,10 +232,12 @@ export function PendingPageClient({ incoming, outgoing }: PendingPageClientProps
     return () => clearInterval(interval);
   }, [incoming, outgoing, router]);
 
-  // Filter pending items using the persisted reservation expiry time.
-  const pendingIncoming = incoming.filter((t) => t.status === 'pending' && isStillPending(t.expiresAt));
+  // The server expires stale transactions before loading them. Keep status as
+  // the source of truth here so a client clock/timestamp difference cannot hide
+  // a pending confirmation that the dashboard still reports as actionable.
+  const pendingIncoming = incoming.filter((t) => t.status === 'pending');
   const processedIncoming = incoming.filter((t) => t.status !== 'pending');
-  const pendingOutgoing = outgoing.filter((t) => t.status === 'pending' && isStillPending(t.expiresAt));
+  const pendingOutgoing = outgoing.filter((t) => t.status === 'pending');
   const processedOutgoing = outgoing.filter((t) => t.status !== 'pending');
 
   return (

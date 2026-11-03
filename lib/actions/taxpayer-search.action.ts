@@ -5,6 +5,11 @@ import db from "@/db/drizzle";
 import { user } from "@/db/schema";
 import { requireRRAPermission } from "@/lib/auth-guard";
 import { logAudit } from "@/lib/audit";
+import {
+    canReadTaxpayerSearchContact,
+    projectTaxpayerSearchRow,
+    type TaxpayerSearchRow,
+} from "@/lib/taxpayer-search-policy";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -18,17 +23,7 @@ export interface TaxpayerSearchFilters {
     dateTo?: string;   // ISO date "YYYY-MM-DD"
 }
 
-export interface TaxpayerSearchRow {
-    id: string;
-    name: string;
-    businessName: string | null;
-    tinNumber: string | null;
-    role: string | null;
-    clearanceStatus: string | null;
-    email: string;
-    phoneNumber: string | null;
-    createdAt: Date;
-}
+export type { TaxpayerSearchRow };
 
 export interface TaxpayerSearchResult {
     rows: TaxpayerSearchRow[];
@@ -48,7 +43,8 @@ export async function searchTaxpayers(
     filters: TaxpayerSearchFilters,
     page = 1,
 ): Promise<TaxpayerSearchResult> {
-    const { user: actor } = await requireRRAPermission("taxpayer.intelligence.search");
+    const { user: actor, staff } = await requireRRAPermission("taxpayer.intelligence.search");
+    const canReadContact = canReadTaxpayerSearchContact(staff.clearanceRoles);
 
     // Build WHERE conditions
     const conditions = [
@@ -59,14 +55,13 @@ export async function searchTaxpayers(
     // Text search across TIN, business name, name
     if (filters.query && filters.query.trim().length >= 2) {
         const q = `%${filters.query.trim()}%`;
-        conditions.push(
-            or(
-                ilike(user.tinNumber, q),
-                ilike(user.businessName, q),
-                ilike(user.name, q),
-                ilike(user.email, q),
-            )!,
-        );
+        const searchableFields = [
+            ilike(user.tinNumber, q),
+            ilike(user.businessName, q),
+            ilike(user.name, q),
+        ];
+        if (canReadContact) searchableFields.push(ilike(user.email, q));
+        conditions.push(or(...searchableFields)!);
     }
 
     // Role filter
@@ -112,8 +107,7 @@ export async function searchTaxpayers(
             tinNumber: user.tinNumber,
             role: user.role,
             clearanceStatus: user.clearanceStatus,
-            email: user.email,
-            phoneNumber: user.phoneNumber,
+            ...(canReadContact ? { email: user.email, phoneNumber: user.phoneNumber } : {}),
             createdAt: user.createdAt,
         })
         .from(user)
@@ -141,7 +135,7 @@ export async function searchTaxpayers(
     });
 
     return {
-        rows,
+        rows: rows.map((row) => projectTaxpayerSearchRow(row, staff.clearanceRoles)),
         totalRows,
         totalPages,
         page: safePage,

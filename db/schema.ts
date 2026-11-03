@@ -528,6 +528,43 @@ export const transactionItem = pgTable(
   (table) => [index('txn_item_txn_idx').on(table.transactionId)],
 );
 
+// Issued sales invoices are immutable snapshots of a completed TaxFlow sale.
+// Recipient email and delivery attempts are deliberately stored separately.
+export const salesInvoice = pgTable(
+  'sales_invoice',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    invoiceNumber: text('invoice_number').notNull().unique(),
+    transactionId: text('transaction_id').notNull().unique().references(() => transaction.id),
+    sellerId: text('seller_id').notNull().references(() => user.id),
+    buyerId: text('buyer_id').references(() => user.id),
+    snapshot: jsonb('snapshot').$type<Record<string, unknown>>().notNull(),
+    issuedAt: timestamp('issued_at').defaultNow().notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('sales_invoice_seller_issued_idx').on(table.sellerId, table.issuedAt),
+    index('sales_invoice_buyer_issued_idx').on(table.buyerId, table.issuedAt),
+  ],
+);
+
+export const salesInvoiceEmailDelivery = pgTable(
+  'sales_invoice_email_delivery',
+  {
+    invoiceId: text('invoice_id').primaryKey().references(() => salesInvoice.id),
+    status: text('status').notNull().default('pending'),
+    attemptCount: integer('attempt_count').notNull().default(0),
+    lastAttemptAt: timestamp('last_attempt_at'),
+    providerMessageId: text('provider_message_id'),
+    lastErrorCode: text('last_error_code'),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => [
+    check('sales_invoice_email_status_check', sql`${table.status} IN ('pending', 'sending', 'sent', 'failed', 'not_available')`),
+    check('sales_invoice_email_attempt_count_check', sql`${table.attemptCount} >= 0`),
+  ],
+);
+
 // ---------------------------------------------------------------------------
 // VAT Records
 // ---------------------------------------------------------------------------
@@ -678,6 +715,74 @@ export const rraCaseEvent = pgTable(
     createdAt: timestamp('created_at').defaultNow().notNull(),
   },
   (table) => [index('rra_case_event_case_created_idx').on(table.caseId, table.createdAt)],
+);
+
+// Taxpayer profile corrections are requests and review records only. The
+// workflow deliberately has no final-decision or taxpayer-mutation fields.
+export const taxpayerCorrectionRequest = pgTable(
+  'taxpayer_correction_request',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    reference: text('reference').notNull().unique(),
+    taxpayerId: text('taxpayer_id').notNull().references(() => user.id),
+    submissionKey: text('submission_key').notNull(),
+    category: text('category').notNull(),
+    fieldKey: text('field_key').notNull(),
+    originalValue: text('original_value').notNull(),
+    requestedValue: text('requested_value').notNull(),
+    reason: text('reason').notNull(),
+    status: text('status').notNull().default('submitted'),
+    assignedStaffId: text('assigned_staff_id').references(() => rraStaff.id, { onDelete: 'set null' }),
+    recommendation: text('recommendation'),
+    recommendationReason: text('recommendation_reason'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('taxpayer_correction_owner_created_idx').on(table.taxpayerId, table.createdAt),
+    uniqueIndex('taxpayer_correction_owner_submission_key_uniq').on(table.taxpayerId, table.submissionKey),
+    index('taxpayer_correction_assigned_status_idx').on(table.assignedStaffId, table.status, table.updatedAt),
+    index('taxpayer_correction_status_created_idx').on(table.status, table.createdAt),
+    check('taxpayer_correction_field_key_check', sql`${table.fieldKey} IN ('name', 'businessName', 'email', 'phoneNumber', 'businessType')`),
+    check('taxpayer_correction_category_check', sql`${table.category} IN ('personal_identity', 'business_profile')`),
+    check('taxpayer_correction_status_check', sql`${table.status} IN ('submitted', 'under_review', 'awaiting_evidence', 'recommended_approval', 'recommended_rejection')`),
+    check('taxpayer_correction_recommendation_check', sql`${table.recommendation} IS NULL OR ${table.recommendation} IN ('RECOMMEND_APPROVAL', 'RECOMMEND_REJECTION')`),
+  ],
+);
+
+export const taxpayerCorrectionEvent = pgTable(
+  'taxpayer_correction_event',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    requestId: text('request_id').notNull().references(() => taxpayerCorrectionRequest.id),
+    actorUserId: text('actor_user_id').notNull().references(() => user.id),
+    eventType: text('event_type').notNull(),
+    fromStatus: text('from_status'),
+    toStatus: text('to_status'),
+    reason: text('reason'),
+    details: jsonb('details').$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [index('taxpayer_correction_event_request_created_idx').on(table.requestId, table.createdAt)],
+);
+
+export const taxpayerCorrectionEvidence = pgTable(
+  'taxpayer_correction_evidence',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    requestId: text('request_id').notNull().references(() => taxpayerCorrectionRequest.id),
+    uploaderUserId: text('uploader_user_id').notNull().references(() => user.id),
+    blobPathname: text('blob_pathname').notNull().unique(),
+    filename: text('filename').notNull(),
+    sizeBytes: integer('size_bytes').notNull(),
+    contentType: text('content_type').notNull().default('application/pdf'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('taxpayer_correction_evidence_request_created_idx').on(table.requestId, table.createdAt),
+    check('taxpayer_correction_evidence_size_check', sql`${table.sizeBytes} > 0 AND ${table.sizeBytes} <= 10485760`),
+    check('taxpayer_correction_evidence_content_type_check', sql`${table.contentType} = 'application/pdf'`),
+  ],
 );
 
 // ---------------------------------------------------------------------------

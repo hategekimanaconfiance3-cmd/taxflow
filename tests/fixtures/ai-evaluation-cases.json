@@ -6,6 +6,6 @@
   { "caseId": "customs", "role": "customs_import_officer", "syntheticPrompt": "Review synthetic import declarations.", "allowedTool": "getImportDeclarations", "deniedTool": "lookupTrader" },
   { "caseId": "payments", "role": "payments_reconciliation_officer", "syntheticPrompt": "Check tax payment status.", "allowedTool": "getTaxStatus", "deniedTool": "getTransactions" },
   { "caseId": "data-ai", "role": "data_ai_analyst", "syntheticPrompt": "Inspect aggregate system behavior patterns.", "allowedTool": "getBehavioralAnalysis", "deniedTool": "getTransactions" },
-  { "caseId": "legacy-correction", "role": "correction_officer", "syntheticPrompt": "Check stock context before review.", "allowedTool": null, "deniedTool": "getStockLevels" },
+  { "caseId": "legacy-correction", "role": "correction_officer", "syntheticPrompt": "Check stock context before review.", "allowedTool": "getStockLevels", "deniedTool": "getTaxStatus" },
   { "caseId": "admin-isolation", "role": "super_admin", "syntheticPrompt": "Query assistant tools without an operational clearance.", "allowedTool": null, "deniedTool": "getSystemStats" }
 ]

@@ -77,6 +77,9 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (!result.ok && result.code === 'RECIPE_NOT_FOUND') {
       return json({ error: 'That recipe version is not available for this product.' }, 404, requestId);
     }
+    if (!result.ok && result.code === 'RECIPE_REQUIRED') {
+      return json({ error: 'This product has an approved recipe. Select its reserved material plan and report actual consumption to continue.' }, 400, requestId);
+    }
     if (!result.ok && result.code === 'MATERIAL_USAGE_MISMATCH') {
       return json({ error: 'Enter an actual quantity for each material in the selected recipe.' }, 400, requestId);
     }

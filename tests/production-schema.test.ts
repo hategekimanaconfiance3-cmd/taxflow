@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { calculateMaterialDifference, calculatePlannedMaterialQuantity, assessMaterialVariance } from '../lib/production-confidentiality';
 import {
   productionBatchMaterialReviewSchema,
   productionEntrySchema,
@@ -87,6 +88,31 @@ test('production recipe usage requires a complete unique line set', () => {
   ] }).success, false);
   assert.equal(productionEntrySchema.safeParse({ ...base, actualMaterials: [{ recipeMaterialId: 'line-1', actualQuantity: -1 }] }).success, false);
   assert.equal(productionEntrySchema.safeParse({ ...base, actualMaterials: [{ recipeMaterialId: 'line-1', actualQuantity: 2, wasteQuantity: 3 }] }).success, false);
+});
+
+test('recipe material reports require an explanation for zero-use lines and reject excess precision', () => {
+  const base = {
+    productId: 'product-1',
+    quantity: 50,
+    unitPrice: 1,
+    idempotencyKey: '78a2f784-9e22-4810-aebf-a0f283dba2f0',
+    recipeVersionId: 'recipe-1',
+    plannedOutputQuantity: 50,
+    materialPlanId: 'plan-1',
+    goodOutputQuantity: 48,
+    rejectedOutputQuantity: 2,
+    actualMaterials: [{ recipeMaterialId: 'line-1', actualQuantity: 0 }],
+  };
+  assert.equal(productionEntrySchema.safeParse(base).success, false);
+  assert.equal(productionEntrySchema.safeParse({ ...base, notes: 'Material was not used in this batch.' }).success, true);
+  assert.equal(productionEntrySchema.safeParse({ ...base, notes: 'Explained', actualMaterials: [{ recipeMaterialId: 'line-1', actualQuantity: 0.1234567 }] }).success, false);
+  assert.equal(productionEntrySchema.safeParse({ ...base, notes: 'Explained', actualMaterials: [{ recipeMaterialId: 'line-1', actualQuantity: 1.25, wasteQuantity: 0.1234567 }] }).success, false);
+});
+
+test('planned material calculation and tolerance use six-decimal accounting arithmetic', () => {
+  assert.equal(calculatePlannedMaterialQuantity(100, 3, 2), 66.666667);
+  assert.equal(calculateMaterialDifference(11.5, 12), -0.5);
+  assert.deepEqual(assessMaterialVariance(12, 11.5, 5000), { status: 'within_tolerance', varianceBasisPoints: 417 });
 });
 
 test('batch release requires independent good/reject quantities and evidence', () => {

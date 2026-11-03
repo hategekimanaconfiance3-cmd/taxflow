@@ -14,7 +14,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
-  ArrowDown, Check, CheckCircle, Circle, Clock3, Loader2, PackagePlus, Search,
+  ArrowDown, Check, CheckCircle, Circle, Clock3, Download, Loader2, PackagePlus, Search,
   Send, ShoppingCart, Trash2,
 } from 'lucide-react';
 
@@ -38,6 +38,7 @@ interface RecentTransaction {
   status: string;
   createdAt: Date;
   confirmedAt: Date | null;
+  invoiceId?: string | null;
 }
 
 interface SellFormProps {
@@ -346,6 +347,13 @@ export function SellForm({ inventory, vatRate, recentTransactions }: SellFormPro
               <p className="mt-1 text-[11px] text-muted-foreground">{new Date(displayedTransaction.createdAt).toLocaleString()}</p>
             </div> : <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">New sale details and its reference will appear here after it is sent.</div>}
             <TransactionTimeline transaction={displayedTransaction} />
+            {displayedTransaction?.invoiceId && ['confirmed', 'completed'].includes(displayedTransaction.status) && (
+              <Button asChild variant="outline" className="w-full gap-2">
+                <a href={`/api/sales-invoices/${displayedTransaction.invoiceId}/pdf`}>
+                  <Download className="h-4 w-4" />Download invoice PDF
+                </a>
+              </Button>
+            )}
             {displayedTransaction?.status === 'pending' && <div className="flex gap-2 rounded-md border border-amber-200 bg-amber-50/60 p-3 text-xs text-amber-800"><Clock3 className="h-4 w-4 shrink-0" /><p>{displayedTransaction.quantity.toLocaleString()} unit(s) are reserved and excluded from available stock. The hold converts on confirmation or releases exactly once on rejection, seller cancellation, or expiry.</p></div>}
             {displayedTransaction?.status === 'rejected' && <div className="flex gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-xs text-red-700"><ArrowDown className="h-4 w-4 shrink-0" /><p>Sale rejected by buyer. The transaction was not finalized and reserved stock has been returned.</p></div>}
             {displayedTransaction?.status === 'expired' && <div className="flex gap-2 rounded-md border border-border bg-muted/40 p-3 text-xs text-muted-foreground"><Clock3 className="h-4 w-4 shrink-0" /><p>Reservation expired before buyer confirmation. The transaction was not finalized and reserved stock has been returned.</p></div>}

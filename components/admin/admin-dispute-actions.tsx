@@ -124,20 +124,24 @@ export function AdminDisputeActions({
         startTransition(async () => {
             try {
                 setError("");
-                await resolveDispute(disputeId, {
+                const result = await resolveDispute(disputeId, {
                     action: action as RRADisputeAction,
                     resolution: resolution.trim(),
                     officialNote: officialNote.trim(),
                     ...(action === "adjust_amount" ? { adjustedUnitPrice: Number(adjustedUnitPrice) } : {}),
                 });
+                if (!result.success) {
+                    setError(result.reference ? `${result.error} Reference: ${result.reference}` : result.error);
+                    return;
+                }
                 setOpen(false);
                 router.refresh();
             } catch (err) {
-                setError(
-                    err instanceof Error
-                        ? err.message
-                        : "Failed to resolve dispute",
-                );
+                console.error("Dispute decision request failed in the admin interface", {
+                    disputeId,
+                    errorName: err instanceof Error ? err.name : typeof err,
+                });
+                setError("The decision could not be issued. No changes were committed. Please try again, or contact support if the problem continues.");
             }
         });
     }

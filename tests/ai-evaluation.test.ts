@@ -80,7 +80,14 @@ test("assistant tools are derived only from permissions already defined in RRA R
       assert.ok(RRA_AI_TOOL_PERMISSIONS[tool].some((permission) => hasRRAPermission(role, permission)));
     }
   }
-  assert.deepEqual(getRRAAIToolNames("correction_officer"), []);
+  const correctionTools = getRRAAIToolNames("correction_officer");
+  assert.ok(correctionTools.includes("getTaxpayerIntelligence"));
+  assert.ok(correctionTools.includes("getStockLevels"));
+  assert.ok(!correctionTools.includes("getTaxStatus"));
+  assert.ok(!correctionTools.includes("getTransactions"));
+  for (const tool of correctionTools) {
+    assert.ok(RRA_AI_TOOL_PERMISSIONS[tool].some((permission) => hasRRAPermission("correction_officer", permission)));
+  }
   assert.deepEqual(getRRAAIToolNames("super_admin"), []);
   assert.ok(!getRRAAIToolNames(["super_admin"]).includes("getProductionHistoryAnalysisTool"));
   assert.ok(getRRAAIToolNames(["super_admin", "product_traceability_officer"]).includes("getStockLevels"));
