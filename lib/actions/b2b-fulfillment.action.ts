@@ -2,7 +2,7 @@
 
 import { and, eq, sql } from 'drizzle-orm';
 import db from '@/db/drizzle';
-import { auditLog, b2bDispatch, b2bOrderAcceptance, b2bReceipt, businessRepresentative, stock, stockMovement, stockReservation, transaction, user } from '@/db/schema';
+import { auditLog, b2bDispatch, b2bOrderAcceptance, b2bReceipt, businessRepresentative, product, stock, stockMovement, stockReservation, transaction, user } from '@/db/schema';
 import { assertBusinessActor, assertVerifiedBusinessOwner } from '@/lib/b2b-authorization';
 import { requireTraderSession } from '@/lib/auth-guard';
 import { dispatchInputSchema, receiptInputSchema, representativeIdSchema, representativeInviteSchema } from '@/lib/validation/b2b-fulfillment.schema';
@@ -148,12 +148,6 @@ export async function revokeBusinessRepresentative(input: unknown): Promise<{ su
 }
 
 export async function recordB2BDispatch(input: unknown): Promise<{ success: true; dispatchId: string }> {
-  // Keep the public server action closed until PostgreSQL-backed lifecycle
-  // tests prove cancellation, expiry, correction, and dispute paths safe for
-  // partially dispatched orders. Hiding the UI alone is not an authorization
-  // boundary for exported server actions.
-  throw new Error('B2B dispatch is not enabled until fulfillment lifecycle validation is complete.');
-
   const data = parseOrThrow(dispatchInputSchema, input);
   const session = await requireTraderSession();
   const dispatchId = await db.transaction(async (tx) => {
@@ -209,10 +203,6 @@ export async function recordB2BDispatch(input: unknown): Promise<{ success: true
 }
 
 export async function recordB2BReceipt(input: unknown): Promise<{ success: true; receiptId: string }> {
-  // Receipt stock credit must remain unavailable until the same lifecycle
-  // validation covers held quantities, retries, rollback, and revocation races.
-  throw new Error('B2B receipt recording is not enabled until fulfillment lifecycle validation is complete.');
-
   const data = parseOrThrow(receiptInputSchema, input);
   const session = await requireTraderSession();
   const receiptId = await db.transaction(async (tx) => {
@@ -287,4 +277,76 @@ export async function recordB2BReceipt(input: unknown): Promise<{ success: true;
   });
 
   return { success: true, receiptId };
+}
+
+/**
+ * Return fulfillment work for the authenticated business account. Order
+ * acceptance remains separate from physical dispatch and measured receipt.
+ */
+export async function getB2BFulfillmentQueue() {
+  const session = await requireTraderSession();
+
+  const [outgoingRows, incomingRows] = await Promise.all([
+    db.select({
+      transactionId: transaction.id,
+      buyerName: sql<string>`coalesce(${user.businessName}, ${user.name})`,
+      buyerTin: user.tinNumber,
+      productName: product.name,
+      transactionQuantity: transaction.quantity,
+      dispatchedQuantity: sql<number>`coalesce((
+        select sum(${b2bDispatch.quantity})
+        from ${b2bDispatch}
+        where ${b2bDispatch.transactionId} = ${transaction.id}
+      ), 0)`,
+    })
+      .from(transaction)
+      .innerJoin(user, eq(transaction.buyerId, user.id))
+      .innerJoin(product, eq(transaction.productId, product.id))
+      .innerJoin(b2bOrderAcceptance, and(
+        eq(b2bOrderAcceptance.transactionId, transaction.id),
+        eq(b2bOrderAcceptance.buyerBusinessId, transaction.buyerId),
+      ))
+      .where(and(eq(transaction.sellerId, session.user.id), eq(transaction.status, 'confirmed'))),
+    db.select({
+      dispatchId: b2bDispatch.id,
+      transactionId: transaction.id,
+      sellerName: sql<string>`coalesce(${user.businessName}, ${user.name})`,
+      sellerTin: user.tinNumber,
+      productName: product.name,
+      dispatchQuantity: b2bDispatch.quantity,
+      dispatchReference: b2bDispatch.dispatchReference,
+      dispatchedAt: b2bDispatch.createdAt,
+      receivedQuantity: sql<number>`coalesce((
+        select sum(${b2bReceipt.quantityReceived})
+        from ${b2bReceipt}
+        where ${b2bReceipt.dispatchId} = ${b2bDispatch.id}
+      ), 0)`,
+      acceptedQuantity: sql<number>`coalesce((
+        select sum(${b2bReceipt.acceptedQuantity})
+        from ${b2bReceipt}
+        where ${b2bReceipt.dispatchId} = ${b2bDispatch.id}
+      ), 0)`,
+    })
+      .from(b2bDispatch)
+      .innerJoin(transaction, eq(b2bDispatch.transactionId, transaction.id))
+      .innerJoin(user, eq(transaction.sellerId, user.id))
+      .innerJoin(product, eq(transaction.productId, product.id))
+      .innerJoin(b2bOrderAcceptance, and(
+        eq(b2bOrderAcceptance.transactionId, transaction.id),
+        eq(b2bOrderAcceptance.buyerBusinessId, transaction.buyerId),
+      ))
+      .where(and(
+        eq(transaction.buyerId, session.user.id),
+        eq(transaction.status, 'confirmed'),
+      )),
+  ]);
+
+  return {
+    outgoing: outgoingRows
+      .map((row) => ({ ...row, remainingQuantity: Math.max(0, row.transactionQuantity - Number(row.dispatchedQuantity)) }))
+      .filter((row) => row.remainingQuantity > 0.000001),
+    incoming: incomingRows
+      .map((row) => ({ ...row, remainingQuantity: Math.max(0, row.dispatchQuantity - Number(row.receivedQuantity)) }))
+      .filter((row) => row.remainingQuantity > 0.000001),
+  };
 }
