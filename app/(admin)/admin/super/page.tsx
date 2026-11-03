@@ -1,4 +1,4 @@
-﻿import { requireRRASession } from '@/lib/auth-guard';
+import { requireRRASession } from '@/lib/auth-guard';
 import db from '@/db/drizzle';
 import { user, vatRecord, taxPayment, auditLog, rraStaff } from '@/db/schema';
 import { sql, desc, gte } from 'drizzle-orm';
@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { SuperAdminSearch } from '@/components/admin/super/super-admin-search';
+import { DeleteTaxpayerDialog } from '@/components/admin/super/delete-taxpayer-dialog';
 
 function fmt(n: number) {
   if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)}B RWF`;
@@ -145,9 +146,12 @@ export default async function SuperAdminOverviewPage() {
             Platform-wide intelligence and control — Super Admin exclusive workspace
           </p>
         </div>
-        <Badge variant="outline" className="border-rose-200 text-rose-700 bg-rose-50/60 text-xs">
-          SUPER ADMIN
-        </Badge>
+        <div className="flex items-center gap-2">
+          <DeleteTaxpayerDialog />
+          <Badge variant="outline" className="border-rose-200 text-rose-700 bg-rose-50/60 text-xs">
+            SUPER ADMIN
+          </Badge>
+        </div>
       </div>
 
       {/* Prominent Search Bar */}
