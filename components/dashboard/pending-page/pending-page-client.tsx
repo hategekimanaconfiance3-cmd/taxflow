@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect, useTransition, useCallback } from 'react';
+import { useState, useEffect, useTransition, useCallback, useRef, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { cancelTransaction, confirmTransaction, rejectTransaction } from '@/lib/actions/transaction.action';
+import { getB2BFulfillmentQueue, recordB2BDispatch, recordB2BReceipt } from '@/lib/actions/b2b-fulfillment.action';
 import { useSocket } from '@/lib/socket-client';
 import { useSocketContext } from '@/components/providers/socket-provider';
 import { formatRWF } from '@/components/dashboard/stat-card/stat-card';
@@ -10,7 +11,7 @@ import { TransactionStatusBadge } from '@/components/dashboard/status-badges/sta
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Clock, ArrowDownLeft, ArrowUpRight, Check, X, Loader2, RefreshCw, Send, Timer } from 'lucide-react';
+import { Clock, ArrowDownLeft, ArrowUpRight, Check, X, Loader2, RefreshCw, Send, Timer, PackageCheck } from 'lucide-react';
 
 /** Pending transactions expire after 10 minutes (must match server constant). */
 /** Returns remaining ms until expiry, or 0 if already expired. */
@@ -79,6 +80,119 @@ interface OutgoingTxn {
   createdAt: Date;
   expiresAt: Date;
   confirmedAt: Date | null;
+}
+
+type FulfillmentQueue = Awaited<ReturnType<typeof getB2BFulfillmentQueue>>;
+
+function DispatchForm({ item }: { item: FulfillmentQueue['outgoing'][number] }) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [quantity, setQuantity] = useState(String(item.remainingQuantity));
+  const [reference, setReference] = useState('');
+  const [error, setError] = useState('');
+  const requestKey = useRef<string | null>(null);
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    requestKey.current ??= crypto.randomUUID();
+    startTransition(async () => {
+      try {
+        setError('');
+        await recordB2BDispatch({
+          transactionId: item.transactionId,
+          quantity: Number(quantity),
+          dispatchReference: reference.trim() || undefined,
+          idempotencyKey: requestKey.current,
+        });
+        requestKey.current = null;
+        router.refresh();
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : 'Could not record dispatch. You can retry safely.');
+      }
+    });
+  }
+
+  return <form onSubmit={submit} className="flex flex-wrap items-end gap-2">
+    <label className="grid gap-1 text-xs text-muted-foreground">Dispatch quantity
+      <input className="h-9 w-32 rounded-md border bg-background px-3 text-sm text-foreground" type="number" min="0.000001" step="any" max={item.remainingQuantity} value={quantity} onChange={(event) => { setQuantity(event.target.value); requestKey.current = null; }} required />
+    </label>
+    <label className="grid gap-1 text-xs text-muted-foreground">Dispatch reference (optional)
+      <input className="h-9 w-56 rounded-md border bg-background px-3 text-sm text-foreground" maxLength={120} value={reference} onChange={(event) => { setReference(event.target.value); requestKey.current = null; }} />
+    </label>
+    <Button size="sm" type="submit" disabled={isPending || !quantity || Number(quantity) > item.remainingQuantity}>
+      {isPending ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <Send className="mr-1 h-3.5 w-3.5" />}
+      Record dispatch
+    </Button>
+    {error && <p role="alert" className="basis-full text-xs text-red-600">{error}</p>}
+  </form>;
+}
+
+function MeasuredReceiptForm({ item }: { item: FulfillmentQueue['incoming'][number] }) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [quantityReceived, setQuantityReceived] = useState(String(item.remainingQuantity));
+  const [acceptedQuantity, setAcceptedQuantity] = useState(String(item.remainingQuantity));
+  const [damagedQuantity, setDamagedQuantity] = useState('0');
+  const [rejectedQuantity, setRejectedQuantity] = useState('0');
+  const [disputedQuantity, setDisputedQuantity] = useState('0');
+  const [notes, setNotes] = useState('');
+  const [error, setError] = useState('');
+  const requestKey = useRef<string | null>(null);
+  const resetRequestKey = () => { requestKey.current = null; };
+  const received = Number(quantityReceived);
+  const classified = Number(acceptedQuantity) + Number(damagedQuantity) + Number(rejectedQuantity) + Number(disputedQuantity);
+  const classificationMatches = Number.isFinite(received) && Number.isFinite(classified) && Math.abs(received - classified) < 0.000001;
+  const quantityFields: Array<{ label: string; value: string; setValue: (value: string) => void }> = [
+    { label: 'Measured received', value: quantityReceived, setValue: setQuantityReceived },
+    { label: 'Accepted', value: acceptedQuantity, setValue: setAcceptedQuantity },
+    { label: 'Damaged', value: damagedQuantity, setValue: setDamagedQuantity },
+    { label: 'Rejected', value: rejectedQuantity, setValue: setRejectedQuantity },
+    { label: 'Disputed', value: disputedQuantity, setValue: setDisputedQuantity },
+  ];
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    requestKey.current ??= crypto.randomUUID();
+    startTransition(async () => {
+      try {
+        setError('');
+        await recordB2BReceipt({
+          dispatchId: item.dispatchId,
+          quantityReceived: received,
+          acceptedQuantity: Number(acceptedQuantity),
+          damagedQuantity: Number(damagedQuantity),
+          rejectedQuantity: Number(rejectedQuantity),
+          disputedQuantity: Number(disputedQuantity),
+          notes: notes.trim() || undefined,
+          idempotencyKey: requestKey.current,
+        });
+        requestKey.current = null;
+        router.refresh();
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : 'Could not record measured receipt. You can retry safely.');
+      }
+    });
+  }
+
+  return <form onSubmit={submit} className="mt-3 grid gap-3 border-t pt-3">
+    <p className="text-xs text-muted-foreground">Record the physical quantity received. Only the accepted quantity is added to your available stock. Damaged, rejected, and disputed quantities remain excluded.</p>
+    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+      {quantityFields.map(({ label, value, setValue }) => (
+        <label key={label} className="grid gap-1 text-xs text-muted-foreground">{label}
+          <input className="h-9 rounded-md border bg-background px-3 text-sm text-foreground" type="number" min="0" step="any" max={item.remainingQuantity} value={value} onChange={(event) => { setValue(event.target.value); resetRequestKey(); }} required />
+        </label>
+      ))}
+    </div>
+    <label className="grid gap-1 text-xs text-muted-foreground">Receipt notes (optional)
+      <input className="h-9 rounded-md border bg-background px-3 text-sm text-foreground" maxLength={2000} value={notes} onChange={(event) => { setNotes(event.target.value); resetRequestKey(); }} />
+    </label>
+    {!classificationMatches && <p className="text-xs text-amber-700">Classified quantities must add up to the measured received quantity.</p>}
+    {error && <p role="alert" className="text-xs text-red-600">{error}</p>}
+    <div><Button size="sm" type="submit" disabled={isPending || !classificationMatches || received <= 0 || received > item.remainingQuantity}>
+      {isPending ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <PackageCheck className="mr-1 h-3.5 w-3.5" />}
+      Confirm measured receipt
+    </Button></div>
+  </form>;
 }
 
 // ---------------------------------------------------------------------------
@@ -194,9 +308,10 @@ function CancelPendingAction({ transactionId }: { transactionId: string }) {
 interface PendingPageClientProps {
   incoming: IncomingTxn[];
   outgoing: OutgoingTxn[];
+  fulfillment: FulfillmentQueue;
 }
 
-export function PendingPageClient({ incoming, outgoing }: PendingPageClientProps) {
+export function PendingPageClient({ incoming, outgoing, fulfillment }: PendingPageClientProps) {
   const router = useRouter();
   const { userId } = useSocketContext();
   const [tab, setTab] = useState<'incoming' | 'outgoing'>('incoming');
@@ -283,7 +398,33 @@ export function PendingPageClient({ incoming, outgoing }: PendingPageClientProps
       {/* ── INCOMING TAB ──────────────────────── */}
       {tab === 'incoming' && (
         <>
-          {pendingIncoming.length === 0 ? (
+          {fulfillment.incoming.length > 0 && (
+            <Card className="border-emerald-200/60">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base font-semibold flex items-center gap-2">
+                  <PackageCheck className="h-4 w-4 text-emerald-600" />
+                  Shipments awaiting measured receipt ({fulfillment.incoming.length})
+                </CardTitle>
+                <p className="text-xs text-muted-foreground">Order acceptance does not add stock. Confirm the quantity physically received; only accepted units will be credited.</p>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {fulfillment.incoming.map((item) => (
+                  <div key={item.dispatchId} className="rounded-md border p-3">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <p className="font-medium">{item.productName} from {item.sellerName ?? 'seller'}</p>
+                        <p className="text-xs text-muted-foreground">Seller TIN: {item.sellerTin ?? '—'} · Dispatched: {item.dispatchQuantity.toLocaleString()} · Already measured: {Number(item.receivedQuantity).toLocaleString()} · Remaining: {item.remainingQuantity.toLocaleString()}</p>
+                        {item.dispatchReference && <p className="text-xs text-muted-foreground">Dispatch reference: {item.dispatchReference}</p>}
+                      </div>
+                      <span className="text-xs text-muted-foreground">{new Date(item.dispatchedAt).toLocaleDateString()}</span>
+                    </div>
+                    <MeasuredReceiptForm item={item} />
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          )}
+          {pendingIncoming.length === 0 && fulfillment.incoming.length === 0 ? (
             <Card>
               <CardContent className="py-12 text-center">
                 <ArrowDownLeft className="h-8 w-8 mx-auto text-muted-foreground/40 mb-3" />
@@ -293,7 +434,7 @@ export function PendingPageClient({ incoming, outgoing }: PendingPageClientProps
                 </p>
               </CardContent>
             </Card>
-          ) : (
+          ) : pendingIncoming.length > 0 ? (
             <Card className="border-amber-200/60">
               <CardHeader className="pb-3">
                 <CardTitle className="text-base font-semibold flex items-center gap-2">
@@ -339,7 +480,7 @@ export function PendingPageClient({ incoming, outgoing }: PendingPageClientProps
                 </Table>
               </CardContent>
             </Card>
-          )}
+          ) : null}
 
           {/* Incoming history */}
           {processedIncoming.length > 0 && (
@@ -383,6 +524,30 @@ export function PendingPageClient({ incoming, outgoing }: PendingPageClientProps
       {/* ── OUTGOING TAB ──────────────────────── */}
       {tab === 'outgoing' && (
         <>
+          {fulfillment.outgoing.length > 0 && (
+            <Card className="border-blue-200/60">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base font-semibold flex items-center gap-2">
+                  <Send className="h-4 w-4 text-blue-600" />
+                  Accepted orders awaiting dispatch ({fulfillment.outgoing.length})
+                </CardTitle>
+                <p className="text-xs text-muted-foreground">Record each physical dispatch separately. The buyer receives stock only after confirming measured receipt.</p>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {fulfillment.outgoing.map((item) => (
+                  <div key={item.transactionId} className="rounded-md border p-3">
+                    <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <p className="font-medium">{item.productName} to {item.buyerName ?? 'buyer'}</p>
+                        <p className="text-xs text-muted-foreground">Buyer TIN: {item.buyerTin ?? '—'} · Order: {item.transactionQuantity.toLocaleString()} · Dispatched: {Number(item.dispatchedQuantity).toLocaleString()} · Remaining: {item.remainingQuantity.toLocaleString()}</p>
+                      </div>
+                    </div>
+                    <DispatchForm item={item} />
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          )}
           {outgoing.length === 0 ? (
             <Card>
               <CardContent className="py-12 text-center">

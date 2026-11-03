@@ -189,7 +189,7 @@ export function AIChatFullPage({ role, businessName }: AIChatFullPageProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const { messages, sendMessage, status, setMessages } = useChat({
+  const { messages, sendMessage, regenerate, status, error, setMessages } = useChat({
     transport: new DefaultChatTransport({ api: '/api/ai/query' }),
   });
 
@@ -382,6 +382,28 @@ export function AIChatFullPage({ role, businessName }: AIChatFullPageProps) {
                     Thinking…
                   </div>
                 </div>
+              </div>
+            )}
+
+            {error && (
+              <div
+                role="alert"
+                className="mx-auto flex max-w-2xl items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive"
+              >
+                <span>
+                  The AI assistant could not complete this request. Please try again.
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0"
+                  onClick={() => void regenerate()}
+                  disabled={isLoading}
+                >
+                  <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+                  Retry
+                </Button>
               </div>
             )}
 

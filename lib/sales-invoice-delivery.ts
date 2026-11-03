@@ -6,6 +6,7 @@ import db from "@/db/drizzle";
 import { auditLog, salesInvoice, salesInvoiceEmailDelivery, user } from "@/db/schema";
 import { parseSalesInvoiceSnapshot } from "@/lib/sales-invoice-types";
 import { renderSalesInvoicePdf } from "@/lib/sales-invoice-pdf";
+import { getSalesInvoiceVerificationUrl } from "@/lib/sales-invoice-verification";
 
 export type InvoiceEmailAttemptResult = "sent" | "failed" | "not_available";
 
@@ -80,7 +81,8 @@ export async function attemptSalesInvoiceEmail(
 
   try {
     const snapshot = parseSalesInvoiceSnapshot(reserved.invoice.snapshot);
-    const pdf = renderSalesInvoicePdf(snapshot);
+    const verificationUrl = getSalesInvoiceVerificationUrl(invoiceId);
+    const pdf = renderSalesInvoicePdf(snapshot, verificationUrl);
     const appUrl = process.env.BETTER_AUTH_URL || process.env.NEXT_PUBLIC_APP_URL;
     const invoiceUrl = appUrl ? `${appUrl.replace(/\/$/, "")}/dashboard/invoices/${invoiceId}` : null;
     const resend = new Resend(process.env.RESEND_API_KEY);
@@ -93,6 +95,7 @@ export async function attemptSalesInvoiceEmail(
         `Seller: ${snapshot.seller.name}`,
         `Date: ${new Date(snapshot.issuedAt).toLocaleDateString("en-GB", { timeZone: "UTC" })}`,
         `Transaction reference: ${snapshot.transaction.id}`,
+        `Scan or open invoice verification: ${verificationUrl}`,
         `Total: ${snapshot.totalRwf.toLocaleString("en-US")} RWF`,
         invoiceUrl ? `Secure invoice link: ${invoiceUrl} (sign-in required)` : "",
         "This is a TaxFlow sales invoice, not an RRA/EBM fiscal invoice.",
