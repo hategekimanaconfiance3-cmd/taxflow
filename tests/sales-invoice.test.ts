@@ -37,7 +37,7 @@ test('sales invoice snapshot rejects unsupported states and malformed monetary d
 });
 
 test('PDF renderer emits a PDF document from the immutable invoice snapshot', () => {
-  const pdf = renderSalesInvoicePdf(snapshot);
+  const pdf = renderSalesInvoicePdf(snapshot, 'https://taxflow.example/invoice/verify/00000000-0000-4000-8000-000000000001');
   assert.ok(pdf.byteLength > 500);
   assert.equal(Buffer.from(pdf).subarray(0, 4).toString('ascii'), '%PDF');
 });

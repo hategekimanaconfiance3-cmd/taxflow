@@ -5,6 +5,20 @@ import db from "@/db/drizzle";
 import { auditLog, salesInvoice, salesInvoiceEmailDelivery } from "@/db/schema";
 import { parseSalesInvoiceSnapshot } from "@/lib/sales-invoice-types";
 
+export async function loadPublicSalesInvoice(invoiceId: string) {
+  const [invoice] = await db.select({
+    id: salesInvoice.id,
+    invoiceNumber: salesInvoice.invoiceNumber,
+    issuedAt: salesInvoice.issuedAt,
+    snapshot: salesInvoice.snapshot,
+  }).from(salesInvoice).where(eq(salesInvoice.id, invoiceId)).limit(1);
+  if (!invoice) return null;
+  return {
+    ...invoice,
+    snapshot: parseSalesInvoiceSnapshot(invoice.snapshot),
+  };
+}
+
 export async function loadSalesInvoiceForParty(invoiceId: string, actorUserId: string) {
   const [invoice] = await db.select().from(salesInvoice).where(and(
     eq(salesInvoice.id, invoiceId),

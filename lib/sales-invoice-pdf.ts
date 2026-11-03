@@ -1,5 +1,6 @@
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
+import QRCode from "qrcode";
 import type { SalesInvoiceSnapshot } from "@/lib/sales-invoice-types";
 
 const money = (amount: number): string => `${amount.toLocaleString("en-US")} RWF`;
@@ -7,7 +8,7 @@ const navy: [number, number, number] = [12, 42, 112];
 const green: [number, number, number] = [0, 112, 72];
 const slate: [number, number, number] = [74, 85, 104];
 
-export function renderSalesInvoicePdf(snapshot: SalesInvoiceSnapshot): Uint8Array {
+export function renderSalesInvoicePdf(snapshot: SalesInvoiceSnapshot, verificationUrl: string): Uint8Array {
   const doc = new jsPDF({ orientation: "landscape", format: "a4", unit: "mm", compress: true });
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
@@ -46,17 +47,34 @@ export function renderSalesInvoicePdf(snapshot: SalesInvoiceSnapshot): Uint8Arra
   doc.setFont("helvetica", "bold");
   doc.setFontSize(13);
   doc.text(snapshot.invoiceNumber, metaX + 5, 16);
-  doc.setFillColor(216, 245, 228);
-  doc.roundedRect(metaX + 67, 19, 20, 6, 2, 2, "F");
-  doc.setTextColor(0, 103, 63);
-  doc.setFontSize(7);
-  doc.text("CONFIRMED", metaX + 77, 23, { align: "center" });
   doc.setFont("helvetica", "normal");
   doc.setTextColor(...slate);
   doc.setFontSize(8);
   doc.text(`Issued: ${issuedAt}`, metaX + 5, 23);
-  doc.text(`Transaction: ${snapshot.transaction.id}`, metaX + 5, 29, { maxWidth: 82 });
+  doc.setTextColor(0, 103, 63);
+  doc.text("CONFIRMED", metaX + 5, 29);
+  doc.setTextColor(...slate);
   doc.text(`Currency: ${snapshot.currency}`, metaX + 5, 35);
+  doc.text(`Transaction: ${snapshot.transaction.id}`, metaX + 5, 39, { maxWidth: 58 });
+
+  const qr = QRCode.create(verificationUrl, { errorCorrectionLevel: "M" });
+  const qrSize = 20;
+  const qrX = metaX + 68;
+  const qrY = 12;
+  const qrModuleSize = qrSize / qr.modules.size;
+  doc.setFillColor(255, 255, 255);
+  doc.rect(qrX - 1, qrY - 1, qrSize + 2, qrSize + 2, "F");
+  doc.setFillColor(0, 0, 0);
+  for (let row = 0; row < qr.modules.size; row += 1) {
+    for (let column = 0; column < qr.modules.size; column += 1) {
+      if (qr.modules.get(row, column)) {
+        doc.rect(qrX + column * qrModuleSize, qrY + row * qrModuleSize, qrModuleSize, qrModuleSize, "F");
+      }
+    }
+  }
+  doc.setFontSize(6);
+  doc.setTextColor(...navy);
+  doc.text("SCAN TO VERIFY", qrX + qrSize / 2, 36, { align: "center" });
 
   // Summary notice makes document purpose explicit without asserting fiscal status.
   doc.setFillColor(239, 249, 246);
@@ -69,7 +87,7 @@ export function renderSalesInvoicePdf(snapshot: SalesInvoiceSnapshot): Uint8Arra
   doc.setFont("helvetica", "normal");
   doc.setTextColor(48, 60, 78);
   doc.setFontSize(8);
-  doc.text("Generated for a confirmed or completed TaxFlow transaction. Amounts are stated in Rwandan Francs (RWF).", margin + 5, 55);
+  doc.text("Generated for a confirmed or completed TaxFlow transaction. Amounts are stated in Rwandan Francs (RWF). Anyone with the QR can view invoice details.", margin + 5, 55, { maxWidth: contentWidth - 10 });
 
   const partyY = 65;
   const partyGap = 5;

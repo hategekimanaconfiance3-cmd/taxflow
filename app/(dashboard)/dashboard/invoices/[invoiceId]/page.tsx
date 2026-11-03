@@ -1,5 +1,6 @@
 import Image from 'next/image';
 import { notFound } from 'next/navigation';
+import QRCode from 'qrcode';
 import {
   BadgeCheck,
   CalendarDays,
@@ -13,6 +14,7 @@ import {
 } from 'lucide-react';
 import { getSalesInvoice } from '@/lib/actions/sales-invoice.action';
 import { SalesInvoiceActions } from '@/components/dashboard/sales-invoice/sales-invoice-actions';
+import { getSalesInvoiceVerificationUrl } from '@/lib/sales-invoice-verification';
 const formatInvoiceRwf = (amount: number): string => `${new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 0,
 }).format(amount)} RWF`;
@@ -32,6 +34,12 @@ export default async function SalesInvoicePage({
   const invoice = await getSalesInvoice(invoiceId);
   if (!invoice) notFound();
   const snapshot = invoice.snapshot;
+  const verificationUrl = getSalesInvoiceVerificationUrl(invoice.id);
+  const verificationQr = await QRCode.toDataURL(verificationUrl, {
+    errorCorrectionLevel: 'M',
+    margin: 1,
+    width: 180,
+  });
 
   return (
     <main className="mx-auto w-full max-w-7xl space-y-5 p-4 sm:p-7 print:max-w-none print:p-0">
@@ -61,7 +69,7 @@ export default async function SalesInvoicePage({
               </div>
             </div>
 
-            <section className="min-w-64 rounded-xl border border-blue-100 bg-blue-50/50 p-4" aria-label="Invoice details">
+            <section className="grid min-w-64 grid-cols-[1fr_auto] gap-3 rounded-xl border border-blue-100 bg-blue-50/50 p-4" aria-label="Invoice details and verification">
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Invoice number</p>
@@ -76,6 +84,11 @@ export default async function SalesInvoicePage({
                 <div className="flex items-start gap-2"><Hash className="mt-0.5 h-4 w-4 text-blue-800" /><dt className="font-medium">Transaction:</dt><dd className="break-all font-mono text-xs">{snapshot.transaction.id}</dd></div>
                 <div className="flex items-start gap-2"><CircleDollarSign className="mt-0.5 h-4 w-4 text-blue-800" /><dt className="font-medium">Currency:</dt><dd>{snapshot.currency}</dd></div>
               </dl>
+              <a href={verificationUrl} className="row-span-2 flex flex-col items-center gap-1 self-start rounded-lg border border-blue-200 bg-white p-2 text-center text-[10px] font-medium text-blue-950 hover:bg-blue-50" aria-label="Scan to view the complete invoice verification details">
+                <Image src={verificationQr} alt="QR code to verify this invoice and view its details" width={88} height={88} unoptimized />
+                <span>Scan to verify</span>
+              </a>
+              <p className="col-span-2 text-xs text-amber-800">Anyone with this QR code or its link can view the invoice details.</p>
             </section>
           </header>
 
@@ -164,7 +177,7 @@ export default async function SalesInvoicePage({
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-blue-200 text-blue-900"><FileCheck2 className="h-5 w-5" /></div>
               <div>
                 <h3 className="font-semibold text-blue-950">Evidence &amp; integrity</h3>
-                <p className="mt-1 max-w-2xl text-xs leading-5 text-slate-600">This invoice is an immutable snapshot of the transaction at issue. Its recorded details cannot be edited or deleted.</p>
+                <p className="mt-1 max-w-2xl text-xs leading-5 text-slate-600">This invoice is an immutable snapshot of the transaction at issue. Its recorded details cannot be edited or deleted. Scanning the QR opens these invoice details on TaxFlow; anyone with the QR or link can view them.</p>
               </div>
             </div>
             <div className="rounded-lg bg-slate-50 px-4 py-3 text-sm sm:text-right">

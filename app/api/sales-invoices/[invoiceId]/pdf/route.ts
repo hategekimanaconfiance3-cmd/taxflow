@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { auth } from '@/lib/auth';
 import { loadSalesInvoiceForParty } from '@/lib/sales-invoice-access';
 import { renderSalesInvoicePdf } from '@/lib/sales-invoice-pdf';
+import { getSalesInvoiceVerificationUrl } from '@/lib/sales-invoice-verification';
 
 const invoiceIdSchema = z.string().uuid();
 
@@ -20,7 +21,7 @@ export async function GET(
   const invoice = await loadSalesInvoiceForParty(parsed.data, session.user.id);
   if (!invoice) return NextResponse.json({ error: 'Invoice not found.' }, { status: 404 });
 
-  const pdf = renderSalesInvoicePdf(invoice.snapshot);
+  const pdf = renderSalesInvoicePdf(invoice.snapshot, getSalesInvoiceVerificationUrl(invoice.id));
   return new NextResponse(Buffer.from(pdf), {
     status: 200,
     headers: {
