@@ -1,4 +1,4 @@
-'use server';
+﻿'use server';
 
 import { eq, desc, sql, and } from 'drizzle-orm';
 import db from '@/db/drizzle';
@@ -398,7 +398,7 @@ export async function checkAndAlertCompliance(traderId: string) {
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session?.user) throw new Error('Authentication is required.');
   if (traderId !== session.user.id) {
-    await requireRRASession('compliance_officer', 'audit_officer');
+    await requireRRASession('compliance_officer', 'audit_officer', 'tax_compliance_officer', 'audit_investigation_officer');
   }
   try {
     // Calculate compliance without auth guard (called from server actions)
@@ -499,7 +499,7 @@ export async function checkAndAlertCompliance(traderId: string) {
  * Returns a summary of the check.
  */
 export async function runSystemComplianceCheck() {
-  await requireRRASession('compliance_officer', 'audit_officer');
+  await requireRRASession('compliance_officer', 'audit_officer', 'tax_compliance_officer', 'audit_investigation_officer');
 
   const traders = await db
     .select({ id: user.id, businessName: user.businessName, name: user.name })

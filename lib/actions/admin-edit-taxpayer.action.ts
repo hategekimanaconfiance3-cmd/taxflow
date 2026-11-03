@@ -6,6 +6,16 @@ import { user } from "@/db/schema";
 import { requireRRASession } from "@/lib/auth-guard";
 import { logAudit } from "@/lib/audit";
 
+/**
+ * Roles authorized to edit taxpayer profile information.
+ * Must match page guards that render the edit taxpayer dialog.
+ */
+const EDIT_ROLES = [
+    "compliance_officer",
+    "tax_compliance_officer",
+    "super_admin",
+] as const;
+
 // ---------------------------------------------------------------------------
 // Edit taxpayer information (admin-side)
 // ---------------------------------------------------------------------------
@@ -19,7 +29,7 @@ export async function editTaxpayer(
         email?: string;
     },
 ) {
-    const { staff, ...session } = await requireRRASession("compliance_officer");
+    const { staff, ...session } = await requireRRASession(...EDIT_ROLES);
 
     // Validate at least one field provided
     const updates: Record<string, string | null> = {};
@@ -87,7 +97,7 @@ export async function editTaxpayer(
                 phoneNumber: current.phoneNumber,
                 email: current.email,
             },
-            editedBy: staff.staffId,
+            editedBy: staff.id,
         },
     });
 

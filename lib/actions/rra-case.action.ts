@@ -8,7 +8,21 @@ import { logAudit } from "@/lib/audit";
 import { requireRRASession } from "@/lib/auth-guard";
 
 const CASE_STATUSES = ["open", "in_progress", "awaiting_information", "closed"] as const;
-const REVIEW_ROLES = ["compliance_officer", "audit_officer", "super_admin"] as const;
+
+/**
+ * Roles authorized to view, create, and manage RRA cases.
+ * Includes both legacy and modern role names so every officer who can
+ * see the Cases page can also call these server actions without triggering
+ * a secondary redirect() during Server Component render.
+ */
+const REVIEW_ROLES = [
+  "compliance_officer",
+  "audit_officer",
+  "tax_compliance_officer",
+  "audit_investigation_officer",
+  "super_admin",
+] as const;
+
 const TRADER_ROLE_FILTER = sql`${user.role} IN ('manufacturer', 'wholesaler', 'retailer')`;
 
 const createCaseSchema = z.object({
@@ -126,7 +140,7 @@ export async function getRraCaseDetails(caseId: string) {
 }
 
 export async function createRraCase(input: unknown) {
-  const { staff, user: actor } = await requireRRASession("compliance_officer");
+  const { staff, user: actor } = await requireRRASession(...REVIEW_ROLES);
   const parsed = createCaseSchema.safeParse(input);
   if (!parsed.success) return { success: false as const, error: parsed.error.issues[0]?.message ?? "Invalid case details." };
   const [trader] = await db.select({ id: user.id, name: user.name, businessName: user.businessName, role: user.role })

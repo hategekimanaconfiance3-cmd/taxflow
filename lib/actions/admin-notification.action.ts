@@ -1,4 +1,4 @@
-"use server";
+﻿"use server";
 
 import { eq, desc, sql, and } from "drizzle-orm";
 import db from "@/db/drizzle";
@@ -56,7 +56,7 @@ export async function sendBulkNotification(
     message: string,
     link?: string,
 ) {
-    await requireRRASession("compliance_officer", "audit_officer");
+    await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
 
     if (!title.trim() || !message.trim()) {
         throw new Error("Title and message are required.");
@@ -107,7 +107,7 @@ export async function sendNotificationToTrader(
     message: string,
     link?: string,
 ) {
-    await requireRRASession("compliance_officer", "audit_officer");
+    await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
 
     if (!title.trim() || !message.trim()) {
         throw new Error("Title and message are required.");
