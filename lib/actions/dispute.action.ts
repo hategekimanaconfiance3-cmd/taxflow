@@ -493,10 +493,10 @@ export async function generateDisputeAiAssistance(rawInput: DisputeAiAssistanceI
         },
     };
     const purpose = input.task === "suggestions"
-        ? "List neutral, evidence-focused checks or questions the authorized employee may consider next. Do not recommend a dispute outcome or action."
+        ? "List clear, specific, evidence-focused checks or follow-up questions the authorized employee should consider next. Be concrete and practical. Do not recommend a dispute outcome or action."
         : input.task === "internal_notes"
-            ? "Write concise internal RRA resolution notes with findings, rationale, evidence reviewed, and any facts still requiring human verification. Describe only the action already selected by the employee; do not decide whether that action is correct."
-            : "Draft clear, neutral official communication addressed to both named parties. Explain only the action already selected by the employee and facts present in the records. Do not add legal claims, deadlines, appeals rights, or facts that are not in the record.";
+            ? "Write authoritative, well-structured internal RRA resolution notes covering: (1) dispute summary and parties involved, (2) key facts established from the evidence, (3) clear rationale for the selected action, (4) any facts still requiring human verification. Use formal, precise RRA administrative language. Be thorough and complete."
+            : "Draft a complete, formal official RRA communication letter addressed to both named parties. Include: (1) opening salutation naming both parties, (2) reference to the dispute number and product involved, (3) clear plain-language explanation of the RRA decision and what it means, (4) a professional closing. Use only facts present in the record. Write in an authoritative, respectful government communication style.";
     const isImproving = input.existingDraft.length > 0 && input.task !== "suggestions";
 
     const google = createGoogleGenerativeAI({ apiKey });
@@ -513,7 +513,7 @@ export async function generateDisputeAiAssistance(rawInput: DisputeAiAssistanceI
                 "Use only facts present in the supplied record. Do not infer missing evidence, legal rules, liability, intent, fraud, or events. If facts are insufficient, mark the gap for the employee to verify instead of filling it in.",
                 "Separate established record facts from unresolved questions. Use neutral, respectful, plain language. Do not make allegations.",
                 isImproving
-                    ? "Improve the employee's draft for clarity, grammar, structure, and tone while preserving its intended meaning. Do not introduce unsupported claims or change the selected action."
+                    ? "IMPROVE DRAFT: Rewrite the employee draft into strong, professional, authoritative language. Fix grammar, spelling, structure and tone. Expand short or unclear text into a complete well-structured version covering the same intent. Use formal RRA administrative style. Do not change the selected action or add facts absent from both the draft and the dispute record."
                     : purpose,
                 "Return only the requested draft or suggestions, without markdown fences or a preamble.",
             ].join("\n"),
@@ -523,9 +523,12 @@ export async function generateDisputeAiAssistance(rawInput: DisputeAiAssistanceI
                 adjustedUnitPriceRwf: input.action === "adjust_amount" ? input.adjustedUnitPrice : undefined,
                 disputeRecord: evidence,
                 employeeDraftToImprove: isImproving ? input.existingDraft : undefined,
+                writingInstruction: isImproving
+                    ? "Transform this draft into strong, professional, authoritative RRA writing. Preserve the intent and selected action exactly, but make it clear, formal, complete, and well-structured. If the draft is very short, expand it substantially into a complete text."
+                    : "Write a strong, complete, well-structured text from the dispute record. Be specific, formal, and authoritative.",
             }),
-            temperature: 0.2,
-            maxOutputTokens: 700,
+            temperature: 0.3,
+            maxOutputTokens: 900,
             abortSignal: AbortSignal.timeout(20_000),
         });
         draft = generated.text.trim();
