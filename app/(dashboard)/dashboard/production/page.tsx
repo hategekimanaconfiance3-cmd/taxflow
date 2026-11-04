@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { ProductionForm } from '@/components/dashboard/production-form/production-form';
+import { ProductionReportForm } from '@/components/dashboard/production-form/production-report-form';
 import { ProductionRegister } from '@/components/dashboard/production-register/production-register';
 import { RecipeManager } from '@/components/dashboard/production-form/recipe-manager';
 import { ProductionMaterialAccountingPanel } from '@/components/dashboard/production-form/production-material-accounting-panel';
@@ -56,10 +56,12 @@ export default async function ProductionPage() {
     || plansResult.status === 'rejected';
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Production</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Record production runs and manage your product inventory.</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Record production runs and manage your product inventory.
+        </p>
       </div>
 
       {hasLoadError && (
@@ -68,13 +70,37 @@ export default async function ProductionPage() {
         </div>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <ProductionForm products={products} recipes={recipes} plans={plans} vatRate={vatRate} />
-        <ProductionRegister records={records} />
-      </div>
-      <RecipeManager products={products.map(({ id, name, unit }) => ({ id, name, unit }))} recipes={recipes} />
-      <ProductionMaterialPlanManager products={products.map(({ id, name, unit }) => ({ id, name, unit }))} recipes={recipes} plans={plans} />
-      <ProductionMaterialAccountingPanel materials={accounting.materials} receipts={accounting.receipts} eligibleImports={accounting.eligibleImports} incomingTransactions={incomingTransactions} />
+      {/* Production Report — full width */}
+      <ProductionReportForm
+        products={products}
+        recipes={recipes}
+        plans={plans}
+        vatRate={vatRate}
+      />
+
+      {/* Production Register — full width */}
+      <ProductionRegister records={records} />
+
+      {/* Recipe Manager */}
+      <RecipeManager
+        products={products.map(({ id, name, unit }) => ({ id, name, unit }))}
+        recipes={recipes}
+      />
+
+      {/* Material Plan Manager */}
+      <ProductionMaterialPlanManager
+        products={products.map(({ id, name, unit }) => ({ id, name, unit }))}
+        recipes={recipes}
+        plans={plans}
+      />
+
+      {/* Material Ledger */}
+      <ProductionMaterialAccountingPanel
+        materials={accounting.materials}
+        receipts={accounting.receipts}
+        eligibleImports={accounting.eligibleImports}
+        incomingTransactions={incomingTransactions}
+      />
     </div>
   );
 }
