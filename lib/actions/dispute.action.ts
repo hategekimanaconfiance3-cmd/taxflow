@@ -415,7 +415,18 @@ const ACTION_LABELS: Record<RRADisputeAction, string> = {
 
 /** Generate an advisory draft using only the dispute record visible to an authorized resolver. */
 export async function generateDisputeAiAssistance(rawInput: DisputeAiAssistanceInput): Promise<{ text: string }> {
-    const { user: actor, staff } = await requireAnyRRAPermission("compliance.followup.manage", "investigation.case.manage");
+    // Catch redirect() / non-Error throws from auth so the client catch block fires correctly.
+    let actor: Awaited<ReturnType<typeof requireAnyRRAPermission>>["user"];
+    let staff: Awaited<ReturnType<typeof requireAnyRRAPermission>>["staff"];
+    try {
+        const session = await requireAnyRRAPermission("compliance.followup.manage", "investigation.case.manage");
+        actor = session.user;
+        staff = session.staff;
+    } catch (authErr) {
+        // redirect() throws a special object — convert it to a serialisable Error.
+        if (authErr instanceof Error) throw authErr;
+        throw new Error("You are not authorised to use AI dispute assistance. Please contact your administrator.");
+    }
     const parsed = disputeAiAssistanceSchema.safeParse(rawInput);
     if (!parsed.success) throw new Error("The AI writing request is invalid. Review the form and try again.");
     const input = parsed.data;
@@ -544,21 +555,31 @@ export async function generateDisputeAiAssistance(rawInput: DisputeAiAssistanceI
         throw new Error("AI writing help is temporarily unavailable. Your dispute form has not been changed.");
     }
 
-    await logAudit({
-        userId: actor.id,
-        action: "DISPUTE_AI_WRITING_ASSISTANCE",
-        targetType: "dispute",
-        targetId: record.id,
-        metadata: {
-            task: input.task,
-            proposedAction: input.action ?? null,
-            roleAtAccess: staff.clearanceRoles,
-            referenceNumber: record.referenceNumber,
+    try {
+        await logAudit({
+            userId: actor.id,
+            action: "DISPUTE_AI_WRITING_ASSISTANCE",
+            targetType: "dispute",
+            targetId: record.id,
+            metadata: {
+                task: input.task,
+                proposedAction: input.action ?? null,
+                roleAtAccess: staff.clearanceRoles,
+                referenceNumber: record.referenceNumber,
+                correlationId,
+                outputLength: draft.length,
+                improvedExistingDraft: isImproving,
+            },
+        });
+    } catch (auditErr) {
+        // Audit failure must not hide a successfully generated draft.
+        console.error("Dispute AI writing: audit log failed", {
+            userId: actor.id,
+            disputeId: record.id,
             correlationId,
-            outputLength: draft.length,
-            improvedExistingDraft: isImproving,
-        },
-    });
+            errorName: auditErr instanceof Error ? auditErr.name : typeof auditErr,
+        });
+    }
 
     return { text: draft };
 }
