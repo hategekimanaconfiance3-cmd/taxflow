@@ -43,7 +43,17 @@ export async function searchTaxpayers(
     filters: TaxpayerSearchFilters,
     page = 1,
 ): Promise<TaxpayerSearchResult> {
-    const { user: actor, staff } = await requireRRAPermission("taxpayer.intelligence.search");
+    // Wrap auth so redirect() (NEXT_REDIRECT) is converted to a serialisable Error.
+    let actor: Awaited<ReturnType<typeof requireRRAPermission>>["user"];
+    let staff: Awaited<ReturnType<typeof requireRRAPermission>>["staff"];
+    try {
+        const session = await requireRRAPermission("taxpayer.intelligence.search");
+        actor = session.user;
+        staff = session.staff;
+    } catch (authErr) {
+        if (authErr instanceof Error) throw authErr;
+        throw new Error("You are not authorised to search taxpayer records.");
+    }
     const canReadContact = canReadTaxpayerSearchContact(staff.clearanceRoles);
 
     // Build WHERE conditions
@@ -117,6 +127,7 @@ export async function searchTaxpayers(
         .offset(offset);
 
     // Audit log — record that a search was made, but never log the result data
+    try {
     await logAudit({
         userId: actor.id,
         action: "TAXPAYER_INTELLIGENCE_SEARCH",
@@ -133,6 +144,9 @@ export async function searchTaxpayers(
             page: safePage,
         },
     });
+    } catch (auditErr) {
+        console.error("[taxpayer-search] audit log failed", auditErr instanceof Error ? auditErr.message : typeof auditErr);
+    }
 
     return {
         rows: rows.map((row) => projectTaxpayerSearchRow(row, staff.clearanceRoles)),
