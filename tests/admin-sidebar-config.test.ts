@@ -60,3 +60,15 @@ test("Command Center navigation requires the explicit executive dashboard permis
     assert.equal(seesDashboard, canReadDashboard, `${role} navigation must match dashboard.executive.read`);
   }
 });
+
+test("Manufacturing Activity navigation matches its explicit read permission for every RRA role", () => {
+  for (const role of RRA_ROLE_VALUES) {
+    const canReadActivity = hasRRAPermission(role, "taxpayer.activity.read");
+    const seesActivity = getAdminSidebarItems(role).some((item) => item.href === "/admin/manufacturing-activity");
+    assert.equal(seesActivity, canReadActivity, `${role} activity navigation must match taxpayer.activity.read`);
+    assert.equal(hasRRAPermission(role, "taxpayer.account.manage"), true, `${role} should be able to manage manufacturer account status`);
+    assert.equal(hasRRAPermission(role, "taxpayer.profile.edit"), true, `${role} should be able to edit limited manufacturer names`);
+  }
+  assert.equal(hasRRAPermission("correction_officer", "tax.records.read"), false);
+  assert.equal(hasRRAPermission("correction_officer", "payments.read"), false);
+});

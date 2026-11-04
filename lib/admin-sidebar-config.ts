@@ -8,7 +8,6 @@ import {
     Scale,
     Shield,
     Settings,
-    HelpCircle,
     Bell,
     FileBarChart,
     UserCheck,
@@ -37,7 +36,7 @@ import {
     Server,
     Eye,
 } from "lucide-react";
-import type { RRARole } from "@/lib/auth-guard";
+import { RRA_ROLE_VALUES, type RRARole } from "@/lib/rra-rbac";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -172,6 +171,12 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 href: "/admin/traders",
                 icon: Users,
                 allowedRoles: TAXPAYER_SEARCH_ROLES,
+            },
+            {
+                label: "Manufacturing Activity",
+                href: "/admin/manufacturing-activity",
+                icon: Package,
+                allowedRoles: [...RRA_ROLE_VALUES] as RRARole[],
             },
             {
                 label: "Taxpayer Corrections",
