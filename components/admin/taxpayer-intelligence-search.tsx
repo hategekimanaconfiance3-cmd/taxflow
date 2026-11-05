@@ -293,6 +293,15 @@ export function TaxpayerIntelligenceSearch() {
             startTransition(async () => {
                 try {
                     const data = await searchTaxpayers(filters, page);
+                    if (data.error) {
+                        setResult(null);
+                        setError(
+                            `${data.error.message} Support reference: ${data.error.reference}${
+                                data.error.diagnosticCode ? ` (diagnostic ${data.error.diagnosticCode})` : ""
+                            }`,
+                        );
+                        return;
+                    }
                     setResult(data);
                 } catch (err) {
                     setResult(null);
