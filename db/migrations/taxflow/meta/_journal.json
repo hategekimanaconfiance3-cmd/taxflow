@@ -204,6 +204,13 @@
       "when": 1793440000001,
       "tag": "0028_sales_invoices",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1793836800000,
+      "tag": "0029_intended_product_imports",
+      "breakpoints": true
     }
   ]
 }

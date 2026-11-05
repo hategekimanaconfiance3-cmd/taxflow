@@ -10,7 +10,7 @@ export const declareImportSchema = z.object({
   productionMaterialId: z.string().trim().min(1).max(128).optional(),
   expectedQuantity: positiveQuantity,
   customsRef: z.string().trim().max(200).optional(),
-  originCountry: z.string().trim().max(100).optional(),
+  originCountry: z.string().trim().min(1, 'Country of origin is required.').max(100),
   supplier: z.string().trim().max(200).optional(),
   estimatedValue: z.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
   currency: z.string().trim().regex(/^[A-Za-z]{3}$/).transform((value) => value.toUpperCase()).optional(),

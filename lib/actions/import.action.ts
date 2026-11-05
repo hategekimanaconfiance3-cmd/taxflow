@@ -19,7 +19,7 @@ import {
 } from "@/lib/validation/import.schema";
 
 async function requireApprovedImportTrader() {
-    const session = await requireTraderSession(["manufacturer", "wholesaler"]);
+    const session = await requireTraderSession(["manufacturer", "wholesaler", "retailer"]);
     const clearanceStatus = (session.user as Record<string, unknown>).clearanceStatus;
     if (clearanceStatus !== "approved") {
         throw new Error("Your account must be approved before managing import declarations.");
@@ -530,7 +530,7 @@ export async function rejectImportArrival(
 // ---------------------------------------------------------------------------
 
 export async function getImportDeclarations() {
-    const session = await requireTraderSession(["manufacturer", "wholesaler"]);
+    const session = await requireTraderSession(["manufacturer", "wholesaler", "retailer"]);
 
     return db
         .select({
@@ -570,7 +570,7 @@ export async function getImportDeclarations() {
 // ---------------------------------------------------------------------------
 
 export async function getImportDeclaration(declarationId: string) {
-    const session = await requireTraderSession(["manufacturer", "wholesaler"]);
+    const session = await requireTraderSession(["manufacturer", "wholesaler", "retailer"]);
     const parsedId = importDeclarationIdSchema.safeParse(declarationId);
     if (!parsedId.success) throw new Error("Declaration not found");
 

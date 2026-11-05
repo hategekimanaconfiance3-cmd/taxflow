@@ -137,7 +137,7 @@ export const SIDEBAR_GROUPS: SidebarGroup[] = [
                 label: "Imports",
                 href: "/dashboard/imports",
                 icon: Ship,
-                roles: ["manufacturer", "wholesaler"],
+                roles: ["manufacturer", "wholesaler", "retailer"],
             },
             {
                 label: "Disputes",

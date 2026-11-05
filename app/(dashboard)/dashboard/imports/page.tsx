@@ -7,16 +7,19 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { FileText, PackageCheck } from 'lucide-react';
 import { SubmitArrivalButton } from '@/components/dashboard/import-form/confirm-arrival-button';
+import { IntendedProductImports } from '@/components/dashboard/intended-product-imports';
+import { listImportIntents } from '@/lib/import-intent-service';
 
 export default async function ImportsPage() {
   const session = await requireApprovedClearance();
 
-  const [products, declarations, accounting] = await Promise.all([
+  const [products, declarations, accounting, intendedImports] = await Promise.all([
     getProducts(),
     getImportDeclarations(),
     session.user.role === 'manufacturer'
       ? listManufacturerMaterialAccounting(session.user.id)
       : Promise.resolve({ materials: [], receipts: [] }),
+    listImportIntents(session.user.id),
   ]);
   const formProducts = products.map((p) => ({
     id: p.id,
@@ -32,6 +35,11 @@ export default async function ImportsPage() {
           Register an incoming import declaration. It will be reviewed and activated by RRA staff.
         </p>
       </div>
+
+      <IntendedProductImports
+        initialIntents={intendedImports}
+        manufacturer={session.user.role === 'manufacturer'}
+      />
 
       <ImportForm products={formProducts} materials={accounting.materials.map(({ id, materialCode, name, unit }) => ({ id, materialCode, name, unit }))} />
 

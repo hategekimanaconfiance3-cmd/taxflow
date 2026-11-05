@@ -36,7 +36,10 @@ export function ImportForm({ products, materials }: ImportFormProps) {
 
     function handleSubmit() {
         const qty = Number(expectedQuantity) || 0;
-        if (!productId || qty <= 0) return;
+        if (!productId || qty <= 0 || !originCountry.trim()) {
+            setMessage({ text: "Select a product, enter a positive quantity, and provide the country of origin.", type: "error" });
+            return;
+        }
 
         startTransition(async () => {
             try {
@@ -144,16 +147,15 @@ export function ImportForm({ products, materials }: ImportFormProps) {
 
                     <div className="space-y-2">
                         <Label htmlFor="originCountry">
-                            Country of Origin{" "}
-                            <span className="text-muted-foreground font-normal">
-                                (optional)
-                            </span>
+                            Country of Origin
                         </Label>
                         <Input
                             id="originCountry"
                             placeholder="e.g. China, Kenya, UAE"
                             value={originCountry}
                             onChange={(e) => setOriginCountry(e.target.value)}
+                        required
+                        maxLength={100}
                         />
                     </div>
                 </div>
@@ -180,7 +182,8 @@ export function ImportForm({ products, materials }: ImportFormProps) {
                         isPending ||
                         !productId ||
                         !expectedQuantity ||
-                        Number(expectedQuantity) <= 0
+                        Number(expectedQuantity) <= 0 ||
+                        !originCountry.trim()
                     }
                     className="w-full sm:w-auto gap-2"
                 >

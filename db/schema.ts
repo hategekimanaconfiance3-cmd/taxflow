@@ -878,6 +878,25 @@ export const importDeclaration = pgTable(
   ],
 );
 
+/** Pre-purchase finished goods that a business plans to import for resale. */
+export const importIntent = pgTable(
+  'import_intent',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    businessId: text('business_id').notNull().references(() => user.id),
+    productName: text('product_name').notNull(),
+    plannedQuantity: real('planned_quantity').notNull(),
+    purchaseCountry: text('purchase_country').notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('import_intent_business_created_idx').on(table.businessId, table.createdAt),
+    check('import_intent_product_name_check', sql`length(trim(${table.productName})) BETWEEN 1 AND 160`),
+    check('import_intent_quantity_check', sql`${table.plannedQuantity} > 0`),
+    check('import_intent_purchase_country_check', sql`length(trim(${table.purchaseCountry})) BETWEEN 1 AND 100`),
+  ],
+);
+
 // ---------------------------------------------------------------------------
 // Disputes — for dispute resolution (§13)
 // ---------------------------------------------------------------------------
@@ -937,6 +956,7 @@ export const dispute = pgTable(
 export const userRelations = relations(user, ({ many, one }) => ({
   sessions: many(session),
   accounts: many(account),
+  importIntents: many(importIntent),
   rraStaff: one(rraStaff),
   products: many(product),
   stock: many(stock),
@@ -1069,6 +1089,13 @@ export const importDeclarationRelations = relations(importDeclaration, ({ one })
   product: one(product, {
     fields: [importDeclaration.productId],
     references: [product.id],
+  }),
+}));
+
+export const importIntentRelations = relations(importIntent, ({ one }) => ({
+  business: one(user, {
+    fields: [importIntent.businessId],
+    references: [user.id],
   }),
 }));
 
