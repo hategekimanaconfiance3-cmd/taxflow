@@ -391,7 +391,7 @@ export function AIChatFullPage({ role, businessName }: AIChatFullPageProps) {
                 className="mx-auto flex max-w-2xl items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive"
               >
                 <span>
-                  The AI assistant could not complete this request. Please try again.
+                  {error.message || "The AI assistant could not complete this request. Please try again."}
                 </span>
                 <Button
                   type="button"

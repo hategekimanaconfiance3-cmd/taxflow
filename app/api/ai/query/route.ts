@@ -75,6 +75,66 @@ const textPartSchema = z.object({ type: z.literal("text"), text: z.string().max(
 const MAX_CONTEXT_MESSAGES = 20;
 const MAX_CONTEXT_CHARACTERS = 12_000;
 
+type ProviderErrorRecord = {
+    name?: unknown;
+    code?: unknown;
+    statusCode?: unknown;
+    status?: unknown;
+    isRetryable?: unknown;
+};
+
+function getProviderErrorDetails(error: unknown): {
+    name: string;
+    code?: string;
+    statusCode?: number;
+    retryable?: boolean;
+} {
+    if (typeof error !== "object" || error === null) {
+        return { name: typeof error };
+    }
+
+    const details = error as ProviderErrorRecord;
+    const status = typeof details.statusCode === "number"
+        ? details.statusCode
+        : typeof details.status === "number" ? details.status : undefined;
+    const code = typeof details.code === "string" && /^[A-Z0-9_-]{1,40}$/i.test(details.code)
+        ? details.code
+        : undefined;
+
+    return {
+        name: typeof details.name === "string" ? details.name.slice(0, 80) : "UnknownError",
+        ...(code ? { code } : {}),
+        ...(status !== undefined ? { statusCode: status } : {}),
+        ...(typeof details.isRetryable === "boolean" ? { retryable: details.isRetryable } : {}),
+    };
+}
+
+function getSafeProviderErrorMessage(error: unknown): string {
+    const { name, code, statusCode } = getProviderErrorDetails(error);
+    if (statusCode === 401 || statusCode === 403) {
+        return "The AI provider rejected its server configuration. Please contact your administrator.";
+    }
+    if (statusCode === 404) {
+        return "The configured AI model is unavailable. Please contact your administrator.";
+    }
+    if (statusCode === 429) {
+        return "The AI service is busy or has reached its usage limit. Please try again later.";
+    }
+    if (statusCode !== undefined && statusCode >= 500) {
+        return "The AI provider is temporarily unavailable. Please try again shortly.";
+    }
+    if (/timeout|abort/i.test(name) || code === "ETIMEDOUT" || code === "ECONNRESET") {
+        return "The AI request timed out. Please try again.";
+    }
+    return "The AI assistant could not complete this request. Please try again.";
+}
+
+function logProviderFailure(error: unknown): void {
+    // Provider messages and response bodies can contain prompts, personal data,
+    // or credential fragments. Log only normalized diagnostic fields.
+    console.error("AI query provider stream failed", getProviderErrorDetails(error));
+}
+
 function parseMessages(input: unknown): { rawMessages: Record<string, unknown>[]; textMessages: { role: "user" | "assistant"; content: string }[] } | null {
     const parsed = requestSchema.safeParse(input);
     if (!parsed.success) return null;
@@ -317,6 +377,7 @@ export async function POST(request: Request) {
             stopWhen: stepCountIs(5),
             temperature: 0.1,      // low temperature for factual accuracy
             maxOutputTokens: 2048,
+            maxRetries: 2,
             abortSignal: AbortSignal.timeout(30_000),
             onFinish: async ({ text, steps }) => {
                 if (!isRRAStaff || !aiAuditId) return;
@@ -363,22 +424,19 @@ export async function POST(request: Request) {
                     });
                 }
             },
-            onError: ({ error }) => console.error("AI query provider stream failed", {
-                userId,
-                errorName: error instanceof Error ? error.name : typeof error,
-            }),
+            onError: ({ error }) => logProviderFailure(error),
         });
 
         return result.toUIMessageStreamResponse({
-            onError: () => "The AI assistant could not complete this request. Please try again.",
+            onError: getSafeProviderErrorMessage,
         });
     } catch (err) {
-        console.error("[AI Query] streamText error:", err);
+        logProviderFailure(err);
 
         // Surface model outage gracefully — never expose internal error details
         return new Response(
             JSON.stringify({
-                error: "The AI service is temporarily unavailable. Please try again in a moment.",
+                error: getSafeProviderErrorMessage(err),
             }),
             { status: 503, headers: { "Content-Type": "application/json" } },
         );
