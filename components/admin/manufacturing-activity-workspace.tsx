@@ -60,6 +60,7 @@ function ActivityRow({ event }: { event: ManufacturerActivityEvent }) {
           {event.status ? <Badge variant="secondary">{event.status.replaceAll("_", " ")}</Badge> : null}
         </div>
         <span className="text-sm text-muted-foreground">{event.productName}{event.quantity ? ` · Quantity ${event.quantity}` : ""}</span>
+        {event.corrects ? <span className="text-sm text-muted-foreground">Corrects: {event.corrects.title} · {formatDate(event.corrects.occurredAt)}</span> : null}
       </div>
       <time className="text-sm text-muted-foreground sm:text-right" dateTime={new Date(event.occurredAt).toISOString()}>{formatDate(event.occurredAt)}</time>
     </li>

@@ -13,6 +13,7 @@ export interface ManufacturerActivityEvent {
   key: string;
   kind: ManufacturerActivityKind;
   title: string;
+  corrects?: { title: string; occurredAt: Date };
   productName: string;
   quantity: string | null;
   status: string | null;

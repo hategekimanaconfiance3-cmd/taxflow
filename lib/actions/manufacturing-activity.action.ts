@@ -213,7 +213,7 @@ export async function getManufacturerActivity(
         .orderBy(desc(b2bReceipt.createdAt))
         .limit(100),
       db
-        .select({ action: auditLog.action, occurredAt: auditLog.createdAt })
+        .select({ id: auditLog.id, action: auditLog.action, metadata: auditLog.metadata, occurredAt: auditLog.createdAt })
         .from(auditLog)
         .where(and(
           eq(auditLog.targetType, "user"),
@@ -286,20 +286,38 @@ export async function getManufacturerActivity(
         status: `accepted ${row.acceptedQuantity} · damaged ${row.damagedQuantity} · rejected ${row.rejectedQuantity} · disputed ${row.disputedQuantity}`,
         occurredAt: row.occurredAt,
       })),
-      ...accountEvents.map((row) => ({
-        kind: "account" as const,
-        title: row.action === "MANUFACTURER_PROFILE_UPDATED"
-          ? "Manufacturer profile names updated"
-          : row.action === "MANUFACTURER_ACCOUNT_SUSPENDED"
-            ? "Manufacturer account suspended"
-            : row.action === "MANUFACTURER_ACCOUNT_RESTORED"
-              ? "Manufacturer account restored to its previous status"
-              : "Manufacturer account marked for review",
-        productName: "Account administration",
-        quantity: null,
-        status: null,
-        occurredAt: row.occurredAt,
-      })),
+      ...accountEvents.map((row) => {
+        const metadata = parseAuditMetadata(row.metadata);
+        const restoredFromAuditId = metadata?.restoredFromAuditId;
+        const correctedEvent = typeof restoredFromAuditId === "string"
+          ? accountEvents.find((candidate) => candidate.id === restoredFromAuditId)
+          : undefined;
+        const correctsTitle = correctedEvent?.action === "MANUFACTURER_ACCOUNT_SUSPENDED"
+          ? "Manufacturer account suspended"
+          : correctedEvent?.action === "MANUFACTURER_ACCOUNT_REVIEW_REQUIRED"
+            ? "Manufacturer account marked for review"
+            : correctedEvent?.action === "CLEARANCE_UPDATED"
+              ? "Manufacturer clearance status updated"
+              : undefined;
+
+        return {
+          kind: "account" as const,
+          title: row.action === "MANUFACTURER_PROFILE_UPDATED"
+            ? "Manufacturer profile names updated"
+            : row.action === "MANUFACTURER_ACCOUNT_SUSPENDED"
+              ? "Manufacturer account suspended"
+              : row.action === "MANUFACTURER_ACCOUNT_RESTORED"
+                ? "Manufacturer account restored to its previous status"
+                : "Manufacturer account marked for review",
+          ...(correctsTitle && correctedEvent ? {
+            corrects: { title: correctsTitle, occurredAt: correctedEvent.occurredAt },
+          } : {}),
+          productName: "Account administration",
+          quantity: null,
+          status: null,
+          occurredAt: row.occurredAt,
+        };
+      }),
     ];
 
     pendingEvents.sort((a, b) => b.occurredAt.getTime() - a.occurredAt.getTime());
