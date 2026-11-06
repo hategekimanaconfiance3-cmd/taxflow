@@ -1,18 +1,20 @@
 export interface RiskAssessmentFactorInput {
   signal: string;
   weight: number;
-  value: number;
+  value: number | null;
   description: string;
+  status?: "computed" | "partial" | "insufficient_data" | "unavailable" | "not_applicable";
 }
 
 export interface RiskAssessmentInput {
-  score: number;
-  level: "low" | "medium" | "high" | "critical";
+  score: number | null;
+  level: "low" | "medium" | "high" | "critical" | "unavailable";
   factors: RiskAssessmentFactorInput[];
   computedAt: Date;
+  status?: "SUCCESS" | "PARTIAL" | "INSUFFICIENT_DATA" | "UNAVAILABLE";
 }
 
-type FactorStatus = "computed" | "insufficient_data" | "unavailable";
+type FactorStatus = "computed" | "partial" | "insufficient_data" | "unavailable";
 
 export interface RiskAssessmentAIPresentation {
   findingType: string;
@@ -35,7 +37,7 @@ export interface RiskAssessmentAIPresentation {
   };
 }
 
-function getFactorStatus(description: string): FactorStatus {
+function getFactorStatus(description: string): Exclude<FactorStatus, "partial"> {
   if (/unable to compute/i.test(description)) return "unavailable";
   if (/no recent transactions|no recent activity|no tax obligations/i.test(description)) return "insufficient_data";
   return "computed";
@@ -48,16 +50,26 @@ function getFactorStatus(description: string): FactorStatus {
  */
 export function presentRiskAssessmentForAI(input: RiskAssessmentInput): RiskAssessmentAIPresentation {
   const factors = input.factors.map((factor) => {
-    const status = getFactorStatus(factor.description);
+    const status: FactorStatus = factor.status === "partial"
+      ? "partial"
+      : factor.status === "insufficient_data" || factor.status === "not_applicable"
+        ? "insufficient_data"
+        : factor.status === "unavailable"
+          ? "unavailable"
+          : factor.status === "computed"
+            ? "computed"
+            : getFactorStatus(factor.description);
     return {
       signal: factor.signal,
       weight: factor.weight,
-      value: status === "computed" ? factor.value : null,
+      value: status === "computed" && factor.value !== null ? factor.value : null,
       status,
       description: factor.description,
     };
   });
-  const complete = factors.every((factor) => factor.status === "computed");
+  const complete = input.status === undefined
+    ? factors.every((factor) => factor.status === "computed" && factor.value !== null) && input.score !== null
+    : input.status === "SUCCESS" && input.score !== null;
 
   return {
     findingType: "system-generated risk signal",

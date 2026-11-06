@@ -124,7 +124,7 @@ export default async function IntelligenceHubPage({
   try {
     const scores = await computeAllRiskScores();
     for (const s of scores) {
-      riskBands[s.level]++;
+      if (s.level !== 'unavailable') riskBands[s.level]++;
     }
   } catch { /* noop */ }
 

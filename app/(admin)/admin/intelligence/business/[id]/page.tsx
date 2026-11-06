@@ -38,6 +38,7 @@ function RiskBadge({ level }: { level: string }) {
     medium:   'bg-amber-100 text-amber-700 border-amber-200',
     high:     'bg-orange-100 text-orange-700 border-orange-200',
     critical: 'bg-red-100 text-red-700 border-red-200',
+    unavailable: 'bg-slate-100 text-slate-600 border-slate-200',
   };
   return (
     <Badge variant="outline" className={cfg[level] ?? ''}>
@@ -258,7 +259,9 @@ export default async function BusinessIntelligencePage({
             <BarChart3 className="h-4 w-4 text-muted-foreground" />
             <div>
               <p className="text-[11px] text-muted-foreground">AI Risk Score</p>
-              <p className="text-2xl font-bold tabular-nums">{riskScore.score}<span className="text-sm font-normal text-muted-foreground">/100</span></p>
+              <p className="text-2xl font-bold tabular-nums">
+                {riskScore.score === null ? "Not available" : <>{riskScore.score}<span className="text-sm font-normal text-muted-foreground">/100</span></>}
+              </p>
             </div>
           </div>
         )}
@@ -278,17 +281,19 @@ export default async function BusinessIntelligencePage({
               <div key={f.signal}>
                 <div className="flex items-center justify-between mb-1">
                   <p className="text-xs font-medium">{f.signal}</p>
-                  <p className="text-[10px] text-muted-foreground">{f.description}</p>
+                    <p className="text-[10px] text-muted-foreground">{f.value === null ? `Not scored: ${f.description}` : f.description}</p>
                 </div>
-                <ProgressBar
-                  value={f.value}
-                  color={
-                    f.value >= 75 ? 'bg-red-500' :
-                    f.value >= 50 ? 'bg-orange-400' :
-                    f.value >= 25 ? 'bg-amber-400' :
-                    'bg-emerald-400'
-                  }
-                />
+                {f.value !== null && (
+                  <ProgressBar
+                    value={f.value}
+                    color={
+                      f.value >= 75 ? 'bg-red-500' :
+                      f.value >= 50 ? 'bg-orange-400' :
+                      f.value >= 25 ? 'bg-amber-400' :
+                      'bg-emerald-400'
+                    }
+                  />
+                )}
               </div>
             ))}
           </CardContent>
