@@ -30,7 +30,7 @@ const profileEditSchema = z.object({
 
 const accountStatusSchema = z.object({
   manufacturerId: z.string().trim().min(1).max(128),
-  status: z.enum(["under_review", "suspended"]),
+  status: z.enum(["under_review", "suspended", "restore"]),
   reason: z.string().trim().min(10).max(500),
 });
 
@@ -42,6 +42,18 @@ function reportFailure(operation: string, error: unknown): void {
     operation,
     errorName: error instanceof Error ? error.name : "UnknownError",
   });
+}
+
+function parseAuditMetadata(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== "string") return null;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Search manufacturers using only the limited profile fields needed by this workspace. */
@@ -210,6 +222,7 @@ export async function getManufacturerActivity(
             "MANUFACTURER_PROFILE_UPDATED",
             "MANUFACTURER_ACCOUNT_SUSPENDED",
             "MANUFACTURER_ACCOUNT_REVIEW_REQUIRED",
+            "MANUFACTURER_ACCOUNT_RESTORED",
           ]),
         ))
         .orderBy(desc(auditLog.createdAt))
@@ -279,7 +292,9 @@ export async function getManufacturerActivity(
           ? "Manufacturer profile names updated"
           : row.action === "MANUFACTURER_ACCOUNT_SUSPENDED"
             ? "Manufacturer account suspended"
-            : "Manufacturer account marked for review",
+            : row.action === "MANUFACTURER_ACCOUNT_RESTORED"
+              ? "Manufacturer account restored to its previous status"
+              : "Manufacturer account marked for review",
         productName: "Account administration",
         quantity: null,
         status: null,
@@ -357,7 +372,7 @@ export async function editManufacturerProfile(
 /** Place a manufacturer under review or suspend access with an auditable reason. */
 export async function setManufacturerAccountStatus(
   input: AccountStatusInput,
-): Promise<ManufacturingActivityResult<{ status: "under_review" | "suspended" }>> {
+): Promise<ManufacturingActivityResult<{ status: string; isActive: boolean }>> {
   const { user: actor } = await requireRRAPermission("taxpayer.account.manage");
   const parsed = accountStatusSchema.safeParse(input);
   if (!parsed.success) return { success: false, error: "Provide a valid account action and a reason." };
@@ -373,11 +388,83 @@ export async function setManufacturerAccountStatus(
         .limit(1);
 
       if (!target || target.role !== "manufacturer") return { success: false, error: "Manufacturer was not found." };
+
+      if (values.status === "restore") {
+        if (target.clearanceStatus !== "suspended" && target.clearanceStatus !== "under_review") {
+          return { success: false, error: "Only a suspended or under-review manufacturer can have its last account action reversed." };
+        }
+
+        const [latestStatusEvent] = await tx
+          .select({ id: auditLog.id, action: auditLog.action, metadata: auditLog.metadata, beforeState: auditLog.beforeState, afterState: auditLog.afterState })
+          .from(auditLog)
+          .where(and(
+            eq(auditLog.targetType, "user"),
+            eq(auditLog.targetId, values.manufacturerId),
+            inArray(auditLog.action, [
+              "MANUFACTURER_ACCOUNT_SUSPENDED",
+              "MANUFACTURER_ACCOUNT_RESTORED",
+              "MANUFACTURER_ACCOUNT_REVIEW_REQUIRED",
+              "CLEARANCE_UPDATED",
+            ]),
+          ))
+          .orderBy(desc(auditLog.createdAt))
+          .limit(1);
+
+        if (!latestStatusEvent || ![
+          "MANUFACTURER_ACCOUNT_SUSPENDED",
+          "MANUFACTURER_ACCOUNT_REVIEW_REQUIRED",
+          "CLEARANCE_UPDATED",
+        ].includes(latestStatusEvent.action)) {
+          return { success: false, error: "The latest account action cannot be safely reversed. Ask an authorized reviewer to inspect the account history." };
+        }
+
+        const metadata = parseAuditMetadata(latestStatusEvent.metadata);
+        const previousStatusValue = latestStatusEvent.beforeState?.clearanceStatus ?? metadata?.previousStatus;
+        const recordedCurrentStatus = latestStatusEvent.afterState?.clearanceStatus ?? metadata?.newStatus;
+        const recordedCurrentActive = latestStatusEvent.afterState?.isActive ?? metadata?.newActive;
+        const previousActiveValue = latestStatusEvent.beforeState?.isActive
+          ?? metadata?.previousActive
+          // The legacy clearance action changed only clearanceStatus. It did not alter isActive.
+          ?? (latestStatusEvent.action === "CLEARANCE_UPDATED" ? target.isActive : undefined);
+        const restorableStatuses = ["pending", "approved", "under_review"];
+        if (
+          typeof previousStatusValue !== "string"
+          || !restorableStatuses.includes(previousStatusValue)
+          || previousActiveValue !== true
+          || recordedCurrentStatus !== target.clearanceStatus
+          || (recordedCurrentActive !== undefined && recordedCurrentActive !== target.isActive)
+        ) {
+          return { success: false, error: "The previous account state is missing or no longer matches the latest account action, so it cannot be safely restored." };
+        }
+
+        await tx
+          .update(user)
+          .set({ clearanceStatus: previousStatusValue, isActive: true })
+          .where(eq(user.id, values.manufacturerId));
+
+        await logAudit(
+          {
+            userId: actor.id,
+            action: "MANUFACTURER_ACCOUNT_RESTORED",
+            targetType: "user",
+            targetId: values.manufacturerId,
+            metadata: { reason: values.reason, restoredFromAuditId: latestStatusEvent.id },
+            beforeState: { clearanceStatus: target.clearanceStatus, isActive: target.isActive },
+            afterState: { clearanceStatus: previousStatusValue, isActive: true },
+          },
+          async (entry) => { await tx.insert(auditLog).values(entry); },
+        );
+
+        return { success: true, data: { status: previousStatusValue, isActive: true } };
+      }
+
       if (target.clearanceStatus === "suspended" || target.isActive === false) {
-        return { success: false, error: "This manufacturer is already suspended. Use the established restoration process." };
+        return { success: false, error: "This manufacturer is inactive. Restore the previous account state before applying another action." };
       }
       if (target.clearanceStatus === values.status) return { success: false, error: "The manufacturer already has this status." };
 
+      const nextStatus = values.status;
+      const nextActive = values.status === "suspended" ? false : target.isActive;
       await tx
         .update(user)
         .set(values.status === "suspended"
@@ -397,16 +484,18 @@ export async function setManufacturerAccountStatus(
           targetId: values.manufacturerId,
           metadata: {
             previousStatus: target.clearanceStatus,
-            newStatus: values.status,
+            newStatus: nextStatus,
             previousActive: target.isActive,
-            newActive: values.status === "suspended" ? false : target.isActive,
+            newActive: nextActive,
             reason: values.reason,
           },
+          beforeState: { clearanceStatus: target.clearanceStatus, isActive: target.isActive },
+          afterState: { clearanceStatus: nextStatus, isActive: nextActive },
         },
         async (entry) => { await tx.insert(auditLog).values(entry); },
       );
 
-      return { success: true, data: { status: values.status } };
+      return { success: true, data: { status: nextStatus, isActive: nextActive } };
     });
   } catch (error) {
     reportFailure("account-status", error);
