@@ -37,6 +37,7 @@ export interface TaxpayerSearchResult {
         message: string;
         reference: string;
         diagnosticCode: string | null;
+        failurePhase: string;
     };
 }
 
@@ -66,11 +67,11 @@ function getSafeSqlState(error: unknown): string | null {
     return null;
 }
 
-function failedSearchResult(page: number, error: unknown): TaxpayerSearchResult {
+function failedSearchResult(page: number, error: unknown, failurePhase: string): TaxpayerSearchResult {
     const reference = randomUUID();
     const errorName = error instanceof Error ? error.name : "UnknownError";
     const diagnosticCode = getSafeSqlState(error);
-    console.error("[taxpayer-search] action failed", { reference, errorName, diagnosticCode });
+    console.error("[taxpayer-search] action failed", { reference, errorName, diagnosticCode, failurePhase });
     return {
         rows: [],
         totalRows: 0,
@@ -81,6 +82,7 @@ function failedSearchResult(page: number, error: unknown): TaxpayerSearchResult 
             message: "Taxpayer search is temporarily unavailable.",
             reference,
             diagnosticCode,
+            failurePhase,
         },
     };
 }
@@ -94,11 +96,13 @@ export async function searchTaxpayers(
     page = 1,
 ): Promise<TaxpayerSearchResult> {
     const requestedPage = Math.max(1, Math.floor(Number.isFinite(page) ? page : 1));
-    const { user: actor, staff } = await requireRRAPermission("taxpayer.intelligence.search");
+    let failurePhase = "authorization";
     try {
+        const { user: actor, staff } = await requireRRAPermission("taxpayer.intelligence.search");
+        failurePhase = "validation";
         const canReadContact = canReadTaxpayerSearchContact(staff.clearanceRoles);
         const parsedFilters = taxpayerSearchFiltersSchema.safeParse(filters);
-        if (!parsedFilters.success) return failedSearchResult(requestedPage, new Error("Invalid taxpayer search filters."));
+        if (!parsedFilters.success) return failedSearchResult(requestedPage, new Error("Invalid taxpayer search filters."), failurePhase);
         const searchFilters = parsedFilters.data;
 
         // Build WHERE conditions
@@ -143,6 +147,7 @@ export async function searchTaxpayers(
         const whereClause = and(...conditions);
 
         // Count total matching rows
+        failurePhase = "count_query";
         const [countResult] = await db
             .select({ count: sql<number>`COUNT(*)::int`.as("count") })
             .from(user)
@@ -154,6 +159,7 @@ export async function searchTaxpayers(
         const offset = (safePage - 1) * PAGE_SIZE;
 
         // Fetch paginated rows
+        failurePhase = "results_query";
         const rows = await db
             .select({
                 id: user.id,
@@ -173,6 +179,7 @@ export async function searchTaxpayers(
         const projectedRows = rows.map((row) => projectTaxpayerSearchRow(row, staff.clearanceRoles));
 
         // Audit log — record that a search was made, but never log the result data
+        failurePhase = "audit_log";
         try {
             await logAudit({
                 userId: actor.id,
@@ -202,6 +209,6 @@ export async function searchTaxpayers(
             pageSize: PAGE_SIZE,
         };
     } catch (error) {
-        return failedSearchResult(requestedPage, error);
+        return failedSearchResult(requestedPage, error, failurePhase);
     }
 }

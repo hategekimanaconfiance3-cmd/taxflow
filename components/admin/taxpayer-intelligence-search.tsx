@@ -297,8 +297,8 @@ export function TaxpayerIntelligenceSearch() {
                         setResult(null);
                         setError(
                             `${data.error.message} Support reference: ${data.error.reference}${
-                                data.error.diagnosticCode ? ` (diagnostic ${data.error.diagnosticCode})` : ""
-                            }`,
+                                data.error.diagnosticCode ? ` (database diagnostic ${data.error.diagnosticCode})` : ""
+                            } (stage ${data.error.failurePhase})`,
                         );
                         return;
                     }
