@@ -125,6 +125,7 @@ export default async function SuperAdminOverviewPage() {
     : 100;
 
   const controlPlaneLinks = [
+    { label: 'Trader Accounts', href: '/admin/super/accounts', icon: Users, desc: 'Approve, edit, suspend, restore, and audit traders' },
     { label: 'Manufacturing Standards', href: '/admin/super/manufacturing/tolerances', icon: Scale, desc: 'Official tolerance versions and approvals' },
     { label: 'Admin Management', href: '/admin/super/admins', icon: UserCog, desc: 'Staff roles & access' },
     { label: 'Security Center', href: '/admin/super/security', icon: Lock, desc: 'Auth & permission audit' },

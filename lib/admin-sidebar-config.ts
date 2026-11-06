@@ -173,6 +173,12 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 allowedRoles: TAXPAYER_SEARCH_ROLES,
             },
             {
+                label: "Trader Account Management",
+                href: "/admin/super/accounts",
+                icon: Users,
+                allowedRoles: ["super_admin"],
+            },
+            {
                 label: "Manufacturing Activity",
                 href: "/admin/manufacturing-activity",
                 icon: Package,

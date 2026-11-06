@@ -28,6 +28,7 @@ type SearchResult = {
 const STATIC_RESULTS: SearchResult[] = [
   // SA pages
   { label: 'SA Overview', description: 'Super Admin command center', href: '/admin/super', icon: ShieldAlert, category: 'page' },
+  { label: 'Trader Accounts', description: 'Manage manufacturers, wholesalers, and retailers', href: '/admin/super/accounts', icon: Users, category: 'page' },
   { label: 'Admin Management', description: 'Staff accounts, roles, status', href: '/admin/super/admins', icon: UserCog, category: 'page' },
   { label: 'Manufacturing Standards', description: 'Super Admin tolerance governance', href: '/admin/super/manufacturing/tolerances', icon: Scale, category: 'page' },
   { label: 'Security Center', description: 'Auth events, permission changes', href: '/admin/super/security', icon: Lock, category: 'page' },
