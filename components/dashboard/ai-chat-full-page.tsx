@@ -300,7 +300,7 @@ export function AIChatFullPage({ role, businessName }: AIChatFullPageProps) {
             </div>
           </div>
         ) : (
-          <div className="mx-auto max-w-2xl px-6 py-4 space-y-4">
+          <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-6 py-4">
             {messages.map((msg, idx) => {
               const isUser = msg.role === 'user';
               const isLast = idx === messages.length - 1;
@@ -319,8 +319,8 @@ export function AIChatFullPage({ role, businessName }: AIChatFullPageProps) {
               /* User bubble */
               if (isUser) {
                 return (
-                  <div key={msg.id} className="flex gap-3 justify-end">
-                    <div className="max-w-[80%] rounded-2xl rounded-br-sm px-4 py-2.5 bg-foreground text-background text-sm leading-relaxed">
+                  <div key={msg.id} className="flex w-full flex-none items-start justify-end gap-3">
+                    <div className="min-w-0 max-w-[80%] break-words rounded-2xl rounded-br-sm bg-foreground px-4 py-2.5 text-sm leading-relaxed">
                       {textContent}
                     </div>
                     <div className="shrink-0 h-7 w-7 rounded-full bg-muted flex items-center justify-center mt-0.5">
@@ -333,7 +333,7 @@ export function AIChatFullPage({ role, businessName }: AIChatFullPageProps) {
               /* Assistant — still querying DB */
               if (!textContent && isStreamingThis) {
                 return (
-                  <div key={msg.id} className="flex gap-3">
+                  <div key={msg.id} className="flex w-full flex-none items-start gap-3">
                     <div className="shrink-0 h-7 w-7 rounded-full bg-gradient-to-br from-blue-500/20 to-violet-500/20 border flex items-center justify-center">
                       <Brain className="h-3.5 w-3.5 text-blue-600" />
                     </div>
@@ -350,14 +350,14 @@ export function AIChatFullPage({ role, businessName }: AIChatFullPageProps) {
               /* Assistant — has text */
               if (textContent) {
                 return (
-                  <div key={msg.id} className="flex gap-3">
+                  <div key={msg.id} className="flex w-full flex-none items-start gap-3">
                     <div className="shrink-0 h-7 w-7 rounded-full bg-gradient-to-br from-blue-500/20 to-violet-500/20 border flex items-center justify-center mt-0.5">
                       <Brain className="h-3.5 w-3.5 text-blue-600" />
                     </div>
-                    <div className="max-w-[85%] rounded-2xl rounded-bl-sm border bg-muted/30 px-4 py-3">
+                    <div className="min-w-0 max-w-[85%] break-words rounded-2xl rounded-bl-sm border bg-muted/30 px-4 py-3">
                       <div
                         dangerouslySetInnerHTML={{ __html: renderMarkdown(textContent) }}
-                        className="[&_strong]:text-foreground [&_code]:text-foreground"
+                        className="min-w-0 break-words [&_strong]:text-foreground [&_code]:text-foreground"
                       />
                       {isStreamingThis && (
                         <span className="inline-block h-2 w-2 rounded-full bg-blue-500 animate-pulse ml-1 align-middle" />
@@ -372,7 +372,7 @@ export function AIChatFullPage({ role, businessName }: AIChatFullPageProps) {
 
             {/* Global loading indicator */}
             {isLoading && messages[messages.length - 1]?.role === 'user' && (
-              <div className="flex gap-3">
+              <div className="flex w-full flex-none items-start gap-3">
                 <div className="shrink-0 h-7 w-7 rounded-full bg-gradient-to-br from-blue-500/20 to-violet-500/20 border flex items-center justify-center">
                   <Brain className="h-3.5 w-3.5 text-blue-600" />
                 </div>
