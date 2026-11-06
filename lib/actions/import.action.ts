@@ -204,13 +204,16 @@ export async function submitImportArrival(
 
 export async function confirmImportArrival(
     declarationId: string,
-    opts?: { inspectedQuantity?: number; reviewerNote?: string },
+    opts: { inspectedQuantity: number; reviewerNote?: string },
 ) {
-    const { staff, ...session } = await requireRRASession("compliance_officer", "audit_officer", "customs_import_officer");
+    const { staff, ...session } = await requireRRASession("customs_import_officer");
+    if (!staff.clearanceRoles.some((role) => role === "customs_import_officer" && hasRRAPermission(role, "imports.review"))) {
+        throw new Error("Only an authorized Customs & Import Officer can confirm inspected goods.");
+    }
     const parsedId = importDeclarationIdSchema.safeParse(declarationId);
     if (!parsedId.success) throw new Error("Import declaration not found.");
     const safeDeclarationId = parsedId.data;
-    const parsedOpts = confirmImportArrivalSchema.safeParse(opts ?? {});
+    const parsedOpts = confirmImportArrivalSchema.safeParse(opts);
     if (!parsedOpts.success) throw new Error("Inspection details are invalid. Quantity must be finite and positive.");
     const review = parsedOpts.data;
 
@@ -246,9 +249,9 @@ export async function confirmImportArrival(
             throw new Error("Declaration is missing arrival details / invoice reference");
         }
 
-        // RRA officer may override with inspected quantity; fall back to trader-declared
+        // The official quantity must come from the Customs officer's physical inspection.
         failureStage = "validate inspected quantity";
-        const quantityToActivate = review.inspectedQuantity ?? declaration.actualQuantity;
+        const quantityToActivate = review.inspectedQuantity;
         if (!Number.isFinite(quantityToActivate) || quantityToActivate <= 0 || quantityToActivate > 1_000_000_000) {
             throw new Error("Inspected quantity must be finite and between 0 and 1,000,000,000.");
         }

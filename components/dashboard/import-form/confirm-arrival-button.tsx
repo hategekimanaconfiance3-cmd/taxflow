@@ -40,7 +40,7 @@ export function SubmitArrivalButton({
     const [error, setError] = useState("");
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    const qty = parseInt(actualQuantity) || 0;
+    const qty = Number(actualQuantity) || 0;
     const discrepancy = qty > 0 ? Math.abs(expectedQuantity - qty) / expectedQuantity : 0;
     const hasDiscrepancy = discrepancy > 0.1;
 
@@ -141,9 +141,10 @@ export function SubmitArrivalButton({
                 <DialogHeader>
                     <DialogTitle>Submit Arrival for Confirmation</DialogTitle>
                     <DialogDescription>
-                        Enter the actual quantity received and upload the
-                        scanned invoice (PDF). An RRA official will review and
-                        confirm.
+                        Enter the quantity you report receiving and upload the
+                        invoice. This is a trader report only. An authorized
+                        Customs officer must physically inspect the goods and
+                        enter the official verified quantity before approval.
                     </DialogDescription>
                 </DialogHeader>
 
@@ -158,15 +159,17 @@ export function SubmitArrivalButton({
 
                     <div className="space-y-2">
                         <Label htmlFor="actualQty">
-                            Actual Quantity Received
+                            Trader-reported received quantity
                         </Label>
                         <Input
                             id="actualQty"
                             type="number"
-                            min={1}
+                            min="0.000001"
+                            max="1000000000"
+                            step="any"
                             value={actualQuantity}
                             onChange={(e) => setActualQuantity(e.target.value)}
-                            placeholder="Enter actual quantity"
+                            placeholder="Enter reported quantity"
                         />
                         {hasDiscrepancy && qty > 0 && (
                             <div className="flex items-center gap-1.5 text-amber-600 text-xs">

@@ -26,7 +26,8 @@ export const submitImportArrivalSchema = z.object({
 }).strict();
 
 export const confirmImportArrivalSchema = z.object({
-  inspectedQuantity: positiveQuantity.optional(),
+  // Only the Customs officer's physical inspection can set the official quantity.
+  inspectedQuantity: positiveQuantity,
   reviewerNote: z.string().trim().max(2_000).optional(),
 }).strict();
 

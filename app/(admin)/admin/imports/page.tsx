@@ -4,6 +4,7 @@ import { AdminImportActions } from '@/components/admin/admin-import-actions';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Ship, Package, ClipboardList } from 'lucide-react';
+import { hasRRAPermission } from '@/lib/rra-rbac';
 
 const STATUS_BADGE: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
   pending:   { label: 'Pending',   variant: 'secondary' },
@@ -13,7 +14,11 @@ const STATUS_BADGE: Record<string, { label: string; variant: 'default' | 'second
 };
 
 export default async function AdminImportsPage() {
-  await requireRRASession("compliance_officer", "audit_officer", "customs_import_officer");
+  const session = await requireRRASession("compliance_officer", "audit_officer", "customs_import_officer");
+  const canReview = session.staff.clearanceRoles.some((role) => hasRRAPermission(role, 'imports.review'));
+  const canInspectAndConfirm = session.staff.clearanceRoles.some((role) =>
+    role === 'customs_import_officer' && hasRRAPermission(role, 'imports.review'),
+  );
 
   const declarations = await getAllImportDeclarations();
   const submitted = declarations.filter((d) => d.status === 'submitted');
@@ -32,7 +37,7 @@ export default async function AdminImportsPage() {
         <CardHeader className="pb-2">
           <CardTitle className="text-base font-semibold flex items-center gap-2">
             <Ship className="h-4 w-4" />
-            Awaiting RRA Review
+            Awaiting Customs Inspection
             {submitted.length > 0 && (
               <Badge variant="default" className="ml-auto">
                 {submitted.length} pending
@@ -62,10 +67,13 @@ export default async function AdminImportsPage() {
                     declarationId={d.id}
                     productName={`${d.productName} (${d.productUnit})`}
                     expectedQuantity={d.expectedQuantity}
-                    actualQuantity={d.actualQuantity ?? d.expectedQuantity}
+                    traderReportedQuantity={d.actualQuantity}
+                    inspectedQuantity={d.inspectedQuantity}
                     invoiceRef={d.invoiceRef ?? ''}
                     supportingDoc={d.supportingDoc ?? ''}
                     materialCode={d.materialCode}
+                    canInspectAndConfirm={canInspectAndConfirm}
+                    canReject={canReview}
                   />
                 </div>
               ))}
@@ -98,8 +106,9 @@ export default async function AdminImportsPage() {
                       <div className="min-w-0">
                         <p className="text-sm font-medium truncate">{d.productName}</p>
                         <p className="text-xs text-muted-foreground">
-                          {d.businessName} · Expected: {d.expectedQuantity.toLocaleString()} {d.productUnit}
-                          {d.actualQuantity != null && ` · Actual: ${d.actualQuantity.toLocaleString()} ${d.productUnit}`}
+                          {d.businessName} · Declared: {d.expectedQuantity.toLocaleString()} {d.productUnit}
+                          {d.actualQuantity != null && ` · Trader reported: ${d.actualQuantity.toLocaleString()} ${d.productUnit}`}
+                          {d.inspectedQuantity != null && ` · Customs verified: ${d.inspectedQuantity.toLocaleString()} ${d.productUnit}`}
                         </p>
                       </div>
                     </div>
