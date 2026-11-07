@@ -24,6 +24,7 @@ import { DefaultChatTransport } from 'ai';
 import { LANGS, translate, type LangCode } from '@/lib/language';
 import { useLanguagePreference } from '@/lib/use-language';
 import { useSocket } from '@/lib/socket-client';
+import { AdminPageListFilters } from '@/components/admin/admin-page-list-filters';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -840,7 +841,10 @@ export function AdminShell({ userId, userName, staffId, clearanceLevel, clearanc
 
           {/* ── Main content ────────────────────────────────── */}
           <main className="min-w-0 flex-1">
-            <div className="min-w-0 p-3 sm:p-4 lg:p-6">{children}</div>
+            <div className="min-w-0 p-3 sm:p-4 lg:p-6">
+              <AdminPageListFilters />
+              {children}
+            </div>
           </main>
         </div>
 
