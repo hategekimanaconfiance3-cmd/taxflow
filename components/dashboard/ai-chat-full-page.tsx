@@ -127,9 +127,9 @@ function renderMarkdown(text: string): string {
       const dataRows = tableLines.filter((l) => !/^\|[\s\-:|]+\|$/.test(l.trim()));
       if (dataRows.length > 0) {
         const parse = (l: string) => l.split('|').slice(1, -1).map((c) => c.trim());
-        const header = parse(dataRows[0]!).map((c) => `<th class="px-3 py-1.5 text-left font-semibold text-xs border-b bg-muted/40">${fmt(c)}</th>`).join('');
-        const body = dataRows.slice(1).map((r) => `<tr class="border-b border-border/40 last:border-0">${parse(r).map((c) => `<td class="px-3 py-1.5 text-xs">${fmt(c)}</td>`).join('')}</tr>`).join('');
-        result.push(`<div class="overflow-x-auto my-2 rounded-lg border"><table class="w-full"><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table></div>`);
+        const header = parse(dataRows[0]!).map((c) => `<th class="break-words [overflow-wrap:anywhere] px-3 py-1.5 text-left font-semibold text-xs border-b bg-muted/40">${fmt(c)}</th>`).join('');
+        const body = dataRows.slice(1).map((r) => `<tr class="border-b border-border/40 last:border-0">${parse(r).map((c) => `<td class="break-words [overflow-wrap:anywhere] px-3 py-1.5 text-xs">${fmt(c)}</td>`).join('')}</tr>`).join('');
+        result.push(`<div class="min-w-0 max-w-full overflow-x-auto my-2 rounded-lg border"><table class="w-full table-fixed"><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table></div>`);
       }
       continue;
     }
@@ -169,7 +169,14 @@ function renderMarkdown(text: string): string {
 }
 
 function fmt(text: string): string {
-  return text
+  const escaped = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+  return escaped
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.*?)\*/g, '<em>$1</em>')
     .replace(/`(.*?)`/g, '<code class="px-1 py-0.5 rounded bg-muted text-xs font-mono">$1</code>');
@@ -220,7 +227,7 @@ export function AIChatFullPage({ role, businessName }: AIChatFullPageProps) {
   }, [messages]);
 
   return (
-    <div className="flex h-[calc(100vh-112px)] flex-col">
+    <div className="flex h-[calc(100vh-112px)] min-h-0 min-w-0 flex-col">
       {/* ── Header ─────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between border-b px-6 py-3 shrink-0 bg-background">
         <div className="flex items-center gap-3">
@@ -253,7 +260,7 @@ export function AIChatFullPage({ role, businessName }: AIChatFullPageProps) {
       </div>
 
       {/* ── Messages ────────────────────────────────────────────────────── */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
         {messages.length === 0 ? (
           /* Empty state with categorised suggestions */
           <div className="mx-auto max-w-2xl px-6 py-8 space-y-8">
@@ -300,15 +307,14 @@ export function AIChatFullPage({ role, businessName }: AIChatFullPageProps) {
             </div>
           </div>
         ) : (
-          <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-6 py-4">
+          <div className="mx-auto flex w-full min-w-0 max-w-2xl flex-col gap-4 px-6 py-4">
             {messages.map((msg, idx) => {
               const isUser = msg.role === 'user';
               const isLast = idx === messages.length - 1;
               const isStreamingThis = isLast && isLoading && !isUser;
 
               const textContent = msg.parts
-                ?.filter((p) => p.type === 'text')
-                .map((p) => (p as { type: 'text'; text: string }).text)
+                ?.flatMap((part) => (part.type === 'text' ? [part.text] : []))
                 .join('') ?? '';
 
               const hasToolCall = msg.parts?.some(
@@ -319,9 +325,9 @@ export function AIChatFullPage({ role, businessName }: AIChatFullPageProps) {
               /* User bubble */
               if (isUser) {
                 return (
-                  <div key={msg.id} className="flex w-full flex-none items-start justify-end gap-3">
-                    <div className="min-w-0 max-w-[80%] break-words rounded-2xl rounded-br-sm bg-foreground px-4 py-2.5 text-sm leading-relaxed">
-                      {textContent}
+                  <div key={msg.id} className="flex w-full min-w-0 flex-none items-start justify-end gap-3">
+                    <div className="min-w-0 max-w-[80%] break-words [overflow-wrap:anywhere] whitespace-pre-wrap rounded-2xl rounded-br-sm bg-primary px-4 py-2.5 text-sm leading-relaxed text-primary-foreground">
+                      {textContent || 'Message unavailable'}
                     </div>
                     <div className="shrink-0 h-7 w-7 rounded-full bg-muted flex items-center justify-center mt-0.5">
                       <User className="h-3.5 w-3.5" />
@@ -333,7 +339,7 @@ export function AIChatFullPage({ role, businessName }: AIChatFullPageProps) {
               /* Assistant — still querying DB */
               if (!textContent && isStreamingThis) {
                 return (
-                  <div key={msg.id} className="flex w-full flex-none items-start gap-3">
+                  <div key={msg.id} className="flex w-full min-w-0 flex-none items-start gap-3">
                     <div className="shrink-0 h-7 w-7 rounded-full bg-gradient-to-br from-blue-500/20 to-violet-500/20 border flex items-center justify-center">
                       <Brain className="h-3.5 w-3.5 text-blue-600" />
                     </div>
@@ -350,14 +356,14 @@ export function AIChatFullPage({ role, businessName }: AIChatFullPageProps) {
               /* Assistant — has text */
               if (textContent) {
                 return (
-                  <div key={msg.id} className="flex w-full flex-none items-start gap-3">
+                  <div key={msg.id} className="flex w-full min-w-0 flex-none items-start gap-3">
                     <div className="shrink-0 h-7 w-7 rounded-full bg-gradient-to-br from-blue-500/20 to-violet-500/20 border flex items-center justify-center mt-0.5">
                       <Brain className="h-3.5 w-3.5 text-blue-600" />
                     </div>
-                    <div className="min-w-0 max-w-[85%] break-words rounded-2xl rounded-bl-sm border bg-muted/30 px-4 py-3">
+                    <div className="flow-root min-h-fit min-w-0 max-w-[85%] break-words [overflow-wrap:anywhere] rounded-2xl rounded-bl-sm border bg-muted/30 px-4 py-3">
                       <div
                         dangerouslySetInnerHTML={{ __html: renderMarkdown(textContent) }}
-                        className="min-w-0 break-words [&_strong]:text-foreground [&_code]:text-foreground"
+                        className="flow-root min-h-fit min-w-0 max-w-full break-words [overflow-wrap:anywhere] [&_strong]:text-foreground [&_code]:text-foreground"
                       />
                       {isStreamingThis && (
                         <span className="inline-block h-2 w-2 rounded-full bg-blue-500 animate-pulse ml-1 align-middle" />
@@ -372,7 +378,7 @@ export function AIChatFullPage({ role, businessName }: AIChatFullPageProps) {
 
             {/* Global loading indicator */}
             {isLoading && messages[messages.length - 1]?.role === 'user' && (
-              <div className="flex w-full flex-none items-start gap-3">
+              <div className="flex w-full min-w-0 flex-none items-start gap-3">
                 <div className="shrink-0 h-7 w-7 rounded-full bg-gradient-to-br from-blue-500/20 to-violet-500/20 border flex items-center justify-center">
                   <Brain className="h-3.5 w-3.5 text-blue-600" />
                 </div>
@@ -388,10 +394,10 @@ export function AIChatFullPage({ role, businessName }: AIChatFullPageProps) {
             {error && (
               <div
                 role="alert"
-                className="mx-auto flex max-w-2xl items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive"
+                className="mx-auto flex w-full min-w-0 max-w-2xl flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive"
               >
-                <span>
-                  {error.message || "The AI assistant could not complete this request. Please try again."}
+                <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">
+                  The AI assistant could not complete this request. Please try again.
                 </span>
                 <Button
                   type="button"
