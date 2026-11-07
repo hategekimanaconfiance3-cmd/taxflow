@@ -650,6 +650,7 @@ export const taxPayment = pgTable(
     paymentMethodId: text('payment_method_id').references(() => paymentMethod.id, { onDelete: 'set null' }),
     /** Masked payer identifier for display on receipts */
     payerDisplay: text('payer_display'),
+    rraAccountId: text('rra_account_id').references(() => rraCollectionAccount.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at')
       .defaultNow()
@@ -680,6 +681,49 @@ export const taxPaymentEvent = pgTable(
     createdAt: timestamp('created_at').defaultNow().notNull(),
   },
   (table) => [index('tax_payment_event_payment_created_idx').on(table.paymentId, table.createdAt)],
+);
+
+// ---------------------------------------------------------------------------
+// RRA Collection Accounts
+// ---------------------------------------------------------------------------
+
+export const rraCollectionAccount = pgTable(
+  'rra_collection_account',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    accountType: text('account_type').notNull(), // 'bank_account' | 'mobile_money'
+    displayName: text('display_name').notNull(),
+    currency: text('currency').notNull().default('RWF'),
+    description: text('description'),
+    providerName: text('provider_name').notNull(),
+    providerIntegration: text('provider_integration'),
+    // Bank-specific
+    bankAccountHolder: text('bank_account_holder'),
+    bankAccountNumber: text('bank_account_number'), // stored masked or encrypted
+    maskedAccountNumber: text('masked_account_number'),
+    bankBranch: text('bank_branch'),
+    // Mobile Money specific
+    merchantCode: text('merchant_code'),
+    registeredName: text('registered_name'),
+    // Verification workflow
+    verificationStatus: text('verification_status').notNull().default('pending'),
+    // 'pending' | 'verified' | 'rejected' | 'reverification_required'
+    submittedBy: text('submitted_by').notNull().references(() => user.id),
+    reviewedBy: text('reviewed_by').references(() => user.id),
+    reviewDate: timestamp('review_date'),
+    rejectionReason: text('rejection_reason'),
+    verifiedAt: timestamp('verified_at'),
+    // Active flag — only verified+active accounts accept payments
+    isActive: boolean('is_active').notNull().default(false),
+    isDeleted: boolean('is_deleted').notNull().default(false),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().$onUpdate(() => /* @__PURE__ */ new Date()).notNull(),
+  },
+  (table) => [
+    index('rra_collection_account_type_idx').on(table.accountType),
+    index('rra_collection_account_status_idx').on(table.verificationStatus),
+    index('rra_collection_account_active_idx').on(table.isActive, table.isDeleted),
+  ],
 );
 
 // ---------------------------------------------------------------------------

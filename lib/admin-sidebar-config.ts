@@ -35,6 +35,7 @@ import {
     Lock,
     Server,
     Eye,
+    Landmark,
 } from "lucide-react";
 import { RRA_ROLE_VALUES, type RRARole } from "@/lib/rra-rbac";
 
@@ -461,6 +462,12 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 href: "/admin/payment-reminders",
                 icon: Bell,
                 allowedRoles: ["compliance_officer", "tax_compliance_officer"],
+            },
+            {
+                label: "Collection Accounts",
+                href: "/admin/payments/collection-accounts",
+                icon: Landmark,
+                allowedRoles: ["super_admin", "payments_reconciliation_officer"],
             },
             {
                 label: "Messages",
