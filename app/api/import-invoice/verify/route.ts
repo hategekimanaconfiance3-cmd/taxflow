@@ -1,5 +1,5 @@
 import { get } from "@vercel/blob";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import db from "@/db/drizzle";
@@ -45,11 +45,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     .where(and(
       eq(importDeclaration.id, declarationId),
       eq(importDeclaration.businessId, session.user.id),
-      eq(importDeclaration.status, "pending"),
+      inArray(importDeclaration.status, ["pending", "submitted"]),
     ))
     .limit(1);
   if (!declaration) {
-    return NextResponse.json({ error: "Pending declaration not found" }, { status: 404 });
+    return NextResponse.json({ error: "Unreviewed declaration not found" }, { status: 404 });
   }
 
   try {

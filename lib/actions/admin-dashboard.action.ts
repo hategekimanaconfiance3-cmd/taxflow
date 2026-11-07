@@ -219,7 +219,7 @@ export async function getDashboardOverview(from?: Date, to?: Date) {
                 businessName: user.businessName,
                 productName: product.name,
                 expectedQuantity: importDeclaration.expectedQuantity,
-                actualQuantity: importDeclaration.actualQuantity,
+                inspectedQuantity: importDeclaration.inspectedQuantity,
                 status: importDeclaration.status,
                 createdAt: importDeclaration.createdAt,
             })

@@ -148,7 +148,7 @@ export type MerchantImport = {
   declarationRef: string | null;
   productName: string;
   expectedQuantity: number;
-  actualQuantity: number | null;
+  inspectedQuantity: number | null;
   status: string;
   customsRef: string | null;
   createdAt: string;
@@ -532,7 +532,7 @@ export async function getMerchantProfileById(
         declarationRef: importDeclaration.declarationRef,
         productName: product.name,
         expectedQuantity: importDeclaration.expectedQuantity,
-        actualQuantity: importDeclaration.actualQuantity,
+        inspectedQuantity: importDeclaration.inspectedQuantity,
         status: importDeclaration.status,
         customsRef: importDeclaration.customsRef,
         createdAt: importDeclaration.createdAt,
@@ -548,7 +548,7 @@ export async function getMerchantProfileById(
       declarationRef: r.declarationRef,
       productName: r.productName,
       expectedQuantity: r.expectedQuantity,
-      actualQuantity: r.actualQuantity,
+      inspectedQuantity: r.inspectedQuantity,
       status: r.status,
       customsRef: r.customsRef,
       createdAt: r.createdAt.toISOString(),

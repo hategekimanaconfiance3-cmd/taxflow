@@ -56,7 +56,7 @@ type LookupData = {
   payments?: Array<{ amount: number; status: string; method: string; reference: string | null; createdAt: Date }>;
   supportRequests?: Array<{ subject: string; status: string; priority: string; createdAt: Date }>;
   transactions?: Array<{ productName: string; quantity: number; totalAmount: number; vatAmount: number; status: string; createdAt: Date }>;
-  imports?: Array<{ declarationRef: string | null; productName: string; expectedQuantity: number; actualQuantity: number | null; status: string; customsRef: string | null; createdAt: Date }>;
+  imports?: Array<{ declarationRef: string | null; productName: string; expectedQuantity: number; inspectedQuantity: number | null; status: string; customsRef: string | null; createdAt: Date }>;
   disputes?: Array<{ referenceNumber: string; status: string; reason: string; createdAt: Date }>;
   cases?: Array<{ title: string; status: string; priority: string; createdAt: Date; updatedAt: Date }>;
   stock?: Array<{ productName: string; unit: string; quantity: number; price: number | null; source: string | null }>;
@@ -157,7 +157,7 @@ async function buildLookup(tin: string, staffRoles: RRARole[], staffRecordId: st
       declarationRef: importDeclaration.declarationRef,
       productName: product.name,
       expectedQuantity: importDeclaration.expectedQuantity,
-      actualQuantity: importDeclaration.actualQuantity,
+      inspectedQuantity: importDeclaration.inspectedQuantity,
       status: importDeclaration.status,
       customsRef: importDeclaration.customsRef,
       createdAt: importDeclaration.createdAt,

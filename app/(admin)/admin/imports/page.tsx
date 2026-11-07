@@ -6,24 +6,24 @@ import { Badge } from '@/components/ui/badge';
 import { Ship, Package, ClipboardList } from 'lucide-react';
 
 const STATUS_BADGE: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
-  pending:   { label: 'Pending',   variant: 'secondary' },
-  submitted: { label: 'Submitted', variant: 'default' },
+  pending:   { label: 'Awaiting inspection', variant: 'secondary' },
+  submitted: { label: 'Awaiting inspection', variant: 'default' },
   activated: { label: 'Activated', variant: 'outline' },
   rejected:  { label: 'Rejected',  variant: 'destructive' },
 };
 
 export default async function AdminImportsPage() {
-  await requireRRASession("compliance_officer", "audit_officer", "customs_import_officer");
+  await requireRRASession("customs_import_officer", "super_admin");
 
   const declarations = await getAllImportDeclarations();
-  const submitted = declarations.filter((d) => d.status === 'submitted');
+  const submitted = declarations.filter((d) => d.status === 'pending' || d.status === 'submitted');
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Import Declarations</h1>
         <p className="text-muted-foreground text-sm mt-1">
-          Review, activate, and manage all trader import declarations.
+          Review trader pre-declarations, record the physical inspection, and approve verified arrivals.
         </p>
       </div>
 
@@ -32,7 +32,7 @@ export default async function AdminImportsPage() {
         <CardHeader className="pb-2">
           <CardTitle className="text-base font-semibold flex items-center gap-2">
             <Ship className="h-4 w-4" />
-            Awaiting RRA Review
+            Awaiting Customs Physical Inspection
             {submitted.length > 0 && (
               <Badge variant="default" className="ml-auto">
                 {submitted.length} pending
@@ -62,7 +62,6 @@ export default async function AdminImportsPage() {
                     declarationId={d.id}
                     productName={`${d.productName} (${d.productUnit})`}
                     expectedQuantity={d.expectedQuantity}
-                    actualQuantity={d.actualQuantity ?? d.expectedQuantity}
                     invoiceRef={d.invoiceRef ?? ''}
                     supportingDoc={d.supportingDoc ?? ''}
                     materialCode={d.materialCode}
@@ -99,7 +98,7 @@ export default async function AdminImportsPage() {
                         <p className="text-sm font-medium truncate">{d.productName}</p>
                         <p className="text-xs text-muted-foreground">
                           {d.businessName} · Expected: {d.expectedQuantity.toLocaleString()} {d.productUnit}
-                          {d.actualQuantity != null && ` · Actual: ${d.actualQuantity.toLocaleString()} ${d.productUnit}`}
+                          {d.inspectedQuantity != null && ` · RRA verified: ${d.inspectedQuantity.toLocaleString()} ${d.productUnit}`}
                         </p>
                       </div>
                     </div>

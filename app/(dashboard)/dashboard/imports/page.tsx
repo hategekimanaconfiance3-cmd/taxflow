@@ -6,7 +6,7 @@ import { ImportForm } from '@/components/dashboard/import-form/import-form';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { FileText, PackageCheck } from 'lucide-react';
-import { SubmitArrivalButton } from '@/components/dashboard/import-form/confirm-arrival-button';
+import { ImportDocumentsButton } from '@/components/dashboard/import-form/import-documents-button';
 
 export default async function ImportsPage() {
   const session = await requireApprovedClearance();
@@ -52,8 +52,8 @@ export default async function ImportsPage() {
               {declarations.map((declaration) => {
                 const statusLabel = declaration.isProductionMaterial && declaration.status === 'activated'
                   ? 'Verified and added to material ledger'
-                  : declaration.status === 'submitted'
-                  ? 'Awaiting RRA review'
+                  : declaration.status === 'submitted' || declaration.status === 'pending'
+                  ? 'Awaiting RRA physical inspection'
                   : declaration.status === 'activated'
                     ? 'Approved and added to stock'
                     : declaration.status === 'rejected'
@@ -63,7 +63,7 @@ export default async function ImportsPage() {
                   ? 'bg-emerald-100 text-emerald-800'
                   : declaration.status === 'rejected'
                     ? 'bg-red-100 text-red-800'
-                    : declaration.status === 'submitted'
+                    : declaration.status === 'submitted' || declaration.status === 'pending'
                       ? 'bg-blue-100 text-blue-800'
                       : 'bg-amber-100 text-amber-800';
 
@@ -80,17 +80,19 @@ export default async function ImportsPage() {
                     </div>
                     <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
                       <p><span className="text-muted-foreground">Expected:</span> {declaration.expectedQuantity} {declaration.productUnit}</p>
-                      {declaration.actualQuantity != null && <p><span className="text-muted-foreground">Arrived:</span> {declaration.actualQuantity} {declaration.productUnit}</p>}
+                      {declaration.inspectedQuantity != null && <p><span className="text-muted-foreground">RRA verified:</span> {declaration.inspectedQuantity} {declaration.productUnit}</p>}
                       {declaration.invoiceRef && <p className="flex items-center gap-1"><FileText className="h-3.5 w-3.5 text-muted-foreground" /><span className="text-muted-foreground">Invoice:</span> {declaration.invoiceRef}</p>}
                       {declaration.supportingDoc && <a className="flex items-center gap-1 text-primary underline-offset-4 hover:underline" href={declaration.supportingDoc} target="_blank" rel="noreferrer"><FileText className="h-3.5 w-3.5" />View invoice PDF</a>}
                       {declaration.customsRef && <p><span className="text-muted-foreground">Customs ref:</span> {declaration.customsRef}</p>}
                     </div>
-                    {declaration.status === 'pending' && (
+                    {(declaration.status === 'pending' || declaration.status === 'submitted') && (
                       <div className="mt-3">
-                        <SubmitArrivalButton
+                        <ImportDocumentsButton
                           declarationId={declaration.id}
                           productName={declaration.productName}
                           expectedQuantity={declaration.expectedQuantity}
+                          invoiceRef={declaration.invoiceRef}
+                          supportingDoc={declaration.supportingDoc}
                         />
                       </div>
                     )}

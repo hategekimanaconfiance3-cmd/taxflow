@@ -3,7 +3,7 @@ import {
   handleUploadPresigned,
   type HandleUploadPresignedBody,
 } from "@vercel/blob/client";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import db from "@/db/drizzle";
@@ -25,7 +25,7 @@ const uploadTokenRequestSchema = z.object({
   }).strict(),
 }).strict();
 
-/** Issue a short-lived private-Blob upload URL for an owned, pending declaration. */
+/** Issue a short-lived private-Blob upload URL for an owned, unreviewed declaration. */
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const session = await auth.api.getSession({ headers: req.headers });
   if (!session?.user) {
@@ -60,11 +60,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       .where(and(
         eq(importDeclaration.id, declarationId),
         eq(importDeclaration.businessId, session.user.id),
-        eq(importDeclaration.status, "pending"),
+        inArray(importDeclaration.status, ["pending", "submitted"]),
       ))
       .limit(1);
     if (!declaration) {
-      return NextResponse.json({ error: "Pending declaration not found" }, { status: 404 });
+      return NextResponse.json({ error: "Unreviewed declaration not found" }, { status: 404 });
     }
 
     const rateLimit = await consumeRateLimit("import-invoice-upload", session.user.id, 10, 60 * 60);

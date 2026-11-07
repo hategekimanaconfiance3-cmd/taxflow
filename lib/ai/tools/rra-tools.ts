@@ -703,7 +703,7 @@ export const getImportDeclarations = tool({
             productName: product.name,
             unit: product.unit,
             expectedQuantity: importDeclaration.expectedQuantity,
-            actualQuantity: importDeclaration.actualQuantity,
+            inspectedQuantity: importDeclaration.inspectedQuantity,
             status: importDeclaration.status,
             customsReference: importDeclaration.customsRef,
             invoiceReference: importDeclaration.invoiceRef,

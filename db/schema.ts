@@ -924,9 +924,9 @@ export const importDeclaration = pgTable(
       .references(() => product.id),
     productionMaterialId: text('production_material_id').references(() => productionMaterial.id),
     expectedQuantity: real('expected_quantity').notNull(),
-    actualQuantity: real('actual_quantity'), // filled by trader on arrival
+    actualQuantity: real('actual_quantity'), // RRA-inspected quantity; mirrors inspected_quantity for compatibility
     status: text('status').notNull().default('pending'),
-    // "pending" → "submitted" → "activated" | "rejected"
+    // "pending" (legacy "submitted") → "activated" | "rejected"; trader submissions never approve arrivals
     customsRef: text('customs_ref'), // customs reference number
     originCountry: text('origin_country'), // country of origin
     invoiceRef: text('invoice_ref'), // invoice or import document reference

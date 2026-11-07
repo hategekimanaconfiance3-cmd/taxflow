@@ -194,13 +194,13 @@ export async function searchProductJourney(input: unknown): Promise<ProductJourn
                     businessTin: user.tinNumber,
                     productName: product.name,
                     productId: product.id,
-                    quantity: sql<number>`COALESCE(${importDeclaration.actualQuantity}, ${importDeclaration.expectedQuantity})`,
+                    quantity: sql<number>`COALESCE(${importDeclaration.inspectedQuantity}, ${importDeclaration.expectedQuantity})`,
                     status: importDeclaration.status,
                     createdAt: importDeclaration.createdAt,
                 }).from(importDeclaration)
                     .innerJoin(user, eq(importDeclaration.businessId, user.id))
                     .innerJoin(product, eq(importDeclaration.productId, product.id))
-                    .where(inArray(importDeclaration.productId, productIds))
+                    .where(and(inArray(importDeclaration.productId, productIds), eq(importDeclaration.status, "activated")))
                     .orderBy(desc(importDeclaration.createdAt)).limit(100),
                 tx.select({
                     id: stockAdjustment.id,

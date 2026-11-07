@@ -948,7 +948,7 @@ function ImportsTab({ imports }: { imports?: MerchantImport[] }) {
               <TableHead>Ref</TableHead>
               <TableHead>Product</TableHead>
               <TableHead className="text-right">Expected</TableHead>
-              <TableHead className="text-right">Actual</TableHead>
+              <TableHead className="text-right">RRA verified</TableHead>
               <TableHead>Customs Ref</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Date</TableHead>
@@ -967,7 +967,7 @@ function ImportsTab({ imports }: { imports?: MerchantImport[] }) {
                   {r.expectedQuantity}
                 </TableCell>
                 <TableCell className="text-right font-mono">
-                  {r.actualQuantity ?? "—"}
+                  {r.inspectedQuantity ?? "Awaiting inspection"}
                 </TableCell>
                 <TableCell className="font-mono text-xs text-muted-foreground">
                   {r.customsRef ?? "—"}
