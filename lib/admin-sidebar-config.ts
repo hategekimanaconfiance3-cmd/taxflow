@@ -202,6 +202,7 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 href: "/admin/imports",
                 icon: Ship,
                 allowedRoles: [
+                    "super_admin",
                     "compliance_officer",
                     "audit_officer",
                     "customs_import_officer",

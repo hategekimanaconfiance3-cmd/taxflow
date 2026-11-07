@@ -31,7 +31,7 @@ export async function GET(
       .select({ id: rraStaff.id })
       .from(rraStaffRole)
       .innerJoin(rraStaff, eq(rraStaffRole.staffRecordId, rraStaff.id))
-      .where(and(eq(rraStaff.userId, session.user.id), eq(rraStaff.isActive, true), inArray(rraStaffRole.role, ["super_admin", "customs_import_officer"])))
+      .where(and(eq(rraStaff.userId, session.user.id), eq(rraStaff.isActive, true), inArray(rraStaffRole.role, ["super_admin", "customs_import_officer", "compliance_officer", "audit_officer"])))
       .limit(1);
     hasAccess = Boolean(staff);
   }

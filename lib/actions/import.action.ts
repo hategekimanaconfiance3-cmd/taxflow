@@ -3,7 +3,7 @@
 import { eq, desc, and, inArray, sql } from "drizzle-orm";
 import db from "@/db/drizzle";
 import { importDeclaration, product, productionMaterial, productionMaterialMovement, productionMaterialReceipt, stock, stockMovement, user, auditLog } from "@/db/schema";
-import { requireTraderSession, requireRRASession } from "@/lib/auth-guard";
+import { requireTraderSession, requireRRASession, requireAnyRRAPermission } from "@/lib/auth-guard";
 import { hasRRAPermission } from "@/lib/rra-rbac";
 import { logAudit } from "@/lib/audit";
 import { createNotification } from "@/lib/notifications";
@@ -630,7 +630,7 @@ export async function getImportDeclaration(declarationId: string) {
 // ---------------------------------------------------------------------------
 
 export async function getAllImportDeclarations(statusFilter?: string) {
-    const session = await requireRRASession("customs_import_officer", "super_admin");
+    const session = await requireAnyRRAPermission("imports.read", "imports.review");
     const canReviewMaterials = session.staff.clearanceRoles.some((role) => hasRRAPermission(role, 'production.material.receipt.review'));
 
     // Build where clause at DB level instead of JS post-filter

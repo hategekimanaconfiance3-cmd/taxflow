@@ -13,7 +13,8 @@ const STATUS_BADGE: Record<string, { label: string; variant: 'default' | 'second
 };
 
 export default async function AdminImportsPage() {
-  await requireRRASession("customs_import_officer", "super_admin");
+  const { staff } = await requireRRASession("compliance_officer", "audit_officer", "customs_import_officer", "super_admin");
+  const canInspectImports = staff.clearanceRoles.some((role) => role === "customs_import_officer" || role === "super_admin");
 
   const declarations = await getAllImportDeclarations();
   const submitted = declarations.filter((d) => d.status === 'pending' || d.status === 'submitted');
@@ -57,15 +58,22 @@ export default async function AdminImportsPage() {
                       {d.customsRef && <span className="ml-2">· Customs: {d.customsRef}</span>}
                     </div>
                   </div>
-                  {/* Correctly mapped component with all required properties */}
-                  <AdminImportActions
-                    declarationId={d.id}
-                    productName={`${d.productName} (${d.productUnit})`}
-                    expectedQuantity={d.expectedQuantity}
-                    invoiceRef={d.invoiceRef ?? ''}
-                    supportingDoc={d.supportingDoc ?? ''}
-                    materialCode={d.materialCode}
-                  />
+                  {canInspectImports ? (
+                    <AdminImportActions
+                      declarationId={d.id}
+                      productName={`${d.productName} (${d.productUnit})`}
+                      expectedQuantity={d.expectedQuantity}
+                      invoiceRef={d.invoiceRef ?? ''}
+                      supportingDoc={d.supportingDoc ?? ''}
+                      materialCode={d.materialCode}
+                    />
+                  ) : (
+                    <div className="space-y-1 text-xs text-muted-foreground">
+                      <p>Expected: {d.expectedQuantity.toLocaleString()} {d.productUnit} · Awaiting Customs physical inspection.</p>
+                      {d.invoiceRef && <p>Invoice reference: {d.invoiceRef}</p>}
+                      {d.supportingDoc?.startsWith('/api/import-invoice/') && <a className="text-primary underline" href={d.supportingDoc} target="_blank" rel="noreferrer">View supporting invoice</a>}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
