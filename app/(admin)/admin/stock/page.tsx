@@ -10,13 +10,28 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Badge } from '@/components/ui/badge';
-import { Package } from 'lucide-react';
+import { CalendarDays, Package } from 'lucide-react';
+import Link from 'next/link';
+import { Button } from '@/components/ui/button';
+
+function firstParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function isValidDateOnly(value: string | undefined): value is string {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
 
 /** Roles that can edit / delete stock records. Must match admin-stock-correction.action.ts. */
 const CORRECTION_ROLES = ['correction_officer', 'super_admin'] as const;
 
-export default async function AdminStockPage() {
+export default async function AdminStockPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const { staff } = await requireRRASession(
     'stock_officer',
     'audit_officer',
@@ -29,16 +44,87 @@ export default async function AdminStockPage() {
     (CORRECTION_ROLES as readonly string[]).includes(role),
   );
 
-  const inventory = await getSystemStockOverview();
+  const params = await searchParams;
+  const rawDateFrom = firstParam(params.from);
+  const rawDateTo = firstParam(params.to);
+  const dateFrom = isValidDateOnly(rawDateFrom) ? rawDateFrom : undefined;
+  const dateTo = isValidDateOnly(rawDateTo) ? rawDateTo : undefined;
+  const hasInvalidDate = Boolean((rawDateFrom && !dateFrom) || (rawDateTo && !dateTo));
+  const datesOutOfOrder = Boolean(dateFrom && dateTo && dateFrom > dateTo);
+  const filterError = hasInvalidDate
+    ? 'Enter valid start and end dates.'
+    : datesOutOfOrder
+      ? 'The start date must be on or before the end date.'
+      : '';
+  const dateRangeLabel = dateFrom && dateTo
+    ? `from ${dateFrom} through ${dateTo}`
+    : dateFrom
+      ? `from ${dateFrom} onward`
+      : dateTo
+        ? `through ${dateTo}`
+        : '';
+  const inventory = filterError
+    ? []
+    : await getSystemStockOverview({ dateFrom, dateTo });
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Stock Corrections</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Stock Overview</h1>
         <p className="text-muted-foreground text-sm mt-1">
-          View system-wide stock levels and apply corrections where discrepancies are found.
+          Filter system-wide stock levels by their last-updated date and apply corrections where discrepancies are found.
         </p>
       </div>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-semibold flex items-center gap-2">
+            <CalendarDays className="h-4 w-4" />
+            Filter by last-updated date
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form method="get" action="/admin/stock" className="flex flex-wrap items-end gap-3">
+            <div className="min-w-[180px] flex-1">
+              <label htmlFor="stock-date-from" className="mb-1 block text-xs font-medium text-muted-foreground">
+                From
+              </label>
+              <input
+                id="stock-date-from"
+                name="from"
+                type="date"
+                defaultValue={rawDateFrom ?? ''}
+                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+              />
+            </div>
+            <div className="min-w-[180px] flex-1">
+              <label htmlFor="stock-date-to" className="mb-1 block text-xs font-medium text-muted-foreground">
+                Through (inclusive)
+              </label>
+              <input
+                id="stock-date-to"
+                name="to"
+                type="date"
+                defaultValue={rawDateTo ?? ''}
+                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+              />
+            </div>
+            <Button type="submit" className="h-10">Apply dates</Button>
+            {(rawDateFrom || rawDateTo) && (
+              <Button asChild type="button" variant="outline" className="h-10">
+                <Link href="/admin/stock">Clear</Link>
+              </Button>
+            )}
+          </form>
+          {filterError ? (
+            <p role="alert" className="mt-3 text-sm text-destructive">{filterError}</p>
+          ) : dateRangeLabel ? (
+            <p className="mt-3 text-xs text-muted-foreground">
+              Showing stock records last updated {dateRangeLabel}.
+            </p>
+          ) : null}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader className="pb-2">
