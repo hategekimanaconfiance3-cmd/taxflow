@@ -259,6 +259,28 @@ const EMPTY_FILTERS: TaxpayerSearchFilters = {
     dateTo: "",
 };
 
+async function runTaxpayerSearch(
+    filters: TaxpayerSearchFilters,
+    page: number,
+): Promise<TaxpayerSearchResult> {
+    try {
+        return await searchTaxpayers(filters, page);
+    } catch {
+        // A browser can retain a Server Action reference from an older
+        // deployment while the app is rolling forward. Retry through the
+        // same authorized search service over a normal JSON request.
+        const response = await fetch("/api/admin/taxpayer-search", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "same-origin",
+            body: JSON.stringify({ filters, page }),
+        });
+        const data = await response.json().catch(() => null) as TaxpayerSearchResult | null;
+        if (!data) throw new Error("Search could not be completed. Refresh the page and try again.");
+        return data;
+    }
+}
+
 export function TaxpayerIntelligenceSearch() {
     const [filters, setFilters] = useState<TaxpayerSearchFilters>(EMPTY_FILTERS);
     const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -292,7 +314,7 @@ export function TaxpayerIntelligenceSearch() {
             setHasSearched(true);
             startTransition(async () => {
                 try {
-                    const data = await searchTaxpayers(filters, page);
+                    const data = await runTaxpayerSearch(filters, page);
                     if (data.error) {
                         setResult(null);
                         setError(
