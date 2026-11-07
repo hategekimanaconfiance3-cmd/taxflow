@@ -46,6 +46,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { AdminClearanceActions } from "@/components/admin/admin-clearance-actions";
 import { editMerchantProfile } from "@/lib/actions/merchant-profile.action";
 import type {
   MerchantProfileData,
@@ -363,6 +364,14 @@ function OverviewTab({
                   <Edit className="h-3 w-3" />
                   Edit
                 </Button>
+              )}
+              {permissions.canManageDisputes && profile.clearanceStatus && (
+                <AdminClearanceActions
+                  traderId={profile.id}
+                  traderName={profile.businessName ?? profile.name}
+                  currentStatus={profile.clearanceStatus}
+                  variant="dropdown"
+                />
               )}
             </div>
           </div>

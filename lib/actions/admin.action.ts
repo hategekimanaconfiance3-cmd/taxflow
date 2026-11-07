@@ -66,53 +66,66 @@ type ClearanceStatus = "approved" | "under_review" | "suspended";
 
 /**
  * Update a trader's clearance status.
- * Requires 'admin' level clearance for the RRA staff member.
+ * Requires compliance.followup.manage permission.
+ * A mandatory reason (min 10 chars) is required and recorded in the audit log.
  */
 export async function updateClearanceStatus(
     targetUserId: string,
     newStatus: ClearanceStatus,
+    reason?: string,
 ) {
-    const { staff, ...session } = await requireRRAPermission("compliance.followup.manage");
+    let actor: Awaited<ReturnType<typeof requireRRAPermission>>['user'];
+    let staff: Awaited<ReturnType<typeof requireRRAPermission>>['staff'];
+    try {
+        const session = await requireRRAPermission('compliance.followup.manage');
+        actor = session.user;
+        staff = session.staff;
+    } catch (authErr) {
+        if (authErr instanceof Error) throw authErr;
+        throw new Error('You are not authorised to change account status.');
+    }
 
-    const validStatuses: ClearanceStatus[] = [
-        "approved",
-        "under_review",
-        "suspended",
-    ];
-
+    const validStatuses: ClearanceStatus[] = ['approved', 'under_review', 'suspended'];
     if (!validStatuses.includes(newStatus)) {
         throw new Error(`Invalid clearance status: ${newStatus}`);
     }
 
-    // Get current status for audit
+    const trimmedReason = (reason ?? '').trim();
+    if (trimmedReason.length < 10) {
+        throw new Error('A reason of at least 10 characters is required for account status changes.');
+    }
+
     const [target] = await db
-        .select({ clearanceStatus: user.clearanceStatus, role: user.role })
+        .select({ clearanceStatus: user.clearanceStatus, role: user.role, businessName: user.businessName, tinNumber: user.tinNumber })
         .from(user)
         .where(eq(user.id, targetUserId))
         .limit(1);
 
-    if (!target) {
-        throw new Error("User not found");
-    }
+    if (!target) throw new Error('User not found');
+    if (target.role === 'rra_staff') throw new Error('Cannot change clearance of RRA staff');
+    if (target.clearanceStatus === newStatus) throw new Error(`Account is already ${newStatus}.`);
 
-    if (target.role === "rra_staff") {
-        throw new Error("Cannot change clearance of RRA staff");
-    }
+    await db.update(user).set({ clearanceStatus: newStatus }).where(eq(user.id, targetUserId));
 
-    await db
-        .update(user)
-        .set({ clearanceStatus: newStatus })
-        .where(eq(user.id, targetUserId));
+    let auditAction = 'CLEARANCE_UPDATED';
+    if (newStatus === 'suspended') auditAction = 'ACCOUNT_SUSPENDED';
+    else if (newStatus === 'approved' && target.clearanceStatus === 'suspended') auditAction = 'ACCOUNT_REINSTATED';
+    else if (newStatus === 'under_review') auditAction = 'ACCOUNT_PLACED_UNDER_REVIEW';
+    else if (newStatus === 'approved') auditAction = 'ACCOUNT_APPROVED';
 
     await logAudit({
-        userId: session.user.id,
-        action: "CLEARANCE_UPDATED",
-        targetType: "user",
+        userId: actor.id,
+        action: auditAction,
+        targetType: 'user',
         targetId: targetUserId,
         metadata: {
             previousStatus: target.clearanceStatus,
             newStatus,
+            reason: trimmedReason,
+            businessName: target.businessName,
+            tinNumber: target.tinNumber,
             updatedBy: staff.staffId,
+            staffRoles: staff.clearanceRoles,
         },
     });
 

@@ -595,6 +595,34 @@ export const vatRecord = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// Saved Payment Methods — per-business saved Mobile Money / bank accounts
+// ---------------------------------------------------------------------------
+
+export const paymentMethod = pgTable(
+  'payment_method',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    businessId: text('business_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+    /** 'mtn_mobile_money' | 'airtel_money' | 'bank_transfer' */
+    provider: text('provider').notNull(),
+    /** User-defined nickname e.g. "My MTN", "Office Bank" */
+    label: text('label'),
+    /** Masked for display: "+250 78* *** 456" */
+    maskedIdentifier: text('masked_identifier').notNull(),
+    /** Full phone/account stored server-side — never returned raw to client */
+    fullIdentifier: text('full_identifier').notNull(),
+    isDefault: boolean('is_default').notNull().default(false),
+    isActive: boolean('is_active').notNull().default(true),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().$onUpdate(() => /* @__PURE__ */ new Date()).notNull(),
+  },
+  (table) => [
+    index('payment_method_business_idx').on(table.businessId),
+    index('payment_method_business_provider_idx').on(table.businessId, table.provider),
+  ],
+);
+
+// ---------------------------------------------------------------------------
 // Tax Payments — actual payments made to RRA
 // ---------------------------------------------------------------------------
 
@@ -607,13 +635,21 @@ export const taxPayment = pgTable(
     businessId: text('business_id')
       .notNull()
       .references(() => user.id),
-    amount: integer('amount').notNull(), // RWF
+    amount: integer('amount').notNull(), // RWF — actual requested payment amount (95–100% of outstanding)
     method: text('method').notNull(), // "mobile_money", "bank_transfer", "cash"
     paymentReference: text('payment_reference').notNull().$defaultFn(() => `TF-${crypto.randomUUID()}`),
     reference: text('reference').unique(), // payment reference / receipt number
     idempotencyKey: text('idempotency_key'),
     status: text('status').default('pending').notNull(), // legacy compatibility: pending | confirmed | rejected
     workflowStatus: text('workflow_status').default('AWAITING_CONFIRMATION').notNull(),
+    /** Percentage of outstanding balance paid (95.00–100.00) */
+    paymentPercentage: numeric('payment_percentage', { precision: 5, scale: 2 }),
+    /** Outstanding balance snapshot at submission time — for receipts */
+    outstandingAtSubmission: integer('outstanding_at_submission'),
+    /** FK to saved payment method used (NULL = one-off or cash) */
+    paymentMethodId: text('payment_method_id').references(() => paymentMethod.id, { onDelete: 'set null' }),
+    /** Masked payer identifier for display on receipts */
+    payerDisplay: text('payer_display'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at')
       .defaultNow()
