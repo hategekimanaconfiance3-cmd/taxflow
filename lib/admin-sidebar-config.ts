@@ -36,6 +36,7 @@ import {
     Server,
     Eye,
     Landmark,
+    SlidersHorizontal,
 } from "lucide-react";
 import { RRA_ROLE_VALUES, type RRARole } from "@/lib/rra-rbac";
 
@@ -123,10 +124,11 @@ const ALL: RRARole[] = [
     "payments_reconciliation_officer",
     "data_ai_analyst",
     "director_executive",
+    "stock_control_admin",
 ];
 
-// System-admin access does not itself grant access to confidential taxpayer data.
-const TAXPAYER_SEARCH_ROLES = ALL.filter((role) => role !== "super_admin");
+// super_admin has taxpayer.intelligence.search; stock_control_admin does not.
+const TAXPAYER_SEARCH_ROLES = ALL.filter((role) => role !== "stock_control_admin");
 
 // ---------------------------------------------------------------------------
 // Navigation groups -- ordered by operational priority
@@ -183,7 +185,7 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 label: "Taxpayer Corrections",
                 href: "/admin/corrections",
                 icon: UserCheck,
-                allowedRoles: ["correction_officer", "super_admin"],
+                allowedRoles: ["correction_officer", "super_admin", "tax_compliance_officer"],
             },
             {
                 label: "Transactions",
@@ -210,6 +212,12 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 href: "/admin/production/material-accounting",
                 icon: Package,
                 allowedRoles: ["customs_import_officer", "stock_control_admin"],
+            },
+            {
+                label: "Stock Control",
+                href: "/admin/stock-control",
+                icon: SlidersHorizontal,
+                allowedRoles: ["super_admin", "stock_control_admin"],
             },
             {
                 label: "Supply Chain",
@@ -467,7 +475,7 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 label: "Collection Accounts",
                 href: "/admin/payments/collection-accounts",
                 icon: Landmark,
-                allowedRoles: ["super_admin", "payments_reconciliation_officer"],
+                allowedRoles: ["super_admin", "payments_reconciliation_officer", "tax_compliance_officer"],
             },
             {
                 label: "Messages",

@@ -108,6 +108,7 @@ type Props = {
   summary: CollectionAccountSummary;
   canManage: boolean;
   canReview: boolean;
+  currentStaffUserId: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -119,6 +120,7 @@ export function RraCollectionAccountsWorkspace({
   summary: initialSummary,
   canManage,
   canReview,
+  currentStaffUserId,
 }: Props) {
   const [accounts, setAccounts] = useState(initialAccounts);
   const [summary, setSummary] = useState(initialSummary);
@@ -312,7 +314,7 @@ export function RraCollectionAccountsWorkspace({
               )}
               <div className="flex flex-wrap gap-2">
                 {/* Review button */}
-                {canReview && ["pending", "reverification_required"].includes(acc.verificationStatus) && acc.submittedBy !== "self" && (
+                {canReview && ["pending", "reverification_required"].includes(acc.verificationStatus) && acc.submittedBy !== currentStaffUserId && (
                   <Button size="sm" variant="default" onClick={() => { setSelected(acc); reviewForm.reset({ decision: "verified", reason: "" }); setReviewOpen(true); }}>
                     <ShieldCheck className="size-3" /> Review
                   </Button>

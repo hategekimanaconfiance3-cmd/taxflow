@@ -1,4 +1,4 @@
-import { requireRRAPermission } from '@/lib/auth-guard';
+import { requireAnyRRAPermission } from '@/lib/auth-guard';
 import { getAuditLogs } from '@/lib/actions/admin.action';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -13,7 +13,7 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollText } from 'lucide-react';
 
 export default async function AdminAuditPage() {
-  await requireRRAPermission("audit.trail.read");
+  await requireAnyRRAPermission("audit.trail.read", "security.audit.read");
 
   let logs: Awaited<ReturnType<typeof getAuditLogs>> = [];
   logs = await getAuditLogs({ limit: 100 });

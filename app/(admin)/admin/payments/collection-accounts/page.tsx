@@ -32,6 +32,7 @@ export default async function CollectionAccountsPage() {
       summary={summary}
       canManage={canManage}
       canReview={canReview}
+      currentStaffUserId={staff.userId}
     />
   );
 }
