@@ -28,6 +28,12 @@ export default async function AdminImportsPage() {
         </p>
       </div>
 
+      {!canInspectImports && (
+        <p className="rounded-md border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+          Read-only view. A staff account needs the Customs &amp; Import Officer role to record inspected quantities, approve or reject declarations, or delete unreviewed declarations.
+        </p>
+      )}
+
       {/* ── Pending Review ─────────────────────────────────────── */}
       <Card>
         <CardHeader className="pb-2">

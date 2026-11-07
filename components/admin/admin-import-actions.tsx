@@ -2,13 +2,13 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { confirmImportArrival, rejectImportArrival } from "@/lib/actions/import.action";
+import { confirmImportArrival, deleteImportDeclaration, rejectImportArrival } from "@/lib/actions/import.action";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { AlertTriangle, CheckCircle, FileText, Loader2, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle, FileText, Loader2, Trash2, XCircle } from "lucide-react";
 
 interface AdminImportActionsProps {
   declarationId: string;
@@ -26,13 +26,15 @@ export function AdminImportActions({
   const [isPending, startTransition] = useTransition();
   const [showInspect, setShowInspect] = useState(false);
   const [showReject, setShowReject] = useState(false);
+  const [showDelete, setShowDelete] = useState(false);
   const [inspectedQuantity, setInspectedQuantity] = useState("");
   const [reviewerNote, setReviewerNote] = useState("");
   const [rejectReason, setRejectReason] = useState("");
+  const [deleteReason, setDeleteReason] = useState("");
   const [error, setError] = useState("");
   const qty = Number(inspectedQuantity);
   const discrepancyPct = qty > 0 ? Math.round((Math.abs(expectedQuantity - qty) / expectedQuantity) * 100) : 0;
-  const hasInvoice = Boolean(invoiceRef && supportingDoc.startsWith("/api/import-invoice/"));
+  const hasInvoice = supportingDoc.startsWith("/api/import-invoice/");
 
   function handleConfirm() {
     if (!Number.isFinite(qty) || qty <= 0) { setError("Enter the quantity physically verified by Customs."); return; }
@@ -63,6 +65,20 @@ export function AdminImportActions({
     });
   }
 
+  function handleDelete() {
+    if (!deleteReason.trim()) return;
+    startTransition(async () => {
+      try {
+        setError("");
+        await deleteImportDeclaration(declarationId, deleteReason.trim());
+        setShowDelete(false);
+        router.refresh();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to delete the unreviewed declaration.");
+      }
+    });
+  }
+
   return (
     <>
       <div className="flex flex-col gap-2">
@@ -74,15 +90,18 @@ export function AdminImportActions({
           {supportingDoc.startsWith("/api/import-invoice/") && (
             <a href={supportingDoc} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline"><FileText className="h-3 w-3" />View Invoice PDF</a>
           )}
-          {!hasInvoice && <p className="text-xs text-amber-700">Trader invoice documents are not attached yet. Approval requires an invoice reference and PDF.</p>}
+          {!hasInvoice && <p className="text-xs text-muted-foreground">No invoice is attached. An invoice is optional for physical inspection and approval.</p>}
         </div>
         {error && <div className="text-xs text-red-600">{error}</div>}
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" className="gap-1 text-emerald-700" onClick={() => { setError(""); setShowInspect(true); }} disabled={isPending || !hasInvoice}>
+          <Button variant="outline" size="sm" className="gap-1 text-emerald-700" onClick={() => { setError(""); setShowInspect(true); }} disabled={isPending}>
             <CheckCircle className="h-3.5 w-3.5" />Inspect &amp; approve
           </Button>
           <Button variant="outline" size="sm" className="gap-1 text-red-600" onClick={() => { setError(""); setShowReject(true); }} disabled={isPending}>
             <XCircle className="h-3.5 w-3.5" />Reject
+          </Button>
+          <Button variant="outline" size="sm" className="gap-1 text-red-700" onClick={() => { setError(""); setShowDelete(true); }} disabled={isPending}>
+            <Trash2 className="h-3.5 w-3.5" />Delete
           </Button>
         </div>
       </div>
@@ -92,7 +111,7 @@ export function AdminImportActions({
           <DialogHeader>
             <DialogTitle>Record Customs physical inspection</DialogTitle>
             <DialogDescription>
-              Enter only the quantity physically counted and verified by the authorized RRA officer. This value will be recorded as the approved arrival quantity and posted to stock.
+              Enter the quantity physically counted by the authorized Customs officer. This verified quantity will be recorded and posted to stock. An invoice is optional.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
@@ -119,6 +138,27 @@ export function AdminImportActions({
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowReject(false)} disabled={isPending}>Cancel</Button>
             <Button variant="destructive" onClick={handleReject} disabled={isPending || !rejectReason.trim()} className="gap-2">{isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}Reject declaration</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showDelete} onOpenChange={setShowDelete}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete unreviewed import declaration?</DialogTitle>
+            <DialogDescription>
+              This removes the pending declaration and its attached invoice, if present. Approved or rejected declarations cannot be deleted. The reason is retained in the RRA audit trail.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 py-2">
+            <div className="text-sm"><strong>{productName}</strong><div className="text-xs text-muted-foreground mt-1">Expected quantity: {expectedQuantity.toLocaleString()}</div></div>
+            <Label htmlFor={`delete-reason-${declarationId}`}>Reason for deletion</Label>
+            <Textarea id={`delete-reason-${declarationId}`} value={deleteReason} onChange={(event) => setDeleteReason(event.target.value)} rows={3} autoFocus placeholder="Explain why this unreviewed declaration should be removed." />
+            {error && <div className="text-sm text-red-600">{error}</div>}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowDelete(false)} disabled={isPending}>Cancel</Button>
+            <Button variant="destructive" onClick={handleDelete} disabled={isPending || !deleteReason.trim()} className="gap-2">{isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}Delete declaration</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

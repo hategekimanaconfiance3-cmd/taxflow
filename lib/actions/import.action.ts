@@ -1,5 +1,6 @@
 ﻿"use server";
 
+import { del } from "@vercel/blob";
 import { eq, desc, and, inArray, sql } from "drizzle-orm";
 import db from "@/db/drizzle";
 import { importDeclaration, product, productionMaterial, productionMaterialMovement, productionMaterialReceipt, stock, stockMovement, user, auditLog } from "@/db/schema";
@@ -8,7 +9,7 @@ import { hasRRAPermission } from "@/lib/rra-rbac";
 import { logAudit } from "@/lib/audit";
 import { createNotification } from "@/lib/notifications";
 import { emitToUser } from "@/lib/realtime";
-import { ensureImportDocumentExists, isImportFilenameForDeclaration } from "@/lib/import-files";
+import { ensureImportDocumentExists, importBlobPathname, isImportFilenameForDeclaration } from "@/lib/import-files";
 import { decimalToMicros, microsToDecimal, quantityToMicros } from "@/lib/material-accounting";
 import {
     confirmImportArrivalSchema,
@@ -245,12 +246,16 @@ export async function confirmImportArrival(
             throw new Error('Confidential material imports require the dedicated material receipt review permission.');
         }
         failureStage = "validate arrival details";
-        if (!declaration.invoiceRef || !declaration.supportingDoc) {
-            throw new Error("Declaration is missing the invoice reference or supporting PDF.");
-        }
-        const invoiceFilename = declaration.supportingDoc.match(/^\/api\/import-invoice\/(.+)$/)?.[1];
-        if (!invoiceFilename || !isImportFilenameForDeclaration(invoiceFilename, safeDeclarationId)) {
-            throw new Error("The attached invoice does not belong to this declaration.");
+        if (declaration.supportingDoc) {
+            const invoiceFilename = declaration.supportingDoc.match(/^\/api\/import-invoice\/(.+)$/)?.[1];
+            if (!invoiceFilename || !isImportFilenameForDeclaration(invoiceFilename, safeDeclarationId)) {
+                throw new Error("The attached invoice does not belong to this declaration.");
+            }
+            try {
+                await ensureImportDocumentExists(invoiceFilename);
+            } catch {
+                throw new Error("The attached invoice file is unavailable or invalid.");
+            }
         }
 
         // The Customs officer's physical inspection is the only source of the
@@ -396,8 +401,8 @@ export async function confirmImportArrival(
         const safeValidationMessage = error instanceof Error ? [
             "Import declaration not found",
             "Only unprocessed declarations can be confirmed.",
-            "Declaration is missing the invoice reference or supporting PDF.",
             "The attached invoice does not belong to this declaration.",
+            "The attached invoice file is unavailable or invalid.",
             "Inspected quantity must be finite and between 0 and 1,000,000,000.",
             "Declaration status changed concurrently; import was not activated.",
             "Import stock activation could not be confirmed.",
@@ -530,6 +535,101 @@ export async function rejectImportArrival(
         declarationId: safeDeclarationId,
         reason: safeReason,
     });
+
+    return { success: true };
+}
+
+// ---------------------------------------------------------------------------
+// RRA: Delete an unreviewed pre-declaration. Approved/rejected declarations
+// are retained for audit and inventory history.
+// ---------------------------------------------------------------------------
+
+export async function deleteImportDeclaration(declarationId: string, reason: string) {
+    const { staff, ...session } = await requireRRASession("customs_import_officer", "super_admin");
+    const parsedId = importDeclarationIdSchema.safeParse(declarationId);
+    if (!parsedId.success) throw new Error("Import declaration not found.");
+    const safeDeclarationId = parsedId.data;
+    const parsedReason = rejectImportArrivalSchema.safeParse(reason);
+    if (!parsedReason.success) throw new Error("A deletion reason is required and must be 2,000 characters or fewer.");
+    const safeReason = parsedReason.data;
+
+    const deleted = await db.transaction(async (tx) => {
+        const [declaration] = await tx
+            .select()
+            .from(importDeclaration)
+            .where(eq(importDeclaration.id, safeDeclarationId))
+            .for("update")
+            .limit(1);
+        if (!declaration) throw new Error("Import declaration not found.");
+        if (declaration.status !== "pending" && declaration.status !== "submitted") {
+            throw new Error("Only unreviewed declarations can be deleted.");
+        }
+
+        const [linkedReceipt] = await tx
+            .select({ id: productionMaterialReceipt.id })
+            .from(productionMaterialReceipt)
+            .where(eq(productionMaterialReceipt.importDeclarationId, safeDeclarationId))
+            .limit(1);
+        if (linkedReceipt) throw new Error("This declaration has linked material ledger evidence and cannot be deleted.");
+
+        const invoiceFilename = declaration.supportingDoc?.match(/^\/api\/import-invoice\/(.+)$/)?.[1];
+        const safeInvoiceFilename = invoiceFilename && isImportFilenameForDeclaration(invoiceFilename, safeDeclarationId)
+            ? invoiceFilename
+            : null;
+        const [removed] = await tx
+            .delete(importDeclaration)
+            .where(and(
+                eq(importDeclaration.id, safeDeclarationId),
+                inArray(importDeclaration.status, ["pending", "submitted"]),
+            ))
+            .returning({ id: importDeclaration.id });
+        if (!removed) throw new Error("Declaration status changed concurrently; it was not deleted.");
+
+        await tx.insert(auditLog).values({
+            userId: session.user.id,
+            action: "IMPORT_DECLARATION_DELETED_BY_RRA",
+            targetType: "import_declaration",
+            targetId: safeDeclarationId,
+            metadata: JSON.stringify({
+                declarationRef: declaration.declarationRef,
+                businessId: declaration.businessId,
+                productId: declaration.productId,
+                expectedQuantity: declaration.expectedQuantity,
+                customsRef: declaration.customsRef,
+                reason: safeReason,
+                deletedBy: staff.staffId,
+            }),
+        });
+
+        return { businessId: declaration.businessId, invoiceFilename: safeInvoiceFilename, declarationRef: declaration.declarationRef };
+    });
+
+    if (deleted.invoiceFilename) {
+        try {
+            await del(importBlobPathname(deleted.invoiceFilename));
+        } catch (error) {
+            console.error("Import declaration invoice cleanup failed after deletion", {
+                declarationId: safeDeclarationId,
+                error: error instanceof Error ? error.message : "Unknown Blob deletion error",
+            });
+        }
+    }
+
+    try {
+        await createNotification({
+            userId: deleted.businessId,
+            type: "compliance_alert",
+            title: "Import Declaration Removed",
+            message: `RRA removed your unreviewed import declaration${deleted.declarationRef ? ` ${deleted.declarationRef}` : ""}. Reason: ${safeReason}`,
+            link: "/dashboard/imports",
+        });
+        emitToUser(deleted.businessId, "import:deleted", { declarationId: safeDeclarationId, reason: safeReason });
+    } catch (error) {
+        console.error("Import declaration deletion notification failed", {
+            declarationId: safeDeclarationId,
+            error: error instanceof Error ? error.message : "Unknown notification error",
+        });
+    }
 
     return { success: true };
 }
