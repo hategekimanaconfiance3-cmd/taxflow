@@ -7,7 +7,6 @@ import { paymentMethod } from "@/db/schema";
 import { requireTraderSession } from "@/lib/auth-guard";
 import { logAudit } from "@/lib/audit";
 import { maskIdentifier } from "@/lib/utils/payment-masking";
-export { maskIdentifier } from "@/lib/utils/payment-masking";
 
 // ---------------------------------------------------------------------------
 // Helpers
