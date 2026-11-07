@@ -76,7 +76,7 @@ export function ManufacturingActivityWorkspace({ initialManufacturers, initialAc
   const [isLoadingActivity, setIsLoadingActivity] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [statusOpen, setStatusOpen] = useState(false);
-  const [statusAction, setStatusAction] = useState<"under_review" | "suspended" | "restore">("under_review");
+  const [statusAction, setStatusAction] = useState<"under_review" | "suspended" | "restore" | "unsuspend">("under_review");
   const [isSaving, setIsSaving] = useState(false);
 
   const searchForm = useForm<SearchFields>({ resolver: zodResolver(searchSchema), defaultValues: { search: "" } });
@@ -170,7 +170,9 @@ export function ManufacturingActivityWorkspace({ initialManufacturers, initialAc
         ? "Account suspended, active sessions revoked, and audit recorded."
         : statusAction === "restore"
           ? "Account restored to the status before its latest account action. The correction was recorded as a new audit event."
-          : "Account marked for review and audit recorded.",
+          : statusAction === "unsuspend"
+            ? "Account unsuspended and set to approved. The action was recorded in the audit log."
+            : "Account marked for review and audit recorded.",
     });
   }
 
@@ -225,7 +227,14 @@ export function ManufacturingActivityWorkspace({ initialManufacturers, initialAc
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {canEditProfiles ? <Button variant="outline" onClick={() => { profileForm.reset({ name: selected.name, businessName: selected.businessName ?? "", reason: "" }); setProfileOpen(true); }}>Edit business names</Button> : null}
-                  {canManageAccounts && (selected.isActive || selected.clearanceStatus === "suspended") ? <Button variant={selected.clearanceStatus === "suspended" ? "outline" : "destructive"} onClick={() => { setStatusAction(selected.clearanceStatus === "suspended" ? "restore" : "under_review"); statusForm.reset({ reason: "" }); setStatusOpen(true); }}><ShieldAlert className="size-4" />{selected.clearanceStatus === "suspended" ? "Restore account" : "Manage account"}</Button> : null}
+                  {canManageAccounts && selected.clearanceStatus === "suspended" ? (
+                    <>
+                      <Button variant="default" onClick={() => { setStatusAction("unsuspend"); statusForm.reset({ reason: "" }); setStatusOpen(true); }}><ShieldAlert className="size-4" />Unsuspend account</Button>
+                      <Button variant="outline" onClick={() => { setStatusAction("restore"); statusForm.reset({ reason: "" }); setStatusOpen(true); }}>Restore previous status</Button>
+                    </>
+                  ) : canManageAccounts && selected.isActive ? (
+                    <Button variant="destructive" onClick={() => { setStatusAction("under_review"); statusForm.reset({ reason: "" }); setStatusOpen(true); }}><ShieldAlert className="size-4" />Manage account</Button>
+                  ) : null}
                 </div>
               </CardHeader>
             </Card>
@@ -254,15 +263,15 @@ export function ManufacturingActivityWorkspace({ initialManufacturers, initialAc
 
       <Dialog open={statusOpen} onOpenChange={setStatusOpen}>
         <DialogContent>
-          <DialogHeader><DialogTitle>{statusAction === "restore" ? "Restore manufacturer account" : "Manage manufacturer account"}</DialogTitle><DialogDescription>{statusAction === "restore" ? "Restore the status and active state recorded immediately before the latest account action. This creates a new audited event and preserves the original history." : "Choose a controlled status action and record the reason. Suspension deactivates the account and revokes active sessions."}</DialogDescription></DialogHeader>
-          {statusAction !== "restore" || selected?.clearanceStatus === "under_review" ? <div className="grid gap-2 sm:grid-cols-2">
+          <DialogHeader><DialogTitle>{statusAction === "restore" ? "Restore manufacturer account" : statusAction === "unsuspend" ? "Unsuspend manufacturer account" : "Manage manufacturer account"}</DialogTitle><DialogDescription>{statusAction === "restore" ? "Restore the status and active state recorded immediately before the latest account action. This creates a new audited event and preserves the original history." : statusAction === "unsuspend" ? "Directly unsuspend this account and set it to approved. Provide a mandatory reason. This action is recorded in the audit log." : "Choose a controlled status action and record the reason. Suspension deactivates the account and revokes active sessions."}</DialogDescription></DialogHeader>
+          {statusAction !== "restore" && statusAction !== "unsuspend" || selected?.clearanceStatus === "under_review" ? <div className="grid gap-2 sm:grid-cols-2">
             <Button type="button" variant={statusAction === "under_review" ? "default" : "outline"} onClick={() => setStatusAction("under_review")}>Mark under review</Button>
             <Button type="button" variant={statusAction === "suspended" ? "destructive" : "outline"} onClick={() => setStatusAction("suspended")}>Suspend account</Button>
             {selected?.clearanceStatus === "under_review" ? <Button type="button" variant={statusAction === "restore" ? "default" : "outline"} onClick={() => setStatusAction("restore")}>Restore previous status</Button> : null}
           </div> : null}
           <form className="grid gap-4" onSubmit={statusForm.handleSubmit(submitStatus)}>
             <div className="grid gap-2"><Label htmlFor="status-reason">Required reason</Label><Textarea id="status-reason" rows={4} {...statusForm.register("reason")} />{statusForm.formState.errors.reason ? <p className="text-sm text-destructive">{statusForm.formState.errors.reason.message}</p> : null}</div>
-            <DialogFooter><Button type="button" variant="outline" onClick={() => setStatusOpen(false)}>Cancel</Button><Button type="submit" variant={statusAction === "suspended" ? "destructive" : "default"} disabled={isSaving}>{isSaving ? "Applying…" : statusAction === "suspended" ? "Suspend and revoke sessions" : statusAction === "restore" ? "Restore previous status" : "Mark for review"}</Button></DialogFooter>
+            <DialogFooter><Button type="button" variant="outline" onClick={() => setStatusOpen(false)}>Cancel</Button><Button type="submit" variant={statusAction === "suspended" ? "destructive" : "default"} disabled={isSaving}>{isSaving ? "Applying…" : statusAction === "suspended" ? "Suspend and revoke sessions" : statusAction === "restore" ? "Restore previous status" : statusAction === "unsuspend" ? "Unsuspend and approve account" : "Mark for review"}</Button></DialogFooter>
           </form>
         </DialogContent>
       </Dialog>

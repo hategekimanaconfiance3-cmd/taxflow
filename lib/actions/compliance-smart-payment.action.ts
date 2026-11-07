@@ -13,7 +13,7 @@ import {
 import { requireTraderSession } from "@/lib/auth-guard";
 import { smartTaxPaymentSchema } from "@/lib/validation/tax-payment.schema";
 import { canInitiateTaxPayment } from "@/lib/payment-engine/domain";
-import { maskIdentifier } from "@/lib/actions/payment-method.action";
+import { maskIdentifier } from "@/lib/utils/payment-masking";
 
 // ---------------------------------------------------------------------------
 // Smart Tax Payment — 95–100% partial payment + saved methods

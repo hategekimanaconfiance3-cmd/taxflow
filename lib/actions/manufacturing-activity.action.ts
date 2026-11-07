@@ -30,7 +30,7 @@ const profileEditSchema = z.object({
 
 const accountStatusSchema = z.object({
   manufacturerId: z.string().trim().min(1).max(128),
-  status: z.enum(["under_review", "suspended", "restore"]),
+  status: z.enum(["under_review", "suspended", "restore", "unsuspend"]),
   reason: z.string().trim().min(10).max(500),
 });
 
@@ -474,6 +474,39 @@ export async function setManufacturerAccountStatus(
         );
 
         return { success: true, data: { status: previousStatusValue, isActive: true } };
+      }
+
+      // Direct unsuspend — sets the account to approved and re-activates it
+      if (values.status === "unsuspend") {
+        if (target.clearanceStatus !== "suspended" && target.isActive) {
+          return { success: false, error: "This manufacturer is not suspended." };
+        }
+        await tx
+          .update(user)
+          .set({ clearanceStatus: "approved", isActive: true })
+          .where(eq(user.id, values.manufacturerId));
+
+        await logAudit(
+          {
+            userId: actor.id,
+            action: "MANUFACTURER_ACCOUNT_RESTORED",
+            targetType: "user",
+            targetId: values.manufacturerId,
+            metadata: {
+              previousStatus: target.clearanceStatus,
+              newStatus: "approved",
+              previousActive: target.isActive,
+              newActive: true,
+              reason: values.reason,
+              method: "direct_unsuspend",
+            },
+            beforeState: { clearanceStatus: target.clearanceStatus, isActive: target.isActive },
+            afterState: { clearanceStatus: "approved", isActive: true },
+          },
+          async (entry) => { await tx.insert(auditLog).values(entry); },
+        );
+
+        return { success: true, data: { status: "approved", isActive: true } };
       }
 
       if (target.clearanceStatus === "suspended" || target.isActive === false) {
