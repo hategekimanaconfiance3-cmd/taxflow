@@ -6,21 +6,14 @@ import db from "@/db/drizzle";
 import { paymentMethod } from "@/db/schema";
 import { requireTraderSession } from "@/lib/auth-guard";
 import { logAudit } from "@/lib/audit";
-import { maskIdentifier } from "@/lib/utils/payment-masking";
+import { maskIdentifier, PAYMENT_PROVIDERS, PROVIDER_LABELS } from "@/lib/utils/payment-masking";
+export type { PaymentMethodProvider } from "@/lib/utils/payment-masking";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-const PROVIDERS = ["mtn_mobile_money", "airtel_money", "bank_transfer"] as const;
-export type PaymentMethodProvider = (typeof PROVIDERS)[number];
-
-export const PROVIDER_LABELS: Record<PaymentMethodProvider, string> = {
-  mtn_mobile_money: "MTN Mobile Money",
-  airtel_money: "Airtel Money",
-  bank_transfer: "Bank Transfer",
-};
-
+const PROVIDERS = PAYMENT_PROVIDERS;
 
 // ---------------------------------------------------------------------------
 // Validation schemas

@@ -15,3 +15,12 @@ export function maskIdentifier(raw: string, provider: string): string {
   const masked = "*".repeat(Math.max(1, digits.length - prefix.length - suffix.length));
   return `+${prefix} ${masked} ${suffix}`;
 }
+
+export const PAYMENT_PROVIDERS = ["mtn_mobile_money", "airtel_money", "bank_transfer"] as const;
+export type PaymentMethodProvider = (typeof PAYMENT_PROVIDERS)[number];
+
+export const PROVIDER_LABELS: Record<PaymentMethodProvider, string> = {
+  mtn_mobile_money: "MTN Mobile Money",
+  airtel_money: "Airtel Money",
+  bank_transfer: "Bank Transfer",
+};
