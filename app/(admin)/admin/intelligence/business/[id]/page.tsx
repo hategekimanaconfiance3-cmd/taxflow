@@ -82,7 +82,7 @@ export default async function BusinessIntelligencePage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
+  await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer", "tax_audit_officer", "revenue_investigator");
   const { id } = await params;
 
   // ── Fetch trader profile ─────────────────────────────────────────────────

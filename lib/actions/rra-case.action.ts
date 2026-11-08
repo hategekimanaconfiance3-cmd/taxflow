@@ -20,6 +20,7 @@ const REVIEW_ROLES = [
   "audit_officer",
   "tax_compliance_officer",
   "audit_investigation_officer",
+  "revenue_investigator",
   "super_admin",
 ] as const;
 

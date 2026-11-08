@@ -10,7 +10,7 @@ import { requireRRASession } from "@/lib/auth-guard";
 // ---------------------------------------------------------------------------
 
 export async function getTraderStock(traderId: string) {
-    await requireRRASession("stock_officer", "audit_officer", "correction_officer", "product_traceability_officer", "audit_investigation_officer");
+    await requireRRASession("stock_officer", "audit_officer", "correction_officer", "product_traceability_officer", "audit_investigation_officer", "tax_audit_officer", "revenue_investigator");
 
     const inventory = await db
         .select({
@@ -51,7 +51,7 @@ function parseDateFilter(value: string | undefined, label: string): Date | undef
 }
 
 export async function getSystemStockOverview(filters: StockOverviewDateFilters = {}) {
-    await requireRRASession("stock_officer", "audit_officer", "correction_officer", "product_traceability_officer", "audit_investigation_officer");
+    await requireRRASession("stock_officer", "audit_officer", "correction_officer", "product_traceability_officer", "audit_investigation_officer", "tax_audit_officer", "revenue_investigator");
 
     const dateFrom = parseDateFilter(filters.dateFrom, "start");
     const dateTo = parseDateFilter(filters.dateTo, "end");

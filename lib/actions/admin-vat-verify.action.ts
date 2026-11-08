@@ -35,6 +35,7 @@ export async function getVatVerification(): Promise<VatDiscrepancy[]> {
         "audit_officer",
         "tax_compliance_officer",
         "audit_investigation_officer",
+        "tax_audit_officer",
     );
 
     // 1. Get declared VAT from vatRecord table (grouped by user + type)

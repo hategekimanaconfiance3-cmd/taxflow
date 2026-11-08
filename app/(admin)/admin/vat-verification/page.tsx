@@ -32,6 +32,7 @@ export default async function AdminVatVerificationPage() {
     "audit_officer",
     "tax_compliance_officer",
     "audit_investigation_officer",
+    "tax_audit_officer",
   );
 
   // All roles above are also accepted by getVatVerification(), so no

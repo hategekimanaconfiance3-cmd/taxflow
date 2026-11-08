@@ -14,6 +14,7 @@ export default async function RraCasesPage() {
     "audit_officer",
     "tax_compliance_officer",
     "audit_investigation_officer",
+    "revenue_investigator",
     "super_admin",
   );
   const cases = await getRraCases();

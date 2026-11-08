@@ -7,6 +7,7 @@ const LEGACY_ROLE_LABELS: Partial<Record<RRARole, string>> = {
   stock_officer: 'Legacy · Stock Monitoring Officer',
   correction_officer: 'Legacy · Correction Officer',
   reporting_officer: 'Legacy · Reporting & Analytics',
+  audit_investigation_officer: 'Legacy · Audit & Investigation Officer',
 };
 
 export const STAFF_ROLE_OPTIONS = RRA_ROLE_VALUES.map((value) => {

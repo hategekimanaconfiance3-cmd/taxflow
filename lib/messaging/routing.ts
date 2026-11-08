@@ -39,12 +39,12 @@ export const DEFAULT_MESSAGING_ROUTES: MessagingRouteRule[] = [
   { category: 'tin_registration', department: null, roles: ['tax_compliance_officer', 'compliance_officer'] },
   { category: 'vat_invoice', department: null, roles: ['tax_compliance_officer', 'payments_reconciliation_officer', 'compliance_officer'] },
   { category: 'tax_payment', department: null, roles: ['payments_reconciliation_officer', 'compliance_officer'] },
-  { category: 'production', department: null, roles: ['audit_investigation_officer', 'product_traceability_officer', 'audit_officer', 'stock_officer'] },
-  { category: 'inventory_transactions', department: null, roles: ['product_traceability_officer', 'audit_investigation_officer', 'stock_officer', 'audit_officer'] },
+  { category: 'production', department: null, roles: ['audit_investigation_officer', 'tax_audit_officer', 'revenue_investigator', 'product_traceability_officer', 'audit_officer', 'stock_officer'] },
+  { category: 'inventory_transactions', department: null, roles: ['product_traceability_officer', 'audit_investigation_officer', 'tax_audit_officer', 'revenue_investigator', 'stock_officer', 'audit_officer'] },
   { category: 'imports', department: null, roles: ['customs_import_officer', 'compliance_officer'] },
-  { category: 'dispute_assessment', department: null, roles: ['audit_investigation_officer', 'tax_compliance_officer', 'audit_officer', 'compliance_officer'] },
-  { category: 'account_access', department: null, roles: ['compliance_officer', 'tax_compliance_officer'] },
-  { category: 'general', department: null, roles: ['compliance_officer', 'tax_compliance_officer', 'super_admin'] },
+  { category: 'dispute_assessment', department: null, roles: ['audit_investigation_officer', 'revenue_investigator', 'tax_compliance_officer', 'audit_officer', 'compliance_officer'] },
+  { category: 'account_access', department: null, roles: ['compliance_officer', 'tax_compliance_officer', 'taxpayer_support_officer'] },
+  { category: 'general', department: null, roles: ['compliance_officer', 'tax_compliance_officer', 'taxpayer_support_officer', 'super_admin'] },
 ];
 
 const KEYWORDS: Record<Exclude<MessageCategory, 'general'>, string[]> = {

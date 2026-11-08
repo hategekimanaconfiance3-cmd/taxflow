@@ -38,6 +38,8 @@ export default async function AdminStockPage({
     'correction_officer',
     'product_traceability_officer',
     'audit_investigation_officer',
+    'tax_audit_officer',
+    'revenue_investigator',
   );
 
   const canCorrect = staff.clearanceRoles.some((role) =>

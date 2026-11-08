@@ -3,7 +3,7 @@ import { hasRRAPermission } from "@/lib/rra-rbac";
 import { ProductJourneyExplorer } from "@/components/admin/product-journey-explorer";
 
 export default async function ProductJourneyPage() {
-    const { staff } = await requireRRASession("audit_officer", "stock_officer", "audit_investigation_officer", "product_traceability_officer");
+    const { staff } = await requireRRASession("audit_officer", "stock_officer", "audit_investigation_officer", "tax_audit_officer", "revenue_investigator", "product_traceability_officer");
     const canReadProductionFormula = staff.clearanceRoles.some((role) => role !== "super_admin" && hasRRAPermission(role, "production.formula.read"));
     return (
         <div className="flex flex-col gap-6">

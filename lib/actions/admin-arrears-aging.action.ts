@@ -48,7 +48,7 @@ function getAgingBucket(days: number): AgingBucket {
 // ---------------------------------------------------------------------------
 
 export async function getArrearsAging(): Promise<ArrearsAgingSummary> {
-    await requireRRASession("compliance_officer", "audit_officer", "reporting_officer", "tax_compliance_officer", "audit_investigation_officer");
+    await requireRRASession("compliance_officer", "audit_officer", "reporting_officer", "tax_compliance_officer", "tax_audit_officer", "audit_investigation_officer");
 
     // Get all traders
     const traders = await db

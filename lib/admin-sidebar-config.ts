@@ -38,7 +38,7 @@ import {
     Landmark,
     SlidersHorizontal,
 } from "lucide-react";
-import { RRA_ROLE_VALUES, type RRARole } from "@/lib/rra-rbac";
+import { hasRRAPermission, type RRARole } from "@/lib/rra-rbac";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -76,7 +76,11 @@ export const ROLE_LABELS: Record<RRARole, string> = {
     super_admin: "Super Admin",
     director_executive: "RRA Director / Executive",
     tax_compliance_officer: "Tax Compliance Officer",
-    audit_investigation_officer: "Audit & Investigation Officer",
+    tax_audit_officer: "Tax Auditor",
+    revenue_investigator: "Revenue Investigator",
+    taxpayer_support_officer: "Taxpayer Support Officer",
+    taxpayer_registration_officer: "Taxpayer Registration Officer",
+    audit_investigation_officer: "Legacy · Audit & Investigation Officer",
     product_traceability_officer: "Product Traceability Officer",
     customs_import_officer: "Customs & Import Officer",
     payments_reconciliation_officer: "Tax Payments & Reconciliation Officer",
@@ -92,6 +96,10 @@ export const ROLE_LABELS: Record<RRARole, string> = {
 export const ROLE_COLORS: Record<RRARole, string> = {
     director_executive: "bg-cyan-500/10 text-cyan-700 border-cyan-200",
     tax_compliance_officer: "bg-violet-500/10 text-violet-700 border-violet-200",
+    tax_audit_officer: "bg-amber-500/10 text-amber-700 border-amber-200",
+    revenue_investigator: "bg-rose-500/10 text-rose-700 border-rose-200",
+    taxpayer_support_officer: "bg-teal-500/10 text-teal-700 border-teal-200",
+    taxpayer_registration_officer: "bg-sky-500/10 text-sky-700 border-sky-200",
     audit_investigation_officer: "bg-amber-500/10 text-amber-700 border-amber-200",
     product_traceability_officer: "bg-blue-500/10 text-blue-700 border-blue-200",
     customs_import_officer: "bg-orange-500/10 text-orange-700 border-orange-200",
@@ -118,6 +126,10 @@ const ALL: RRARole[] = [
     "correction_officer",
     "reporting_officer",
     "tax_compliance_officer",
+    "tax_audit_officer",
+    "revenue_investigator",
+    "taxpayer_support_officer",
+    "taxpayer_registration_officer",
     "audit_investigation_officer",
     "product_traceability_officer",
     "customs_import_officer",
@@ -128,7 +140,7 @@ const ALL: RRARole[] = [
 ];
 
 // super_admin has taxpayer.intelligence.search; stock_control_admin does not.
-const TAXPAYER_SEARCH_ROLES = ALL.filter((role) => role !== "stock_control_admin");
+const TAXPAYER_SEARCH_ROLES = ALL.filter((role) => hasRRAPermission(role, "taxpayer.intelligence.search"));
 
 // ---------------------------------------------------------------------------
 // Navigation groups -- ordered by operational priority
@@ -176,10 +188,16 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 allowedRoles: TAXPAYER_SEARCH_ROLES,
             },
             {
+                label: "Taxpayer Registration",
+                href: "/admin/taxpayer-registration",
+                icon: UserCheck,
+                allowedRoles: ["super_admin", "tax_compliance_officer", "taxpayer_registration_officer", "compliance_officer"],
+            },
+            {
                 label: "Manufacturing Activity",
                 href: "/admin/manufacturing-activity",
                 icon: Package,
-                allowedRoles: [...RRA_ROLE_VALUES] as RRARole[],
+                allowedRoles: ALL.filter((role) => !["taxpayer_support_officer", "taxpayer_registration_officer"].includes(role)),
             },
             {
                 label: "Taxpayer Corrections",
@@ -195,6 +213,7 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                     "super_admin",
                     "audit_officer",
                     "audit_investigation_officer",
+                    "tax_audit_officer",
                 ],
             },
             {
@@ -229,6 +248,8 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                     "stock_officer",
                     "audit_investigation_officer",
                     "product_traceability_officer",
+                    "tax_audit_officer",
+                    "revenue_investigator",
                     "director_executive",
                     "data_ai_analyst",
                 ],
@@ -242,6 +263,8 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                     "stock_officer",
                     "audit_investigation_officer",
                     "product_traceability_officer",
+                    "tax_audit_officer",
+                    "revenue_investigator",
                 ],
             },
             {
@@ -254,6 +277,8 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                     "correction_officer",
                     "product_traceability_officer",
                     "audit_investigation_officer",
+                    "tax_audit_officer",
+                    "revenue_investigator",
                 ],
             },
             {
@@ -263,6 +288,8 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 allowedRoles: [
                     "compliance_officer",
                     "audit_officer",
+                    "tax_audit_officer",
+                    "revenue_investigator",
                 ],
             },
         ],
@@ -279,6 +306,8 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                     "super_admin",
                     "compliance_officer",
                     "reporting_officer",
+                    "tax_compliance_officer",
+                    "tax_audit_officer",
                     "payments_reconciliation_officer",
                 ],
             },
@@ -310,6 +339,7 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                     "reporting_officer",
                     "director_executive",
                     "data_ai_analyst",
+                    "tax_audit_officer",
                 ],
             },
             {
@@ -358,6 +388,7 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                     "audit_officer",
                     "tax_compliance_officer",
                     "audit_investigation_officer",
+                    "tax_audit_officer",
                 ],
             },
             {
@@ -380,6 +411,8 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                             "audit_officer",
                             "tax_compliance_officer",
                             "audit_investigation_officer",
+                            "tax_audit_officer",
+                            "revenue_investigator",
                             "data_ai_analyst",
                         ],
                     },
@@ -392,6 +425,8 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                             "audit_officer",
                             "tax_compliance_officer",
                             "audit_investigation_officer",
+                            "tax_audit_officer",
+                            "revenue_investigator",
                             "data_ai_analyst",
                         ],
                     },
@@ -404,6 +439,8 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                             "audit_officer",
                             "tax_compliance_officer",
                             "audit_investigation_officer",
+                            "tax_audit_officer",
+                            "revenue_investigator",
                         ],
                     },
                     {
@@ -440,6 +477,8 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                     "super_admin",
                     "audit_officer",
                     "audit_investigation_officer",
+                    "tax_audit_officer",
+                    "revenue_investigator",
                 ],
             },
             {
@@ -452,6 +491,8 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                     "audit_officer",
                     "tax_compliance_officer",
                     "audit_investigation_officer",
+                    "tax_audit_officer",
+                    "revenue_investigator",
                 ],
             },
             {
@@ -482,7 +523,7 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 label: "Messages",
                 href: "/admin/messages",
                 icon: MessageSquare,
-                allowedRoles: ["super_admin", "director_executive", "tax_compliance_officer", "audit_investigation_officer", "product_traceability_officer", "customs_import_officer", "payments_reconciliation_officer", "compliance_officer", "audit_officer", "stock_officer", "correction_officer", "reporting_officer"],
+                allowedRoles: ["super_admin", "director_executive", "tax_compliance_officer", "audit_investigation_officer", "tax_audit_officer", "revenue_investigator", "taxpayer_support_officer", "product_traceability_officer", "customs_import_officer", "payments_reconciliation_officer", "compliance_officer", "audit_officer", "stock_officer", "correction_officer", "reporting_officer"],
             },
         ],
     },
