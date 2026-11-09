@@ -131,23 +131,26 @@ async function runBuyerDecision<T>(
 // ---------------------------------------------------------------------------
 
 /**
- * Releases stale active reservations and expires legacy pending transactions.
- * Called lazily before queries and transaction actions; active pending pages
- * also refresh periodically so holds are released shortly after expiry.
+ * Releases a bounded batch of the current user's stale reservations and legacy
+ * pending transactions. Active pending pages also refresh periodically, so a
+ * large system-wide backlog is handled incrementally without blocking a sale.
  */
-async function expireStalePendingTransactions(): Promise<void> {
+async function expireStalePendingTransactions(actorUserId: string): Promise<void> {
   try {
     const now = new Date();
     const config = await getSystemConfig();
     const legacyCutoff = new Date(now.getTime() - config.buyerConfirmationWindowHours * 60 * 60 * 1000);
+    const actorTransactions = or(eq(transaction.sellerId, actorUserId), eq(transaction.buyerId, actorUserId));
     const [legacyPending, expiredReservations] = await Promise.all([
       db.select({ id: transaction.id }).from(transaction)
-        .where(and(eq(transaction.status, 'pending'), lt(transaction.createdAt, legacyCutoff))),
+        .where(and(eq(transaction.status, 'pending'), lt(transaction.createdAt, legacyCutoff), actorTransactions))
+        .orderBy(asc(transaction.createdAt)).limit(25),
       db.select({ id: transaction.id }).from(transaction)
         .innerJoin(stockReservation, eq(stockReservation.transactionId, transaction.id))
-        .where(and(eq(transaction.status, 'pending'), eq(stockReservation.status, 'active'), lt(stockReservation.expiresAt, now))),
+        .where(and(eq(transaction.status, 'pending'), eq(stockReservation.status, 'active'), lt(stockReservation.expiresAt, now), actorTransactions))
+        .orderBy(asc(transaction.createdAt)).limit(25),
     ]);
-    const stalePendingIds = new Set([...legacyPending, ...expiredReservations].map(({ id }) => id));
+    const stalePendingIds = new Set([...legacyPending, ...expiredReservations].map(({ id }) => id).slice(0, 10));
 
     for (const id of stalePendingIds) {
       try {
@@ -228,7 +231,7 @@ async function createSaleForConfirmationInternal(data: {
   const { suspended, clearanceStatus, ...session } = await requireApprovedClearance();
   if (suspended) throw new Error(`Your account is ${clearanceStatus}. Cannot create transactions.`);
   setFailureStage('expire stale sales');
-  await expireStalePendingTransactions();
+  await expireStalePendingTransactions(session.user.id);
   const sellerRole = session.user.role as TraderRole;
   if (sellerRole === 'retailer') throw new Error('Retailers must use consumer sales instead.');
   if (!/^\d{9}$/.test(data.buyerTin)) throw new Error('Buyer TIN must contain exactly 9 digits.');
@@ -454,7 +457,7 @@ export async function confirmTransaction(transactionId: string) {
     return { success: false as const, error: `Your account is ${clearanceStatus}. Cannot confirm transactions.` };
   }
 
-  await expireStalePendingTransactions();
+  await expireStalePendingTransactions(session.user.id);
 
   const confirmationResult = await runBuyerDecision('confirm', () => withTransactionRetry(() => db.transaction(async (tx) => {
     // Serialize concurrent confirmations by locking the transaction row first.
@@ -676,7 +679,7 @@ export async function confirmTransaction(transactionId: string) {
 
 export async function rejectTransaction(transactionId: string) {
   const session = await requireTraderSession();
-  await expireStalePendingTransactions();
+  await expireStalePendingTransactions(session.user.id);
 
   const rejectionResult = await runBuyerDecision('reject', () => withTransactionRetry(() => db.transaction(async (tx) => {
     const [lockedTxn] = await tx
@@ -739,7 +742,7 @@ export async function rejectTransaction(transactionId: string) {
 
 export async function cancelTransaction(transactionId: string) {
   const session = await requireTraderSession();
-  await expireStalePendingTransactions();
+  await expireStalePendingTransactions(session.user.id);
   const cancellation = await withTransactionRetry(() => db.transaction(async (tx) => {
     const [lockedTxn] = await tx.select().from(transaction).where(eq(transaction.id, transactionId)).for('update').limit(1);
     if (!lockedTxn || lockedTxn.sellerId !== session.user.id || lockedTxn.status !== 'pending') {
@@ -983,7 +986,7 @@ export async function getOutgoingTransactions() {
   const session = await requireTraderSession();
 
   // Expire any stale pending transactions before querying
-  await expireStalePendingTransactions();
+  await expireStalePendingTransactions(session.user.id);
   const config = await getSystemConfig();
   const rows = await db
     .select({
@@ -1023,7 +1026,7 @@ export async function getIncomingTransactions() {
   const session = await requireTraderSession();
 
   // Expire any stale pending transactions before querying
-  await expireStalePendingTransactions();
+  await expireStalePendingTransactions(session.user.id);
   const config = await getSystemConfig();
   const rows = await db
     .select({
