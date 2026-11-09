@@ -37,6 +37,7 @@ interface AdminDisputeActionsProps {
     reason: string;
     counterpartyResponse: string;
     counterpartyNote: string | null;
+    hasFulfillmentAcceptance: boolean;
 }
 
 const ACTION_OPTIONS: {
@@ -47,7 +48,7 @@ const ACTION_OPTIONS: {
         {
             value: "undo_transaction",
             label: "Undo Transaction",
-            description: "Reverse inventory and VAT. This is blocked if the buyer has already used the purchased stock.",
+            description: "Reverse inventory and VAT. Unavailable when B2B acceptance or fulfillment evidence exists because inventory disposition requires a separate review.",
         },
         {
             value: "adjust_amount",
@@ -74,6 +75,7 @@ export function AdminDisputeActions({
     reason,
     counterpartyResponse,
     counterpartyNote,
+    hasFulfillmentAcceptance,
 }: AdminDisputeActionsProps) {
     const router = useRouter();
     const [isPending, startTransition] = useTransition();
@@ -254,6 +256,7 @@ export function AdminDisputeActions({
                                         <SelectItem
                                             key={opt.value}
                                             value={opt.value}
+                                            disabled={hasFulfillmentAcceptance && opt.value === "undo_transaction"}
                                         >
                                             <div>
                                                 <span className="font-medium">
@@ -267,6 +270,11 @@ export function AdminDisputeActions({
                             {selectedAction && (
                                 <p className="text-xs text-muted-foreground">
                                     {selectedAction.description}
+                                </p>
+                            )}
+                            {hasFulfillmentAcceptance && (
+                                <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+                                    This transaction has B2B order acceptance evidence. Adjust Amount, Uphold Dispute, and Dismiss remain available because they do not change inventory. Undo Transaction is disabled here to protect stock; it requires the fulfillment-aware reversal process.
                                 </p>
                             )}
                             <div className="space-y-2">

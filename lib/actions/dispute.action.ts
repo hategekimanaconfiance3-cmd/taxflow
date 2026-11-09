@@ -377,10 +377,12 @@ export async function getAllDisputes() {
             filedByTin: filer.tin,
             counterpartyName: counterparty.name,
             counterpartyTin: counterparty.tin,
+            hasFulfillmentAcceptance: sql<boolean>`${b2bOrderAcceptance.id} IS NOT NULL`.as("has_fulfillment_acceptance"),
         })
         .from(dispute)
         .innerJoin(filer, eq(dispute.filedById, filer.id))
         .innerJoin(counterparty, eq(dispute.counterpartyId, counterparty.id))
+        .leftJoin(b2bOrderAcceptance, eq(b2bOrderAcceptance.transactionId, dispute.transactionId))
         .where(notInArray(dispute.status, ["resolved", "dismissed"]))
         .orderBy(desc(dispute.createdAt));
 }
@@ -625,8 +627,8 @@ export async function resolveDispute(
         if (!txn) throw new Error("Disputed transaction not found");
         const [fulfillmentAcceptance] = await tx.select({ id: b2bOrderAcceptance.id })
             .from(b2bOrderAcceptance).where(eq(b2bOrderAcceptance.transactionId, txn.id)).limit(1);
-        if (fulfillmentAcceptance) {
-            throw new Error("This transaction has separate B2B fulfillment evidence. Dispute financial resolution is disabled until the fulfillment-aware stock and VAT disposition workflow is completed.");
+        if (fulfillmentAcceptance && data.action === "undo_transaction") {
+            throw new Error("This B2B order has acceptance or fulfillment evidence. Undo is unavailable here because it would change stock; use the fulfillment-aware reversal process. Adjust amount, uphold, or dismiss can still resolve the financial dispute without changing inventory.");
         }
 
         const transactionVatRecords = await tx
@@ -775,7 +777,7 @@ export async function resolveDispute(
             "Dispute not found",
             "This dispute has already been finalized",
             "Disputed transaction not found",
-            "This transaction has separate B2B fulfillment evidence. Dispute financial resolution is disabled until the fulfillment-aware stock and VAT disposition workflow is completed.",
+            "This B2B order has acceptance or fulfillment evidence. Undo is unavailable here because it would change stock; use the fulfillment-aware reversal process. Adjust amount, uphold, or dismiss can still resolve the financial dispute without changing inventory.",
             "VAT records are missing; dispute requires manual review.",
             "VAT record freeze state is inconsistent; dispute requires manual review.",
             "Transaction cannot be undone because the buyer no longer has the purchased stock.",

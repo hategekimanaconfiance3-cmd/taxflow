@@ -58,6 +58,7 @@ export default async function AdminDisputesPage() {
                   reason={dispute.reason}
                   counterpartyResponse={dispute.counterpartyResponse ?? 'pending'}
                   counterpartyNote={dispute.counterpartyNote}
+                  hasFulfillmentAcceptance={dispute.hasFulfillmentAcceptance}
                 />
               </div>
             ))
