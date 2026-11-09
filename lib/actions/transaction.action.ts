@@ -1,6 +1,9 @@
 'use server';
 
-import { eq, and, or, asc, desc, lt, sql } from 'drizzle-orm';
+import { after } from 'next/server';
+import { eq, and, or, asc, desc, lt, sql, inArray } from 'drizzle-orm';
+import { withActionDeadline } from '@/lib/action-deadline';
+import { createSaleTransactionId } from '@/lib/transaction-idempotency';
 import db from '@/db/drizzle';
 import { transaction, stock, stockMovement, stockReservation, vatRecord, product, user, auditLog, notification, customer, b2bOrderAcceptance, salesInvoice } from '@/db/schema';
 import {
@@ -19,6 +22,33 @@ import { calculateVat } from '@/lib/intelligence/tax-engine';
 import { assertVerifiedBusinessOwner } from '@/lib/b2b-authorization';
 import { createSalesInvoiceForTransaction } from '@/lib/sales-invoice-service';
 import { attemptSalesInvoiceEmail } from '@/lib/sales-invoice-delivery';
+
+/** Keep optional post-commit work out of the sale/confirmation response path. */
+function schedulePostTransactionWork(input: {
+  invoiceId?: string | null;
+  actorUserId: string;
+  transactionId: string;
+  operation: 'confirmation' | 'retail sale';
+}) {
+  after(async () => {
+    const tasks: Promise<unknown>[] = [];
+    if (input.invoiceId) {
+      tasks.push(attemptSalesInvoiceEmail(input.invoiceId, input.actorUserId).catch((error) => {
+        console.error(`Transaction ${input.operation} committed, but invoice delivery failed`, {
+          transactionId: input.transactionId,
+          code: error instanceof Error ? error.name : 'unknown_error',
+        });
+      }));
+    }
+    tasks.push(checkAndAlertCompliance(input.actorUserId).catch((error) => {
+      console.error(`Transaction ${input.operation} committed, but compliance alerting failed`, {
+        transactionId: input.transactionId,
+        code: error instanceof Error ? error.name : 'unknown_error',
+      });
+    }));
+    await Promise.allSettled(tasks);
+  });
+}
 
 type ReservationReleaseStatus = 'released' | 'expired' | 'cancelled';
 
@@ -87,6 +117,39 @@ async function withTransactionRetry<T>(operation: () => Promise<T>): Promise<T> 
       await new Promise<void>((resolve) => setTimeout(resolve, attempt * 50));
     }
   }
+}
+
+function matchesB2BSaleSubmission(
+  existing: Array<typeof transaction.$inferSelect>,
+  input: {
+    items: Array<{ productId: string; quantity: number; unitPrice: number }>;
+    sellerId: string;
+    buyerId: string;
+    transactionType: 'STANDARD_B2B_SALE' | 'DIRECT_BULK_SALE';
+    invoiceReference?: string;
+    deliveryInformation?: { address?: string; schedule?: string; notes?: string };
+  },
+): boolean {
+  if (existing.length !== input.items.length) return false;
+  const rowsByProduct = new Map(existing.map((row) => [row.productId, row]));
+  const expectedReference = input.invoiceReference?.trim() || null;
+  const normalizeDelivery = (value: { address?: string; schedule?: string; notes?: string } | null | undefined) => JSON.stringify({
+    address: value?.address ?? null,
+    schedule: value?.schedule ?? null,
+    notes: value?.notes ?? null,
+  });
+  const expectedDelivery = normalizeDelivery(input.deliveryInformation);
+  return input.items.every((item) => {
+    const row = rowsByProduct.get(item.productId);
+    return Boolean(row)
+      && row!.sellerId === input.sellerId
+      && row!.buyerId === input.buyerId
+      && row!.transactionType === input.transactionType
+      && row!.quantity === item.quantity
+      && row!.unitPrice === item.unitPrice
+      && (row!.invoiceReference ?? null) === expectedReference
+      && normalizeDelivery(row!.deliveryInformation) === expectedDelivery;
+  });
 }
 
 function transactionActionFailure(error: unknown, action: 'confirm' | 'reject') {
@@ -223,6 +286,7 @@ async function expireStalePendingTransactions(actorUserId: string): Promise<void
 async function createSaleForConfirmationInternal(data: {
   buyerTin: string;
   items: Array<{ productId: string; quantity: number; unitPrice: number }>;
+  submissionKey: string;
   transactionType?: 'STANDARD_B2B_SALE' | 'DIRECT_BULK_SALE';
   invoiceReference?: string;
   deliveryInformation?: { address?: string; schedule?: string; notes?: string };
@@ -230,8 +294,6 @@ async function createSaleForConfirmationInternal(data: {
   setFailureStage('verify seller clearance');
   const { suspended, clearanceStatus, ...session } = await requireApprovedClearance();
   if (suspended) throw new Error(`Your account is ${clearanceStatus}. Cannot create transactions.`);
-  setFailureStage('expire stale sales');
-  await expireStalePendingTransactions(session.user.id);
   const sellerRole = session.user.role as TraderRole;
   if (sellerRole === 'retailer') throw new Error('Retailers must use consumer sales instead.');
   if (!/^\d{9}$/.test(data.buyerTin)) throw new Error('Buyer TIN must contain exactly 9 digits.');
@@ -256,7 +318,11 @@ async function createSaleForConfirmationInternal(data: {
   }
 
   setFailureStage('look up buyer');
-  const [buyer] = await db.select().from(user).where(eq(user.tinNumber, data.buyerTin)).limit(1);
+  const [buyer] = await withActionDeadline(
+    Promise.resolve(db.select().from(user).where(eq(user.tinNumber, data.buyerTin)).limit(1)),
+    12_000,
+    'Buyer verification took too long. No sale was created; please try again.',
+  );
   if (!buyer) throw new Error('Buyer not found with that TIN.');
   if (buyer.id === session.user.id) throw new Error('Cannot sell to yourself.');
   if (!buyer.isActive) throw new Error('Buyer account is inactive.');
@@ -264,15 +330,43 @@ async function createSaleForConfirmationInternal(data: {
   validateRoleCompatibility(sellerRole, buyer.role as TraderRole);
   if (buyer.clearanceStatus !== 'approved') throw new Error(`Buyer account is ${buyer.clearanceStatus}; RRA approval is required.`);
 
+  const transactionType = data.transactionType ?? 'STANDARD_B2B_SALE';
+  const requestTransactionIds = data.items.map((item) => createSaleTransactionId(session.user.id, data.submissionKey, item.productId));
+  const priorTransactions = await withActionDeadline(
+    Promise.resolve(db.select().from(transaction).where(inArray(transaction.id, requestTransactionIds))),
+    12_000,
+    'Checking a previous sale submission took too long. Please retry; no duplicate sale was created.',
+  );
+  if (priorTransactions.length > 0) {
+    if (!matchesB2BSaleSubmission(priorTransactions, {
+      items: data.items,
+      sellerId: session.user.id,
+      buyerId: buyer.id,
+      transactionType,
+      invoiceReference: data.invoiceReference,
+      deliveryInformation: data.deliveryInformation,
+    })) {
+      throw new Error('This sale submission key was already used with different details. Refresh the page and submit again.');
+    }
+    return data.items.map((item) => priorTransactions.find((row) => row.productId === item.productId)!);
+  }
+
+  setFailureStage('expire stale sales');
+  await withActionDeadline(
+    expireStalePendingTransactions(session.user.id),
+    12_000,
+    'Inventory checks took too long. No sale was created; please try again.',
+  );
+
   setFailureStage('check tax compliance');
-  const [sellerCompliance, buyerCompliance, config] = await Promise.all([
+  const [sellerCompliance, buyerCompliance, config] = await withActionDeadline(Promise.all([
     getBusinessComplianceStatus(session.user.id), getBusinessComplianceStatus(buyer.id), getSystemConfig(),
-  ]);
+  ]), 15_000, 'Sale eligibility checks took too long. No sale was created; please try again.');
   if (!sellerCompliance.isCompliant) throw new Error(`You must pay at least ${sellerCompliance.threshold}% of your tax to sell. Current: ${sellerCompliance.compliancePct}%.`);
   if (!buyerCompliance.isCompliant) throw new Error(`Buyer has not met tax compliance (${buyerCompliance.compliancePct}% paid). They must pay at least ${buyerCompliance.threshold}% to purchase.`);
 
   setFailureStage('check product price and access');
-  const validatedItems = await Promise.all(data.items.map(async (item) => {
+  const validatedItems = await withActionDeadline(Promise.all(data.items.map(async (item) => {
     const priceCheck = await validatePriceFloor(item.productId, session.user.id, item.unitPrice);
     if (!priceCheck.valid) throw new Error(priceCheck.error ?? 'Price is below the AI-computed minimum.');
     const [details] = await db.select({ id: product.id, name: product.name })
@@ -283,19 +377,43 @@ async function createSaleForConfirmationInternal(data: {
     if (!Number.isSafeInteger(totalAmount) || totalAmount <= 0) throw new Error('Sale total is outside the supported amount range.');
     const vatAmount = calculateVat({ amountRwf: totalAmount, rateBasisPoints: Math.round(config.vatRate * 10_000), pricingMode: 'exclusive' }).vatAmountRwf;
     return { ...item, name: details.name, totalAmount, vatAmount, priceCheck };
-  }));
+  })), 15_000, 'Sale validation took too long. No sale was created; please try again.');
 
-  const transactionType = data.transactionType ?? 'STANDARD_B2B_SALE';
   if (!['STANDARD_B2B_SALE', 'DIRECT_BULK_SALE'].includes(transactionType)) throw new Error('Invalid transaction type.');
   setFailureStage('reserve inventory and save sale');
   const expiresAt = new Date(Date.now() + config.buyerConfirmationWindowHours * 60 * 60 * 1000);
-  const created = await withTransactionRetry(() => db.transaction(async (tx) => {
+  let created: {
+    txns: Array<typeof transaction.$inferSelect>;
+    savedNotification: typeof notification.$inferSelect | null;
+    replayed: boolean;
+  };
+  try {
+    created = await withTransactionRetry(() => db.transaction(async (tx) => {
+    await tx.execute(sql`SET LOCAL statement_timeout = '30s'`);
     setFailureStage('lock seller inventory');
     const lockedStocks = await tx.select().from(stock).where(and(
       eq(stock.businessId, session.user.id),
       or(...validatedItems.map((item) => eq(stock.productId, item.productId))),
     )).orderBy(asc(stock.productId)).for('update');
     const stockByProduct = new Map(lockedStocks.map((row) => [row.productId, row]));
+    const committedRetry = await tx.select().from(transaction).where(inArray(transaction.id, requestTransactionIds));
+    if (committedRetry.length > 0) {
+      if (!matchesB2BSaleSubmission(committedRetry, {
+        items: data.items,
+        sellerId: session.user.id,
+        buyerId: buyer.id,
+        transactionType,
+        invoiceReference: data.invoiceReference,
+        deliveryInformation: data.deliveryInformation,
+      })) {
+        throw new Error('This sale submission key was already used with different details. Refresh the page and submit again.');
+      }
+      return {
+        txns: data.items.map((item) => committedRetry.find((row) => row.productId === item.productId)!),
+        savedNotification: null,
+        replayed: true,
+      };
+    }
     for (const item of validatedItems) {
       const row = stockByProduct.get(item.productId);
       if (!row || row.quantity < item.quantity) throw new Error(`Insufficient stock for ${item.name}. Available: ${row?.quantity ?? 0}.`);
@@ -307,6 +425,7 @@ async function createSaleForConfirmationInternal(data: {
       const quantityAfter = row.quantity - item.quantity;
       setFailureStage('save transaction');
       const [txn] = await tx.insert(transaction).values({
+        id: createSaleTransactionId(session.user.id, data.submissionKey, item.productId),
         sellerId: session.user.id, buyerId: buyer.id, productId: item.productId, transactionType,
         buyerType: transactionType === 'DIRECT_BULK_SALE' && (!buyer.businessType || buyer.businessType === 'registered_business')
           ? 'large_bulk_buyer' : buyer.businessType,
@@ -363,21 +482,43 @@ async function createSaleForConfirmationInternal(data: {
       message: `${session.user.name} (TIN ${session.user.tinNumber ?? '—'}) sent ${summary}. Total incl. tax: ${total.toLocaleString()} RWF. References: ${txns.map((txn) => txn.id).join(', ')}. Confirm each item in Pending Confirmations by ${expiresAt.toLocaleString()}.`,
       link: '/dashboard/pending',
     }).returning();
-    return { txns, savedNotification };
-  }));
-
-  try {
-    for (const txn of created.txns) emitToUser(buyer.id, 'txn:incoming', {
-      transactionId: txn.id, sellerName: session.user.name, productId: txn.productId,
-      quantity: txn.quantity, totalAmount: txn.totalAmount, status: 'pending',
-    });
-    emitToUser(buyer.id, 'notification', {
-      id: created.savedNotification.id, type: created.savedNotification.type,
-      title: created.savedNotification.title, message: created.savedNotification.message,
-      link: created.savedNotification.link,
-    });
+    return { txns, savedNotification, replayed: false };
+    }));
   } catch (error) {
-    console.error('Sale and reservation were committed, but realtime notification delivery failed', error);
+    if (getDatabaseErrorCode(error) === '23505') {
+      const committedRetry = await withActionDeadline(
+        Promise.resolve(db.select().from(transaction).where(inArray(transaction.id, requestTransactionIds))),
+        12_000,
+        'Checking a previous sale submission took too long. Please retry; no duplicate sale was created.',
+      );
+      if (matchesB2BSaleSubmission(committedRetry, {
+        items: data.items,
+        sellerId: session.user.id,
+        buyerId: buyer.id,
+        transactionType,
+        invoiceReference: data.invoiceReference,
+        deliveryInformation: data.deliveryInformation,
+      })) {
+        return data.items.map((item) => committedRetry.find((row) => row.productId === item.productId)!);
+      }
+    }
+    throw error;
+  }
+
+  if (!created.replayed && created.savedNotification) {
+    try {
+      for (const txn of created.txns) emitToUser(buyer.id, 'txn:incoming', {
+        transactionId: txn.id, sellerName: session.user.name, productId: txn.productId,
+        quantity: txn.quantity, totalAmount: txn.totalAmount, status: 'pending',
+      });
+      emitToUser(buyer.id, 'notification', {
+        id: created.savedNotification.id, type: created.savedNotification.type,
+        title: created.savedNotification.title, message: created.savedNotification.message,
+        link: created.savedNotification.link,
+      });
+    } catch (error) {
+      console.error('Sale and reservation were committed, but realtime notification delivery failed', error);
+    }
   }
   return created.txns;
 }
@@ -390,13 +531,18 @@ type SaleCreationResult =
 export async function createSaleForConfirmation(data: {
   buyerTin: string;
   items: Array<{ productId: string; quantity: number; unitPrice: number }>;
+  submissionKey?: string;
   transactionType?: 'STANDARD_B2B_SALE' | 'DIRECT_BULK_SALE';
   invoiceReference?: string;
   deliveryInformation?: { address?: string; schedule?: string; notes?: string };
 }): Promise<SaleCreationResult> {
   let failureStage = 'validate sale request';
   try {
-    return { success: true, transactions: await createSaleForConfirmationInternal(data, (stage) => { failureStage = stage; }) };
+    const submissionKey = data.submissionKey ?? crypto.randomUUID();
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(submissionKey)) {
+      throw new Error('Submission key must be a UUID.');
+    }
+    return { success: true, transactions: await createSaleForConfirmationInternal({ ...data, submissionKey }, (stage) => { failureStage = stage; }) };
   } catch (error) {
     const reference = crypto.randomUUID();
     const errorCode = getDatabaseErrorCode(error);
@@ -410,6 +556,10 @@ export async function createSaleForConfirmation(data: {
       'A ', 'The minimum price for this product', 'Price is below', 'Could not create the stock reservation',
       'Incompatible', 'You must pay at least', 'Buyer has not met tax compliance',
       'A selected product', 'Sale total is', 'Invalid transaction type', 'Insufficient stock',
+      'Sale validation took too long', 'Inventory checks took too long',
+      'Buyer verification took too long', 'Sale eligibility checks took too long',
+      'Checking a previous sale submission took too long', 'This sale submission key',
+      'Submission key must be a UUID',
     ].some((prefix) => error.message.startsWith(prefix))
       ? error.message
       : `Sale could not be saved during ${failureStage}. Reference ${reference}${errorCode ? ` (database code: ${errorCode})` : ''}.`;
@@ -428,12 +578,14 @@ export async function createTransaction(data: {
   quantity: number;
   unitPrice: number; // RWF
   transactionType?: 'STANDARD_B2B_SALE' | 'DIRECT_BULK_SALE';
+  submissionKey?: string;
   invoiceReference?: string;
   deliveryInformation?: { address?: string; schedule?: string; notes?: string };
 }) {
   const result = await createSaleForConfirmation({
     buyerTin: data.buyerTin,
     items: [{ productId: data.productId, quantity: data.quantity, unitPrice: data.unitPrice }],
+    submissionKey: data.submissionKey,
     transactionType: data.transactionType,
     invoiceReference: data.invoiceReference,
     deliveryInformation: data.deliveryInformation,
@@ -457,9 +609,8 @@ export async function confirmTransaction(transactionId: string) {
     return { success: false as const, error: `Your account is ${clearanceStatus}. Cannot confirm transactions.` };
   }
 
-  await expireStalePendingTransactions(session.user.id);
-
   const confirmationResult = await runBuyerDecision('confirm', () => withTransactionRetry(() => db.transaction(async (tx) => {
+    await tx.execute(sql`SET LOCAL statement_timeout = '30s'`);
     // Serialize concurrent confirmations by locking the transaction row first.
     const [lockedTxn] = await tx
       .select()
@@ -654,21 +805,12 @@ export async function confirmTransaction(transactionId: string) {
     console.error('Transaction confirmed, but realtime notification delivery failed', error);
   }
 
-  try {
-    if (confirmation.invoiceId) await attemptSalesInvoiceEmail(confirmation.invoiceId, session.user.id);
-  } catch (error) {
-    console.error('Transaction confirmed and invoice saved, but buyer email delivery could not be attempted', {
-      transactionId: txn.id,
-      code: error instanceof Error ? error.name : 'unknown_error',
-    });
-  }
-
-  // Compliance alert auto-detection — check both seller and buyer
-  try {
-    await checkAndAlertCompliance(session.user.id);
-  } catch (error) {
-    console.error('Transaction confirmed, but post-confirmation compliance alerting failed', error);
-  }
+  schedulePostTransactionWork({
+    invoiceId: confirmation.invoiceId,
+    actorUserId: session.user.id,
+    transactionId: txn.id,
+    operation: 'confirmation',
+  });
 
   return { success: true as const, invoiceId: confirmation.invoiceId };
 }
@@ -791,10 +933,56 @@ export async function cancelTransaction(transactionId: string) {
 // Create Retail Sale (Retailer → Final Consumer)
 // ---------------------------------------------------------------------------
 
+async function findExistingRetailSale(input: {
+  id: string;
+  sellerId: string;
+  productId: string;
+  quantity: number;
+  unitPrice: number;
+  customerName?: string;
+  customerId?: string;
+}) {
+  const [existing] = await db.select().from(transaction).where(eq(transaction.id, input.id)).limit(1);
+  if (!existing) return null;
+
+  if (!matchesRetailSaleSubmission(existing, input)) {
+    throw new Error('This retail sale submission key was already used with different details. Refresh and submit again.');
+  }
+
+  const [invoice] = await db.select({ id: salesInvoice.id }).from(salesInvoice)
+    .where(eq(salesInvoice.transactionId, existing.id)).limit(1);
+  if (!invoice) throw new Error('The previous sale is saved, but its invoice reference is unavailable. Contact support.');
+  return { ...existing, invoiceId: invoice.id };
+}
+
+function matchesRetailSaleSubmission(
+  existing: typeof transaction.$inferSelect,
+  input: {
+    sellerId: string;
+    productId: string;
+    quantity: number;
+    unitPrice: number;
+    customerName?: string;
+    customerId?: string;
+  },
+): boolean {
+  const customerMatches = input.customerId
+    ? existing.customerId === input.customerId
+    : existing.customerId === null && existing.buyerName === input.customerName?.trim();
+  return existing.sellerId === input.sellerId
+    && existing.transactionType === 'RETAIL_SALE'
+    && existing.productId === input.productId
+    && existing.quantity === input.quantity
+    && existing.unitPrice === input.unitPrice
+    && existing.status === 'completed'
+    && customerMatches;
+}
+
 export async function createRetailSale(data: {
   productId: string;
   quantity: number;
   unitPrice: number;
+  submissionKey?: string;
   customerName?: string;
   customerId?: string;
 }) {
@@ -821,7 +1009,23 @@ export async function createRetailSale(data: {
     throw new Error('Customer name must be 160 characters or fewer.');
   }
 
-  const config = await getSystemConfig();
+  const submissionKey = data.submissionKey ?? crypto.randomUUID();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(submissionKey)) {
+    throw new Error('Sale submission key must be a UUID.');
+  }
+  const transactionId = createSaleTransactionId(session.user.id, submissionKey, data.productId);
+  const existingSale = await withActionDeadline(
+    findExistingRetailSale({ ...data, id: transactionId, sellerId: session.user.id }),
+    12_000,
+    'Checking a previous sale submission took too long. Please retry; no duplicate sale was created.',
+  );
+  if (existingSale) return existingSale;
+
+  const config = await withActionDeadline(
+    getSystemConfig(),
+    12_000,
+    'Sale configuration could not be checked in time. No sale was recorded; please try again.',
+  );
   // Persist whole-RWF amounts consistently with the integer database columns.
   const totalAmount = Math.round(data.quantity * data.unitPrice);
   if (totalAmount <= 0) throw new Error("Sale total must be at least 1 RWF after rounding");
@@ -833,7 +1037,11 @@ export async function createRetailSale(data: {
   const vatAmount = vatCalculation.vatAmountRwf;
 
   // AI Price Floor enforcement — blocks underreporting
-  const priceCheck = await validatePriceFloor(data.productId, session.user.id, data.unitPrice);
+  const priceCheck = await withActionDeadline(
+    validatePriceFloor(data.productId, session.user.id, data.unitPrice),
+    15_000,
+    'Sale validation took too long. No sale was recorded; please try again.',
+  );
   if (!priceCheck.valid) {
     throw new Error(priceCheck.error ?? 'Price is below the AI-computed minimum.');
   }
@@ -859,7 +1067,10 @@ export async function createRetailSale(data: {
   }
 
   // Atomic: deduct stock + create transaction + create VAT record
-  const result = await db.transaction(async (tx) => {
+  let result: { txn: typeof transaction.$inferSelect; invoiceId: string; replayed: boolean };
+  try {
+    result = await db.transaction(async (tx) => {
+    await tx.execute(sql`SET LOCAL statement_timeout = '30s'`);
     const selectedCustomer = data.customerId
       ? (await tx.select({ id: customer.id, name: customer.name }).from(customer)
         .where(and(
@@ -882,6 +1093,18 @@ export async function createRetailSale(data: {
       .for('update')
       .limit(1);
 
+    const [committedRetry] = await tx.select().from(transaction)
+      .where(eq(transaction.id, transactionId)).limit(1);
+    if (committedRetry) {
+      if (!matchesRetailSaleSubmission(committedRetry, { ...data, sellerId: session.user.id })) {
+        throw new Error('This retail sale submission key was already used with different details. Refresh and submit again.');
+      }
+      const [invoice] = await tx.select({ id: salesInvoice.id }).from(salesInvoice)
+        .where(eq(salesInvoice.transactionId, committedRetry.id)).limit(1);
+      if (!invoice) throw new Error('The previous sale is saved, but its invoice reference is unavailable. Contact support.');
+      return { txn: committedRetry, invoiceId: invoice.id, replayed: true };
+    }
+
     if (!retailerStock || retailerStock.quantity < data.quantity) {
       throw new Error(`Insufficient stock. Available: ${retailerStock?.quantity ?? 0}`);
     }
@@ -895,6 +1118,7 @@ export async function createRetailSale(data: {
     const [txn] = await tx
       .insert(transaction)
       .values({
+        id: transactionId,
         sellerId: session.user.id,
         buyerId: null,
         buyerName,
@@ -957,20 +1181,28 @@ export async function createRetailSale(data: {
 
     const issuedInvoice = await createSalesInvoiceForTransaction(tx, txn, session.user.id, new Date());
 
-    return { txn, invoiceId: issuedInvoice.id };
-  });
-
-  try {
-    await attemptSalesInvoiceEmail(result.invoiceId, session.user.id);
-  } catch (error) {
-    console.error('Retail sale completed and invoice saved, but buyer email delivery could not be attempted', {
-      transactionId: result.txn.id,
-      code: error instanceof Error ? error.name : 'unknown_error',
+    return { txn, invoiceId: issuedInvoice.id, replayed: false };
     });
+  } catch (error) {
+    if (getDatabaseErrorCode(error) === '23505') {
+      const committedRetry = await withActionDeadline(
+        findExistingRetailSale({ ...data, id: transactionId, sellerId: session.user.id }),
+        12_000,
+        'Checking a previous sale submission took too long. Please retry; no duplicate sale was created.',
+      );
+      if (committedRetry) return committedRetry;
+    }
+    throw error;
   }
 
-  // Compliance alert auto-detection for retailer
-  await checkAndAlertCompliance(session.user.id);
+  if (!result.replayed) {
+    schedulePostTransactionWork({
+      invoiceId: result.invoiceId,
+      actorUserId: session.user.id,
+      transactionId: result.txn.id,
+      operation: 'retail sale',
+    });
+  }
 
   return { ...result.txn, invoiceId: result.invoiceId };
 }

@@ -86,7 +86,7 @@ export async function attemptSalesInvoiceEmail(
     const appUrl = process.env.BETTER_AUTH_URL || process.env.NEXT_PUBLIC_APP_URL;
     const invoiceUrl = appUrl ? `${appUrl.replace(/\/$/, "")}/dashboard/invoices/${invoiceId}` : null;
     const resend = new Resend(process.env.RESEND_API_KEY);
-    const result = await resend.emails.send({
+    const emailPayload = {
       from: process.env.TAXFLOW_EMAIL_FROM || "TaxFlow <onboarding@resend.dev>",
       to: reserved.email,
       subject: `Your TaxFlow Sales Invoice — ${snapshot.invoiceNumber}`,
@@ -101,10 +101,19 @@ export async function attemptSalesInvoiceEmail(
         "This is a TaxFlow sales invoice, not an RRA/EBM fiscal invoice.",
       ].filter(Boolean).join("\n"),
       attachments: [{ filename: `${snapshot.invoiceNumber}.pdf`, content: Buffer.from(pdf).toString("base64") }],
-    }, { idempotencyKey: `sales-invoice-${invoiceId}` });
+    };
+    // Resend 6.9.4 forwards request options to fetch, but its published types
+    // omit Fetch's signal field. Keep the supported idempotency option and pass
+    // the abort signal through that same request-options object.
+    const emailTimeoutSignal = AbortSignal.timeout(12_000);
+    const requestOptions = {
+      idempotencyKey: `sales-invoice-${invoiceId}`,
+      signal: emailTimeoutSignal,
+    } as Parameters<typeof resend.emails.send>[1];
+    const result = await resend.emails.send(emailPayload, requestOptions);
 
     if (result.error || !result.data?.id) {
-      return fail("email_provider_rejected_request");
+      return fail(emailTimeoutSignal.aborted ? "email_provider_timeout" : "email_provider_rejected_request");
     }
     await db.transaction(async (tx) => {
       await tx.update(salesInvoiceEmailDelivery).set({

@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useTransition, useEffect, useCallback } from "react";
+import { useState, useTransition, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { createRetailSale } from "@/lib/actions/transaction.action";
+import { clearClientSubmissionKey, getClientSubmissionKey } from "@/lib/client-submission-key";
 import { PriceRangeBar } from "@/components/dashboard/price-range-bar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -45,6 +46,7 @@ interface SaleItem {
 export function RecordSaleForm({ inventory, customers, vatRate }: RecordSaleFormProps) {
     const router = useRouter();
     const [isPending, startTransition] = useTransition();
+    const submissionInFlight = useRef(false);
     const [customerName, setCustomerName] = useState("");
     const [customerId, setCustomerId] = useState("");
     const [saleItems, setSaleItems] = useState<SaleItem[]>(
@@ -136,18 +138,27 @@ export function RecordSaleForm({ inventory, customers, vatRate }: RecordSaleForm
         !hasBlockedPrice;
 
     async function handleConfirmSale() {
-        if (!canSubmit) return;
+        if (submissionInFlight.current || !canSubmit) return;
+        submissionInFlight.current = true;
 
         startTransition(async () => {
             try {
                 setMessage(null);
                 const invoiceIds: string[] = [];
+                const submission = {
+                    customerName: customerName.trim(),
+                    customerId: customerId || null,
+                    items: activeItems.map(({ productId, quantityToSell, unitPrice }) => ({ productId, quantity: quantityToSell, unitPrice })),
+                };
+                const storageKey = "taxflow:retail-sale";
+                const submissionKey = getClientSubmissionKey(storageKey, JSON.stringify(submission));
                 for (const item of activeItems) {
                     const completedSale = await createRetailSale({
                         productId: item.productId,
                         quantity: item.quantityToSell,
                         unitPrice: item.unitPrice,
                         customerName: customerName.trim(),
+                        submissionKey,
                         ...(customerId ? { customerId } : {}),
                     });
                     invoiceIds.push(completedSale.invoiceId);
@@ -158,6 +169,7 @@ export function RecordSaleForm({ inventory, customers, vatRate }: RecordSaleForm
                     type: "success",
                     invoiceIds,
                 });
+                clearClientSubmissionKey(storageKey, submissionKey);
 
                 // Optimistic update: deduct sold quantities from available stock
                 setCustomerName("");
@@ -178,6 +190,8 @@ export function RecordSaleForm({ inventory, customers, vatRate }: RecordSaleForm
                             : "Failed to record sale",
                     type: "error",
                 });
+            } finally {
+                submissionInFlight.current = false;
             }
         });
     }

@@ -202,11 +202,14 @@ function MeasuredReceiptForm({ item }: { item: FulfillmentQueue['incoming'][numb
 function ConfirmRejectActions({ transactionId }: { transactionId: string }) {
     const router = useRouter();
     const [isPending, startTransition] = useTransition();
+    const actionInFlight = useRef(false);
     const [result, setResult] = useState<"confirmed" | "rejected" | null>(null);
     const [invoiceId, setInvoiceId] = useState<string | null>(null);
     const [error, setError] = useState("");
 
     function handleAction(action: "confirm" | "reject") {
+        if (actionInFlight.current) return;
+        actionInFlight.current = true;
         startTransition(async () => {
             try {
                 setError("");
@@ -225,6 +228,8 @@ function ConfirmRejectActions({ transactionId }: { transactionId: string }) {
                 setError(
                     err instanceof Error ? err.message : `Failed to ${action}`,
                 );
+            } finally {
+                actionInFlight.current = false;
             }
         });
     }

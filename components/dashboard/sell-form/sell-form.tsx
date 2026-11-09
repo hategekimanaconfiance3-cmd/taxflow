@@ -1,8 +1,9 @@
 'use client';
 
-import { useCallback, useMemo, useState, useTransition } from 'react';
+import { useCallback, useMemo, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { createSaleForConfirmation } from '@/lib/actions/transaction.action';
+import { clearClientSubmissionKey, getClientSubmissionKey } from '@/lib/client-submission-key';
 import { BuyerLookup, type BuyerInfo } from '@/components/dashboard/buyer-lookup/buyer-lookup';
 import { formatRWF } from '@/components/dashboard/stat-card/stat-card';
 import { PriceRangeBar, usePriceSuggestion } from '@/components/dashboard/price-range-bar';
@@ -139,6 +140,7 @@ export function SellForm({ inventory, vatRate, recentTransactions }: SellFormPro
   const router = useRouter();
   const { userId } = useSocketContext();
   const [isPending, startTransition] = useTransition();
+  const submissionInFlight = useRef(false);
   const [buyer, setBuyer] = useState<BuyerInfo | null>(null);
   const [isDirectBulkSale, setIsDirectBulkSale] = useState(false);
   const [invoiceReference, setInvoiceReference] = useState('');
@@ -209,17 +211,21 @@ export function SellForm({ inventory, vatRate, recentTransactions }: SellFormPro
   }
 
   function handleSendSale() {
-    if (!buyer?.isEligible || hasInvalidItems || saleItems.length === 0) return;
+    if (submissionInFlight.current || !buyer?.isEligible || hasInvalidItems || saleItems.length === 0) return;
+    submissionInFlight.current = true;
     startTransition(async () => {
       try {
         setMessage(null);
-        const result = await createSaleForConfirmation({
+        const submission = {
           buyerTin: buyer.tinNumber ?? '',
           items: saleItems.map(({ productId, quantityToSell, unitPrice }) => ({ productId, quantity: quantityToSell, unitPrice })),
-          transactionType: isDirectBulkSale ? 'DIRECT_BULK_SALE' : 'STANDARD_B2B_SALE',
+          transactionType: isDirectBulkSale ? 'DIRECT_BULK_SALE' as const : 'STANDARD_B2B_SALE' as const,
           invoiceReference,
           deliveryInformation: isDirectBulkSale ? { address: deliveryAddress, schedule: deliverySchedule, notes: deliveryNotes } : undefined,
-        });
+        };
+        const storageKey = 'taxflow:b2b-sale';
+        const submissionKey = getClientSubmissionKey(storageKey, JSON.stringify(submission));
+        const result = await createSaleForConfirmation({ ...submission, submissionKey });
         if (!result.success) {
           setMessage({ text: result.error, type: 'error' });
           return;
@@ -243,9 +249,12 @@ export function SellForm({ inventory, vatRate, recentTransactions }: SellFormPro
           type: 'success',
         });
         setSaleItems([]);
+        clearClientSubmissionKey(storageKey, submissionKey);
         router.refresh();
       } catch (error) {
         setMessage({ text: error instanceof Error ? error.message : 'Unable to send the sale for confirmation.', type: 'error' });
+      } finally {
+        submissionInFlight.current = false;
       }
     });
   }

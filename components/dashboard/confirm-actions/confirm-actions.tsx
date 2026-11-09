@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import {
     confirmTransaction,
     rejectTransaction,
@@ -14,11 +14,14 @@ interface ConfirmActionsProps {
 
 export function ConfirmActions({ transactionId }: ConfirmActionsProps) {
     const [isPending, startTransition] = useTransition();
+    const actionInFlight = useRef(false);
     const [result, setResult] = useState<"confirmed" | "rejected" | null>(null);
     const [invoiceId, setInvoiceId] = useState<string | null>(null);
     const [error, setError] = useState("");
 
     function handleAction(action: "confirm" | "reject") {
+        if (actionInFlight.current) return;
+        actionInFlight.current = true;
         startTransition(async () => {
             try {
                 setError("");
@@ -36,6 +39,8 @@ export function ConfirmActions({ transactionId }: ConfirmActionsProps) {
                 setError(
                     err instanceof Error ? err.message : `Failed to ${action}`,
                 );
+            } finally {
+                actionInFlight.current = false;
             }
         });
     }

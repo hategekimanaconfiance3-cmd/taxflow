@@ -41,20 +41,18 @@ export async function getPriceSuggestion(
     productId: string,
     sellerUserId: string,
 ): Promise<PriceSuggestion> {
-    // 1. Get seller's district from TIN DB
-    const sellerDistrict = await getSellerDistrict(sellerUserId);
-
-    // 2. Get the seller's purchase cost for this product
-    const purchaseCost = await getPurchaseCost(productId, sellerUserId);
-
-    // 3. Get historical median (90-day confirmed transactions for this product in this district)
-    const historicalMedian = await getHistoricalMedian(productId, sellerDistrict);
-
-    // 4. Get peer median (P25–P75 percentile of current prices from peers in same district)
-    const peerMedian = await getPeerMedian(productId, sellerUserId, sellerDistrict);
-
-    // Count total data points for confidence
-    const dataPoints = await getDataPointCount(productId, sellerDistrict);
+    // Resolve independent seller data together, then reuse the district cohort
+    // across the three analytics queries instead of repeating the TIN lookups.
+    const [sellerDistrict, purchaseCost] = await Promise.all([
+        getSellerDistrict(sellerUserId),
+        getPurchaseCost(productId, sellerUserId),
+    ]);
+    const districtUserIds = sellerDistrict ? await getDistrictUserIds(sellerDistrict) : null;
+    const [historicalMedian, peerMedian, dataPoints] = await Promise.all([
+        getHistoricalMedian(productId, districtUserIds),
+        getPeerMedian(productId, sellerUserId, districtUserIds),
+        getDataPointCount(productId, districtUserIds),
+    ]);
 
     // --- Compute the range ---
 
@@ -188,6 +186,26 @@ async function getSellerDistrict(sellerUserId: string): Promise<string | null> {
     }
 }
 
+/** Resolve a district cohort once so price statistics do not repeat cross-database lookups. */
+async function getDistrictUserIds(district: string): Promise<string[] | undefined> {
+    try {
+        const districtTins = await tinDb
+            .select({ tinNumber: tinRecord.tinNumber })
+            .from(tinRecord)
+            .where(eq(tinRecord.district, district));
+        if (districtTins.length === 0) return [];
+
+        const districtUsers = await db
+            .select({ id: user.id })
+            .from(user)
+            .where(inArray(user.tinNumber, districtTins.map((record) => record.tinNumber)));
+        return districtUsers.map(({ id }) => id);
+    } catch (error) {
+        console.error("Failed to resolve district price cohort:", error);
+        return undefined;
+    }
+}
+
 /** Get the seller's known purchase cost for this product (from stock.price). */
 async function getPurchaseCost(
     productId: string,
@@ -218,9 +236,10 @@ async function getPurchaseCost(
  */
 async function getHistoricalMedian(
     productId: string,
-    district: string | null,
+    districtUserIds: string[] | null | undefined,
 ): Promise<number | null> {
     try {
+        if (districtUserIds === undefined) return null;
         const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
 
         // Get all confirmed/completed unit prices for this product in the last 90 days
@@ -236,38 +255,20 @@ async function getHistoricalMedian(
                 ),
             );
 
-        // If we have a district, further filter to transactions from sellers in that district
-        if (district) {
-            // Get all seller user IDs in this district from TIN DB
-            const districtTins = await tinDb
-                .select({ tinNumber: tinRecord.tinNumber })
-                .from(tinRecord)
-                .where(eq(tinRecord.district, district));
-
-            if (districtTins.length > 0) {
-                const tinNumbers = districtTins.map((t) => t.tinNumber);
-
-                // Get user IDs for these TINs
-                const districtUsers = await db
-                    .select({ id: user.id })
-                    .from(user)
-                    .where(inArray(user.tinNumber, tinNumbers));
-
-                if (districtUsers.length > 0) {
-                    const userIds = districtUsers.map((u) => u.id);
-                    pricesQuery = db
-                        .select({ unitPrice: transaction.unitPrice })
-                        .from(transaction)
-                        .where(
-                            and(
-                                eq(transaction.productId, productId),
-                                inArray(transaction.status, ["confirmed", "completed"]),
-                                gte(transaction.createdAt, ninetyDaysAgo),
-                                inArray(transaction.sellerId, userIds),
-                            ),
-                        );
-                }
-            }
+        // Match the existing fallback: when no district members are found,
+        // use the full product history rather than filtering to an empty set.
+        if (districtUserIds?.length) {
+            pricesQuery = db
+                .select({ unitPrice: transaction.unitPrice })
+                .from(transaction)
+                .where(
+                    and(
+                        eq(transaction.productId, productId),
+                        inArray(transaction.status, ["confirmed", "completed"]),
+                        gte(transaction.createdAt, ninetyDaysAgo),
+                        inArray(transaction.sellerId, districtUserIds),
+                    ),
+                );
         }
 
         const prices = await pricesQuery;
@@ -293,9 +294,10 @@ async function getHistoricalMedian(
 async function getPeerMedian(
     productId: string,
     sellerUserId: string,
-    district: string | null,
+    districtUserIds: string[] | null | undefined,
 ): Promise<number | null> {
     try {
+        if (districtUserIds === undefined) return null;
         const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
 
         // Build base query — exclude the current seller's transactions
@@ -306,30 +308,10 @@ async function getPeerMedian(
             sql`${transaction.sellerId} != ${sellerUserId}`,
         ];
 
-        // Filter by district if available
-        if (district) {
-            const districtTins = await tinDb
-                .select({ tinNumber: tinRecord.tinNumber })
-                .from(tinRecord)
-                .where(eq(tinRecord.district, district));
-
-            if (districtTins.length > 0) {
-                const tinNumbers = districtTins.map((t) => t.tinNumber);
-                const districtUsers = await db
-                    .select({ id: user.id })
-                    .from(user)
-                    .where(inArray(user.tinNumber, tinNumbers));
-
-                if (districtUsers.length > 0) {
-                    const peerIds = districtUsers
-                        .map((u) => u.id)
-                        .filter((id) => id !== sellerUserId);
-
-                    if (peerIds.length > 0) {
-                        baseConditions.push(inArray(transaction.sellerId, peerIds));
-                    }
-                }
-            }
+        // Keep the existing system-wide fallback when no district peers exist.
+        if (districtUserIds?.length) {
+            const peerIds = districtUserIds.filter((id) => id !== sellerUserId);
+            if (peerIds.length > 0) baseConditions.push(inArray(transaction.sellerId, peerIds));
         }
 
         const prices = await db
@@ -360,9 +342,10 @@ async function getPeerMedian(
 /** Count total data points for this product in this district. */
 async function getDataPointCount(
     productId: string,
-    district: string | null,
+    districtUserIds: string[] | null | undefined,
 ): Promise<number> {
     try {
+        if (districtUserIds === undefined) return 0;
         const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
 
         const conditions = [
@@ -371,25 +354,8 @@ async function getDataPointCount(
             gte(transaction.createdAt, ninetyDaysAgo),
         ];
 
-        if (district) {
-            const districtTins = await tinDb
-                .select({ tinNumber: tinRecord.tinNumber })
-                .from(tinRecord)
-                .where(eq(tinRecord.district, district));
-
-            if (districtTins.length > 0) {
-                const tinNumbers = districtTins.map((t) => t.tinNumber);
-                const districtUsers = await db
-                    .select({ id: user.id })
-                    .from(user)
-                    .where(inArray(user.tinNumber, tinNumbers));
-
-                if (districtUsers.length > 0) {
-                    conditions.push(
-                        inArray(transaction.sellerId, districtUsers.map((u) => u.id)),
-                    );
-                }
-            }
+        if (districtUserIds?.length) {
+            conditions.push(inArray(transaction.sellerId, districtUserIds));
         }
 
         const [result] = await db
