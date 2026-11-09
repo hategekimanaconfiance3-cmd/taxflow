@@ -885,7 +885,7 @@ function ProductionTab({
             <TableRow>
               <TableHead>Batch Ref</TableHead>
               <TableHead>Product</TableHead>
-              <TableHead className="text-right">Qty</TableHead>
+              <TableHead className="text-right">Reported total</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Validation</TableHead>
               <TableHead>Period</TableHead>
@@ -902,13 +902,10 @@ function ProductionTab({
                 </TableCell>
                 <TableCell className="text-right font-mono">
                   {r.quantity}
+                  <div className="text-xs font-sans text-muted-foreground">{r.materialReviewStatus === "released" ? `Officer released · ${r.verifiedGoodOutputQuantity ?? "—"} good` : r.materialReviewStatus === "rejected" ? "Rejected · not released" : r.materialReviewStatus === "pending" ? "Awaiting officer review" : "Legacy · verification unavailable"}</div>
                 </TableCell>
                 <TableCell>
-                  {r.status ? (
-                    <StatusBadge status={r.status} />
-                  ) : (
-                    <span className="text-muted-foreground text-xs">—</span>
-                  )}
+                  <StatusBadge status={r.materialReviewStatus === "released" ? "officer_released" : r.materialReviewStatus === "rejected" ? "officer_review_rejected" : r.materialReviewStatus === "pending" ? "awaiting_officer_review" : "legacy_verification_unavailable"} />
                 </TableCell>
                 <TableCell>
                   <StatusBadge status={r.validationStatus} />

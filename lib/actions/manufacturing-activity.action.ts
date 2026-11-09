@@ -124,6 +124,7 @@ export async function getManufacturerActivity(
           declaredQuantity: productionBatch.declaredQuantity,
           reportedGoodOutputQuantity: productionBatch.reportedGoodOutputQuantity,
           goodOutputQuantity: productionBatch.goodOutputQuantity,
+          materialReviewStatus: productionBatch.materialReviewStatus,
           status: productionBatch.status,
           occurredAt: productionBatch.createdAt,
         })
@@ -232,10 +233,10 @@ export async function getManufacturerActivity(
     const pendingEvents: Omit<ManufacturerActivityEvent, "key">[] = [
       ...batches.map((row) => ({
         kind: "production" as const,
-        title: "Production batch recorded",
+        title: row.materialReviewStatus === "released" ? "Production batch verified and released" : "Manufacturer production batch reported",
         productName: row.productName,
-        quantity: row.reportedGoodOutputQuantity ?? row.goodOutputQuantity ?? String(row.declaredQuantity),
-        status: row.status,
+        quantity: row.goodOutputQuantity && row.materialReviewStatus === "released" ? String(row.goodOutputQuantity) : String(row.declaredQuantity),
+        status: row.materialReviewStatus === "released" ? "officer_released" : row.materialReviewStatus === "rejected" ? "officer_rejected_not_released" : row.materialReviewStatus === "pending" ? "awaiting_officer_review" : "legacy_verification_unavailable",
         occurredAt: row.occurredAt,
       })),
       ...sales.map((row) => ({

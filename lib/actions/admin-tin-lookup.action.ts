@@ -173,6 +173,8 @@ async function buildLookup(tin: string, staffRoles: RRARole[], staffRecordId: st
       productName: product.name,
       quantity: productionBatch.declaredQuantity,
       status: productionBatch.status,
+      materialReviewStatus: productionBatch.materialReviewStatus,
+      verifiedGoodOutputQuantity: productionBatch.goodOutputQuantity,
       productionValidationStatus: productionBatch.productionValidationStatus,
       periodStart: productionBatch.periodStart,
       periodEnd: productionBatch.periodEnd,

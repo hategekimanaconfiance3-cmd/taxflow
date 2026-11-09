@@ -1427,7 +1427,7 @@ export function ProductionReportForm({
                 Step 4b — Finished goods produced
               </CardTitle>
               <p className="text-xs text-muted-foreground">
-                Record actual output. Good + Rejected must equal Actual total output.
+                Enter the manufacturer-reported output. Good + Rejected must equal the reported total; an authorized officer verifies output before it enters available stock.
               </p>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -1435,7 +1435,7 @@ export function ProductionReportForm({
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b bg-muted/40 text-xs text-muted-foreground">
-                      <th className="px-3 py-2.5 text-left font-medium">Output</th>
+                      <th className="px-3 py-2.5 text-left font-medium">Manufacturer-reported output</th>
                       <th className="px-3 py-2.5 text-right font-medium">
                         Quantity ({selectedRecipe?.productUnit})
                       </th>
@@ -1449,14 +1449,14 @@ export function ProductionReportForm({
                       </td>
                     </tr>
                     <tr>
-                      <td className="px-3 py-2 font-medium">Actual total output</td>
+                      <td className="px-3 py-2 font-medium">Reported total output</td>
                       <td className="px-3 py-2 text-right">
                         <Input
                           type="number"
                           min="0.0001"
                           step="any"
                           placeholder="e.g. 950"
-                          aria-label="Actual total output"
+                          aria-label="Reported total output"
                           value={quantity}
                           onChange={(e) => { setQuantity(e.target.value); idempotencyKeyReport.current = null; }}
                           className="ml-auto h-8 w-32 text-right tabular-nums"

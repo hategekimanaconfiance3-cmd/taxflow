@@ -3,7 +3,7 @@ import 'server-only';
 import { and, desc, eq, inArray, lte, sql } from 'drizzle-orm';
 import { createHash, randomUUID } from 'node:crypto';
 import db from '@/db/drizzle';
-import { auditLog, product, productionBatch, productionBatchMaterialUsage, productionMaterial, productionMaterialMovement, productionMaterialPlan, productionMaterialPlanLine, productionMaterialReservation, productionRecipe, productionRecipeMaterial, productionToleranceStandard, stock, stockMovement } from '@/db/schema';
+import { auditLog, product, productionBatch, productionBatchMaterialUsage, productionMaterial, productionMaterialMovement, productionMaterialPlan, productionMaterialPlanLine, productionMaterialReservation, productionRecipe, productionRecipeMaterial, productionToleranceStandard } from '@/db/schema';
 import { getSystemConfig } from '@/lib/actions/system-config.action';
 import type { ProductionEntryInput, ProductRegistrationInput, productionRecipeSchema } from '@/lib/validation/production.schema';
 import { assessMaterialVariance, calculatePlannedMaterialQuantity, combineMaterialValidation } from '@/lib/production-confidentiality';
@@ -557,8 +557,10 @@ export async function recordManufacturerProduction(
       recipeInputHash,
       idempotencyKey: input.idempotencyKey,
       materialPlanId: input.materialPlanId ?? null,
-      materialReviewStatus: input.recipeVersionId ? 'pending' : 'not_required',
-      status: input.recipeVersionId ? 'held_material_review' : 'recorded',
+      // Every manufacturer production declaration is provisional until an
+      // authorized officer releases independently verified output.
+      materialReviewStatus: 'pending',
+      status: 'awaiting_officer_review',
       periodStart: now,
       periodEnd: now,
       notes: input.notes?.trim() || null,
@@ -631,56 +633,21 @@ export async function recordManufacturerProduction(
       })));
     }
 
-    let quantityBefore: number | null = null;
-    let quantityAfter: number | null = null;
-    if (plannedMaterialUsage.length === 0) {
-      const [updatedStock] = await tx.insert(stock).values({
-        businessId: manufacturerId,
-        productId: input.productId,
-        quantity: input.quantity,
-        source: 'manufactured',
-        price: input.unitPrice,
-      }).onConflictDoUpdate({
-        target: [stock.businessId, stock.productId],
-        set: {
-          quantity: sql`${stock.quantity} + ${input.quantity}`,
-          price: input.unitPrice,
-          source: 'manufactured',
-          updatedAt: now,
-        },
-      }).returning({ id: stock.id, quantity: stock.quantity });
-      if (!updatedStock) throw new Error('Inventory update returned no row');
-      quantityBefore = updatedStock.quantity - input.quantity;
-      quantityAfter = updatedStock.quantity;
-      await tx.insert(stockMovement).values({
-        businessId: manufacturerId,
-        productId: input.productId,
-        quantityDelta: input.quantity,
-        quantityBefore,
-        quantityAfter,
-        movementType: 'production',
-        sourceType: 'production_batch',
-        sourceId: batch.id,
-        actorUserId: manufacturerId,
-        reason: 'Manufacturer production recorded',
-      });
-    } else if (input.materialPlanId) {
+    if (input.materialPlanId && plannedMaterialUsage.length > 0) {
       const [claimedPlan] = await tx.update(productionMaterialPlan).set({ status: 'in_progress' })
         .where(and(eq(productionMaterialPlan.id, input.materialPlanId), eq(productionMaterialPlan.status, 'planned')))
         .returning({ id: productionMaterialPlan.id });
       if (!claimedPlan) throw new Error('Production plan was claimed by another batch.');
     }
 
-    const auditEvents = plannedMaterialUsage.length > 0
-      ? ['PRODUCTION_CREATED', 'BATCH_CREATED'] as const
-      : ['PRODUCTION_CREATED', 'BATCH_CREATED', 'INVENTORY_INCREASED'] as const;
+    const auditEvents = ['PRODUCTION_CREATED', 'BATCH_CREATED'] as const;
     await tx.insert(auditLog).values(auditEvents.map((action) => ({
       userId: manufacturerId,
       action,
       targetType: 'production_batch',
       targetId: batch.id,
-      beforeState: quantityBefore === null ? null : { stockQuantity: quantityBefore },
-      afterState: quantityAfter === null ? { materialReviewStatus: 'pending', finishedGoodsPosted: false } : { stockQuantity: quantityAfter },
+      beforeState: { finishedGoodsPosted: false },
+      afterState: { materialReviewStatus: 'pending', finishedGoodsPosted: false },
       metadata: JSON.stringify({
         productId: input.productId,
         batchId: batch.id,
@@ -698,7 +665,6 @@ export async function recordManufacturerProduction(
         manufacturerReportedRejectedOutputQuantity: input.rejectedOutputQuantity === undefined ? null : microsToDecimal(quantityToMicros(input.rejectedOutputQuantity)),
         productionValidationStatus,
         materialCount: plannedMaterialUsage.length,
-        source: action === 'INVENTORY_INCREASED' ? 'PRODUCTION' : undefined,
       }),
     })));
 
@@ -716,7 +682,7 @@ export async function recordManufacturerProduction(
         totalValue,
         vatRate,
         potentialTax,
-      status: input.recipeVersionId ? 'held_material_review' : 'recorded',
+      status: 'awaiting_officer_review',
         productionValidationStatus,
         createdAt: now.toISOString(),
       },
@@ -732,12 +698,10 @@ export async function recordManufacturerProduction(
         errorName: error instanceof Error ? error.name : 'UnknownError',
       });
     }
-    if (input.recipeVersionId) {
-      try {
-        await notifyProductionBatchSubmitted(result.record.id);
-      } catch (error) {
-        console.error('[production:material-review-notification]', { errorName: error instanceof Error ? error.name : 'UnknownError' });
-      }
+    try {
+      await notifyProductionBatchSubmitted(result.record.id);
+    } catch (error) {
+      console.error('[production:officer-review-notification]', { errorName: error instanceof Error ? error.name : 'UnknownError' });
     }
   }
   return result;

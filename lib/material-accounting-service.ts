@@ -150,21 +150,23 @@ export async function notifyProductionBatchSubmitted(batchId: string): Promise<v
   const shortageCodes = usages.filter((usage) => (balances.get(usage.materialId) ?? BigInt(0)) < quantityToMicros(usage.actualQuantity))
     .map((usage) => usage.materialCode);
   const manufacturerMessage = shortageCodes.length
-    ? `Batch ${batch.batchReference} is held for review. Verified material stock is short for: ${shortageCodes.join(', ')}. No material was deducted and no finished goods were added to available stock.`
-    : `Batch ${batch.batchReference} is held for independent review. No material was deducted and no finished goods were added to available stock.`;
+    ? `Batch ${batch.batchReference} is awaiting officer review. Verified material stock is short for: ${shortageCodes.join(', ')}. No material was deducted and no finished goods were added to available stock.`
+    : `Batch ${batch.batchReference} is awaiting independent officer review. No material was deducted and no finished goods were added to available stock.`;
 
   await notifySafely({
     userId: batch.manufacturerId,
     type: 'system',
-    title: shortageCodes.length ? 'Production material shortage' : 'Production batch awaiting review',
+    title: shortageCodes.length ? 'Production material shortage' : 'Production batch awaiting officer review',
     message: manufacturerMessage,
     link: '/dashboard/production',
   });
   try {
     await notifyRraReviewers(
       ['stock_control_admin'],
-      shortageCodes.length ? 'Production material shortage needs review' : 'Production batch needs review',
-      `Batch ${batch.batchReference} is held for material review. ${shortageCodes.length} material line(s) currently show insufficient verified stock. Review protected material codes and evidence in the batch queue.`,
+      shortageCodes.length ? 'Production material shortage needs review' : 'Production batch needs officer review',
+      shortageCodes.length
+        ? `Batch ${batch.batchReference} is awaiting officer review. ${shortageCodes.length} material line(s) show insufficient verified stock. Review the reported quantities and evidence in the batch queue.`
+        : `Batch ${batch.batchReference} is awaiting independent output verification. Review the manufacturer's reported quantities and evidence before releasing finished goods.`,
       '/admin/production/material-accounting',
     );
   } catch (error) {
@@ -705,6 +707,7 @@ export async function listPendingProductionBatchReviews(batchId?: string) {
     manufacturerName: user.businessName,
     productId: productionBatch.productId,
     productName: product.name,
+    hasRecipe: productionBatch.recipeVersionId,
     batchReference: productionBatch.batchReference,
     outputQuantity: productionBatch.declaredQuantity,
     outputUnit: product.unit,
@@ -792,7 +795,7 @@ export async function reviewProductionBatch(actorUserId: string, input: BatchRev
     const [batch] = await tx.select().from(productionBatch).where(eq(productionBatch.id, input.batchId)).for('update').limit(1);
     if (!batch) throw new MaterialAccountingError('NOT_FOUND', 'Production batch was not found.');
     if (batch.materialReviewStatus === 'released') return { batchId: batch.id, manufacturerId: batch.manufacturerId, status: 'released', replayed: true };
-    if (batch.materialReviewStatus !== 'pending' || !batch.recipeVersionId) throw new MaterialAccountingError('NOT_PENDING', 'This batch is not awaiting material review.');
+    if (batch.materialReviewStatus !== 'pending') throw new MaterialAccountingError('NOT_PENDING', 'This batch is not awaiting officer review.');
 
     if (input.decision === 'reject') {
       const now = new Date();
@@ -834,8 +837,11 @@ export async function reviewProductionBatch(actorUserId: string, input: BatchRev
     }).from(productionBatchMaterialUsage)
       .innerJoin(productionMaterial, eq(productionBatchMaterialUsage.materialId, productionMaterial.id))
       .where(eq(productionBatchMaterialUsage.productionBatchId, batch.id));
-    if (usages.length === 0 || usages.some((usage) => usage.materialManufacturerId !== batch.manufacturerId)) {
+    if (batch.recipeVersionId && (usages.length === 0 || usages.some((usage) => usage.materialManufacturerId !== batch.manufacturerId))) {
       throw new MaterialAccountingError('MATERIAL_EVIDENCE_MISSING', 'Batch material evidence is incomplete or does not belong to the manufacturer.');
+    }
+    if (!batch.recipeVersionId && (usages.length > 0 || batch.materialPlanId)) {
+      throw new MaterialAccountingError('MATERIAL_EVIDENCE_MISMATCH', 'A batch without a registered recipe cannot consume recipe materials or a material plan.');
     }
     const sortedMaterialIds = [...new Set(usages.map((usage) => usage.materialId))].sort();
     for (const materialId of sortedMaterialIds) {

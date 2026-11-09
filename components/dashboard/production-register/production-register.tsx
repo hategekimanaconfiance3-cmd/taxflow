@@ -35,7 +35,7 @@ export function ProductionRegister({ records }: ProductionRegisterProps) {
                                     <TableHead>Product</TableHead>
                                     <TableHead>Product ID</TableHead>
                                     <TableHead>Batch ID</TableHead>
-                                    <TableHead className="text-right">Quantity</TableHead>
+                                    <TableHead className="text-right">Manufacturer-reported output</TableHead>
                                     <TableHead className="text-right">Unit Price</TableHead>
                                     <TableHead className="text-right">Total Value</TableHead>
                                     <TableHead className="text-right">Potential Tax</TableHead>
@@ -55,9 +55,12 @@ export function ProductionRegister({ records }: ProductionRegisterProps) {
                                         <TableCell className="text-right font-mono text-emerald-600">{formatRWF(record.potentialTax)}</TableCell>
                                         <TableCell className="whitespace-nowrap text-sm">
                                             <div>{record.productionValidationStatus === "review_required" ? <span className="text-amber-700">Review required</span> : record.productionValidationStatus === "within_tolerance" ? <span className="text-emerald-700">Within tolerance</span> : <span className="text-muted-foreground">No recipe evidence</span>}</div>
-                                            {record.materialReviewStatus === "pending" && <div className="text-xs text-amber-700">Held for independent release review</div>}
-                                            {record.materialReviewStatus !== "not_required" && <div className="text-xs text-muted-foreground">Reported: {record.reportedGoodOutputQuantity ?? "—"} good / {record.reportedRejectedOutputQuantity ?? "—"} rejected</div>}
-                                            {record.materialReviewStatus !== "not_required" && <div className="text-xs text-muted-foreground">Verified: {record.goodOutputQuantity ?? "pending"} good / {record.rejectedOutputQuantity ?? "pending"} rejected</div>}
+                                            {record.materialReviewStatus === "pending" && <div className="text-xs text-amber-700">Awaiting officer review · excluded from available stock</div>}
+                                            {record.materialReviewStatus === "released" && <div className="text-xs text-emerald-700">Officer released to stock</div>}
+                                            {record.materialReviewStatus === "rejected" && <div className="text-xs text-destructive">Officer review rejected · not released to stock</div>}
+                                            {record.materialReviewStatus === "not_required" && <div className="text-xs text-muted-foreground">Legacy record · independent verification status unavailable</div>}
+                                            {record.reportedGoodOutputQuantity !== null && <div className="text-xs text-muted-foreground">Manufacturer reported: {record.reportedGoodOutputQuantity} good / {record.reportedRejectedOutputQuantity ?? "—"} rejected</div>}
+                                            {record.materialReviewStatus === "released" && <div className="text-xs text-muted-foreground">Officer verified: {record.goodOutputQuantity ?? "—"} good / {record.rejectedOutputQuantity ?? "—"} rejected</div>}
                                             {record.materialShortageCount > 0 && <div className="text-xs text-destructive">{record.materialShortageCount} material shortage{record.materialShortageCount === 1 ? "" : "s"} against verified stock</div>}
                                             {record.materialReviewStatus !== "not_required" && <ProductionMaterialTraceability batchId={record.id} />}
                                         </TableCell>

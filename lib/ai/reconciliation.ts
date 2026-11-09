@@ -73,13 +73,14 @@ export async function reconcileInventory(
         lte(transaction.createdAt, periodEnd),
       ));
 
-    // Produced — from productionBatch declarations
+    // Produced — only officer-released good output contributes to stock reconciliation.
     const [producedResult] = await db
-      .select({ total: sql<number>`COALESCE(SUM(${productionBatch.declaredQuantity}), 0)::float8` })
+      .select({ total: sql<number>`COALESCE(SUM(${productionBatch.goodOutputQuantity}), 0)::float8` })
       .from(productionBatch)
       .where(and(
         eq(productionBatch.manufacturerId, businessId),
         eq(productionBatch.productId, productId),
+        eq(productionBatch.materialReviewStatus, 'released'),
         gte(productionBatch.periodStart, periodStart),
         lte(productionBatch.periodEnd, periodEnd),
       ));

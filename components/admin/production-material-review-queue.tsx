@@ -31,6 +31,7 @@ interface Batch {
   manufacturerName: string | null;
   productId: string;
   productName: string;
+  hasRecipe: string | null;
   batchReference: string;
   outputQuantity: number;
   outputUnit: string;
@@ -63,8 +64,10 @@ function ReviewDecision({ endpoint, recordId, actionLabel, outputQuantity, outpu
   const [pending, startTransition] = useTransition();
   const [note, setNote] = useState("");
   const [feedback, setFeedback] = useState("");
-  const [goodOutput, setGoodOutput] = useState(reportedGoodOutputQuantity ?? "");
-  const [rejectedOutput, setRejectedOutput] = useState(reportedRejectedOutputQuantity ?? "");
+  // Never prefill an officer's verification fields with the manufacturer's
+  // report. The reported values remain visible as evidence to compare.
+  const [goodOutput, setGoodOutput] = useState("");
+  const [rejectedOutput, setRejectedOutput] = useState("");
   const [outputEvidenceReference, setOutputEvidenceReference] = useState("");
 
   function submit(decision: "verify" | "reject" | "release", event: React.FormEvent<HTMLFormElement>) {
@@ -99,7 +102,7 @@ function ReviewDecision({ endpoint, recordId, actionLabel, outputQuantity, outpu
           setFeedback(result.error ?? "Review was not saved. Refresh and review the latest evidence.");
           return;
         }
-        setFeedback(decision === "release" ? "Batch released; material and finished-stock movements posted atomically." : decision === "verify" ? "Receipt verified and included in the material ledger." : "Decision recorded. The batch or receipt remains unavailable for posting.");
+          setFeedback(decision === "release" ? "Verified output released to stock and recorded in the audit trail." : decision === "verify" ? "Receipt verified and included in the material ledger." : "Decision recorded. The batch or receipt remains unavailable for posting.");
         router.refresh();
       } catch {
         setFeedback("Could not save the review. Check your connection and retry.");
@@ -152,23 +155,23 @@ export function ProductionMaterialReviewQueue({ receipts, batches, canReviewBatc
       </Card>
 
       {canReviewBatches && <Card>
-        <CardHeader><CardTitle className="flex items-center gap-2 text-base"><ClipboardCheck className="h-4 w-4" /> Production batches held for material review</CardTitle><p className="text-sm text-muted-foreground">Release requires sufficient verified stock for every actual material quantity. Release posts material consumption and finished stock in one database transaction.</p></CardHeader>
+        <CardHeader><CardTitle className="flex items-center gap-2 text-base"><ClipboardCheck className="h-4 w-4" /> Production batches awaiting officer review</CardTitle><p className="text-sm text-muted-foreground">Manufacturer output is provisional. Review the evidence and enter independently verified good and rejected quantities before finished goods are released to stock.</p></CardHeader>
         <CardContent>
           {batches.length === 0 ? <p className="text-sm text-muted-foreground">No production batches awaiting review.</p> : <div className="divide-y">
             {batches.map((batch) => {
               const shortages = batch.materials.filter((material) => Number(material.shortage) > 0);
               return <article id={`production-batch-${batch.id}`} key={batch.id} className={`space-y-3 py-4 first:pt-0 last:pb-0 ${focusBatchId === batch.id ? 'rounded-md bg-primary/5 px-3 ring-2 ring-primary' : ''}`}>
                 <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div><p className="font-medium">{batch.manufacturerName ?? "Manufacturer"} · {batch.productName}</p><p className="text-sm text-muted-foreground">{batch.batchReference} · output {batch.outputQuantity.toLocaleString()} {batch.outputUnit} · {new Date(batch.createdAt).toLocaleString()}</p></div>
+                  <div><p className="font-medium">{batch.manufacturerName ?? "Manufacturer"} · {batch.productName}</p><p className="text-sm text-muted-foreground">{batch.batchReference} · manufacturer reported total {batch.outputQuantity.toLocaleString()} {batch.outputUnit} · {new Date(batch.createdAt).toLocaleString()}</p><p className="mt-1 text-xs text-muted-foreground">Reported good / rejected: {batch.reportedGoodOutputQuantity ?? "not reported"} / {batch.reportedRejectedOutputQuantity ?? "not reported"} {batch.outputUnit}. Verify these independently before release.</p></div>
                   <Badge variant={shortages.length ? "destructive" : "secondary"}>{shortages.length ? `${shortages.length} material shortage${shortages.length === 1 ? "" : "s"}` : batch.validationStatus.replaceAll("_", " ")}</Badge>
                 </div>
-                <div className="overflow-x-auto rounded-md border">
+                {batch.materials.length > 0 ? <div className="overflow-x-auto rounded-md border">
                   <table className="w-full min-w-[560px] text-sm"><thead><tr className="border-b bg-muted/40 text-left"><th className="p-2">Protected material code</th><th className="p-2">Actual used</th><th className="p-2">Verified available</th><th className="p-2">Shortage</th></tr></thead><tbody>
                     {batch.materials.map((material) => <tr key={material.materialId} className="border-b last:border-0"><td className="p-2 font-mono">{material.materialCode}</td><td className="p-2">{material.requiredQuantity} {material.unit}</td><td className="p-2">{material.availableQuantity} {material.unit}</td><td className={Number(material.shortage) > 0 ? "p-2 font-medium text-destructive" : "p-2"}>{material.shortage} {material.unit}</td></tr>)}
                   </tbody></table>
-                </div>
+                </div> : <p className="rounded-md border bg-muted/20 p-3 text-sm text-muted-foreground">No recipe material lines were submitted for this batch. Verify the production output evidence directly; raw-material consumption is not represented here.</p>}
                 {shortages.length > 0 && <p role="alert" className="text-sm text-destructive">Insufficient verified material. Do not release until verified receipts or an authorized evidence-backed adjustment resolves the shortage.</p>}
-                {batch.historyComparison && <details open={focusBatchId === batch.id} className="rounded-md border bg-muted/20 p-3">
+                {batch.historyComparison && batch.hasRecipe && <details open={focusBatchId === batch.id} className="rounded-md border bg-muted/20 p-3">
                   <summary className="cursor-pointer text-sm font-medium">Historical comparison · {batch.historyComparison.alertReasons.length ? 'review signal' : 'recorded'}</summary>
                   <div className="mt-3 space-y-3 text-sm">
                     <p className="text-muted-foreground">Compared {new Date(batch.historyComparison.comparisonAt).toLocaleString()} · rule {batch.historyComparison.ruleVersion}. Signals request human review and are not findings of wrongdoing.</p>

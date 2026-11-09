@@ -179,8 +179,8 @@ export async function searchProductJourney(input: unknown): Promise<ProductJourn
                     businessTin: user.tinNumber,
                     productName: product.name,
                     productId: product.id,
-                    quantity: productionBatch.declaredQuantity,
-                    status: sql<string>`COALESCE(${productionBatch.status}, 'declared')`,
+                    quantity: sql<number>`CASE WHEN ${productionBatch.materialReviewStatus} = 'released' AND ${productionBatch.goodOutputQuantity} IS NOT NULL THEN ${productionBatch.goodOutputQuantity} ELSE ${productionBatch.declaredQuantity} END`,
+                    status: sql<string>`CASE WHEN ${productionBatch.materialReviewStatus} = 'released' AND ${productionBatch.goodOutputQuantity} IS NOT NULL THEN 'officer_verified' ELSE 'manufacturer_reported_unverified' END`,
                     createdAt: productionBatch.createdAt,
                 }).from(productionBatch)
                     .innerJoin(user, eq(productionBatch.manufacturerId, user.id))

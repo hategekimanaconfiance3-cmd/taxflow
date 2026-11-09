@@ -137,6 +137,8 @@ export type MerchantProductionBatch = {
   productName: string;
   quantity: number;
   status: string | null;
+  materialReviewStatus: string;
+  verifiedGoodOutputQuantity: number | null;
   validationStatus: string;
   periodStart: string;
   periodEnd: string;
@@ -477,6 +479,8 @@ export async function getMerchantProfileById(
           productName: product.name,
           quantity: productionBatch.declaredQuantity,
           status: productionBatch.status,
+          materialReviewStatus: productionBatch.materialReviewStatus,
+          verifiedGoodOutputQuantity: productionBatch.goodOutputQuantity,
           productionValidationStatus:
             productionBatch.productionValidationStatus,
           periodStart: productionBatch.periodStart,
@@ -517,6 +521,8 @@ export async function getMerchantProfileById(
       productName: r.productName,
       quantity: r.quantity,
       status: r.status,
+      materialReviewStatus: r.materialReviewStatus,
+      verifiedGoodOutputQuantity: r.verifiedGoodOutputQuantity === null ? null : Number(r.verifiedGoodOutputQuantity),
       validationStatus: r.productionValidationStatus,
       periodStart: r.periodStart.toISOString(),
       periodEnd: r.periodEnd.toISOString(),

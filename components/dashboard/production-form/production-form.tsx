@@ -390,15 +390,15 @@ export function ProductionForm({ products, recipes, plans, vatRate }: Production
                                 </div>
                                 <div className="space-y-3 rounded-lg border p-4">
                                     <h3 className="text-sm font-semibold">3. Finished-goods output</h3>
-                                    <p className="text-xs text-muted-foreground">Compare the planned batch quantity with actual output, then account for acceptable and rejected goods.</p>
+                                    <p className="text-xs text-muted-foreground">Report the batch output and separate good from rejected goods. An authorized officer independently verifies these figures before stock is released.</p>
                                     <div className="grid gap-3 sm:grid-cols-2">
                                     <div className="space-y-1"><Label htmlFor="planned-batch-output">Planned output ({selectedRecipe.productUnit})</Label><Input id="planned-batch-output" value={plannedOutputQuantity} readOnly aria-readonly="true" className="bg-muted/40" /></div>
-                                    <div className="space-y-1"><Label htmlFor="production-quantity">Actual output ({selectedRecipe.productUnit})</Label><Input id="production-quantity" type="number" placeholder="1000" value={quantity} onChange={(event) => { setQuantity(event.target.value); resetSubmissionKey(); }} min="0.0001" step="any" /></div>
+                                    <div className="space-y-1"><Label htmlFor="production-quantity">Reported total output ({selectedRecipe.productUnit})</Label><Input id="production-quantity" type="number" placeholder="1000" value={quantity} onChange={(event) => { setQuantity(event.target.value); resetSubmissionKey(); }} min="0.0001" step="any" /></div>
                                     <div className="space-y-1"><Label htmlFor="good-output">Reported good output ({selectedRecipe.productUnit})</Label><Input id="good-output" type="number" min="0" step="0.000001" value={goodOutputQuantity} onChange={(event) => { setGoodOutputQuantity(event.target.value); resetSubmissionKey(); }} /></div>
                                     <div className="space-y-1"><Label htmlFor="rejected-output">Reported rejected output ({selectedRecipe.productUnit})</Label><Input id="rejected-output" type="number" min="0" step="0.000001" value={rejectedOutputQuantity} onChange={(event) => { setRejectedOutputQuantity(event.target.value); resetSubmissionKey(); }} /></div>
                                     </div>
                                 </div>
-                                <p className="text-xs text-muted-foreground">Reported good output plus rejected output must equal actual total output. Stock remains held until an authorized reviewer verifies and releases the batch.</p>
+                                <p className="text-xs text-muted-foreground">Reported good output plus rejected output must equal reported total output. Stock remains held until an authorized reviewer verifies and releases the batch.</p>
                                 <div className="rounded-md bg-muted/40 p-3 text-xs text-muted-foreground">
                                     <p>Yield standard: {selectedRecipe.yieldToleranceBasisPoints === null ? "Review required · no approved standard" : `${(selectedRecipe.yieldToleranceBasisPoints / 100).toFixed(2)}% · version ${selectedRecipe.yieldToleranceStandardId}`}</p>
                                     <p className="mt-1">Recipe version {selectedRecipe.version} · {selectedRecipe.materials.length} required material lines. Required recipe materials cannot be removed; report zero use with an explanation in production notes.</p>
