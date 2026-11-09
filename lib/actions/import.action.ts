@@ -5,6 +5,7 @@ import { eq, desc, and, inArray, sql } from "drizzle-orm";
 import db from "@/db/drizzle";
 import { importDeclaration, product, productionMaterial, productionMaterialMovement, productionMaterialReceipt, stock, stockMovement, user, auditLog } from "@/db/schema";
 import { requireTraderSession, requireRRASession, requireAnyRRAPermission } from "@/lib/auth-guard";
+import { assertPurchasedStockReceiptEligible } from "@/lib/stock-sell-through-enforcement";
 import { hasRRAPermission } from "@/lib/rra-rbac";
 import { logAudit } from "@/lib/audit";
 import { createNotification } from "@/lib/notifications";
@@ -346,6 +347,7 @@ export async function confirmImportArrival(
         } else {
             // Ordinary imported products continue to update only product stock.
             failureStage = "add inspected quantity to stock";
+            await assertPurchasedStockReceiptEligible(tx, declaration.businessId, declaration.productId, quantityToActivate, session.user.id, "import_declaration", declaration.id);
             await tx.insert(stock)
                 .values({ businessId: declaration.businessId, productId: declaration.productId, quantity: quantityToActivate })
                 .onConflictDoUpdate({
@@ -406,6 +408,7 @@ export async function confirmImportArrival(
             "Inspected quantity must be finite and between 0 and 1,000,000,000.",
             "Declaration status changed concurrently; import was not activated.",
             "Import stock activation could not be confirmed.",
+            "Restocking is unavailable for ",
             "Confidential material imports require the dedicated material receipt review permission.",
             "Confidential material ownership or unit validation failed.",
         ].find((message) => error.message.startsWith(message)) : undefined;

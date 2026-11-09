@@ -265,7 +265,8 @@ export const stockSellThroughThreshold = pgTable(
     thresholdPercent: real('threshold_percent').notNull(),
     effectiveAt: timestamp('effective_at').notNull(),
     reason: text('reason').notNull(),
-    createdByUserId: text('created_by_user_id').notNull().references(() => user.id),
+    createdByUserId: text('created_by_user_id').references(() => user.id),
+    createdByRole: text('created_by_role'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
   },
   (table) => [
@@ -341,7 +342,7 @@ export const stockRestockRequest = pgTable(
     check('stock_restock_request_owner_check', sql`${table.requestedByUserId} = ${table.businessId}`),
     check('stock_restock_request_quantities_check', sql`${table.baselineQuantity} >= 0 AND ${table.cohortQuantity} >= 0 AND ${table.qualifyingSalesQuantity} >= 0 AND ${table.requiredSalesQuantity} >= 0`),
     check('stock_restock_request_eligibility_check', sql`${table.eligibilityStatus} IN ('eligible', 'blocked', 'review_required')`),
-    check('stock_restock_request_exception_check', sql`${table.exceptionStatus} IN ('none', 'pending', 'approved', 'rejected')`),
+    check('stock_restock_request_exception_check', sql`${table.exceptionStatus} IN ('none', 'pending', 'approved', 'rejected', 'consumed')`),
     check('stock_restock_request_threshold_check', sql`${table.thresholdPercent} IS NULL OR (${table.thresholdPercent} >= 0 AND ${table.thresholdPercent} <= 100)`),
     check('stock_restock_request_sell_through_check', sql`${table.sellThroughPercent} IS NULL OR (${table.sellThroughPercent} >= 0 AND ${table.sellThroughPercent} <= 100)`),
     check('stock_restock_request_exception_reason_check', sql`${table.exceptionStatus} = 'none' OR ${table.exceptionReason} IS NOT NULL`),

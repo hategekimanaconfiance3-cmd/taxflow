@@ -81,16 +81,32 @@ test("zero percent is eligible without sales and 75/100 percent thresholds use r
   assert.equal(calculateSellThrough(input({ thresholdPercent: 100 })).status, "blocked");
 });
 
-test("verified inbound stock increases the cohort denominator before sell-through is compared", () => {
+test("FIFO requires each prior purchase lot to meet sell-through even if the aggregate ratio qualifies", () => {
   const movements = [
     movement("1", "import_receipt", 20, 100, "import-1"),
     movement("2", "retail_sale", -90, 120, "sale-1"),
   ];
   const result = calculateSellThrough(input({ currentQuantity: 30, movements }));
-  assert.equal(result.availableCohortQuantity, 120);
-  assert.equal(result.qualifyingSalesQuantity, 90);
-  assert.equal(result.sellThroughPercent, 75);
-  assert.equal(result.status, "eligible");
+  assert.equal(result.availableCohortQuantity, 20);
+  assert.equal(result.qualifyingSalesQuantity, 0);
+  assert.equal(result.sellThroughPercent, 0);
+  assert.equal(result.remainingSalesQuantity, 15);
+  assert.equal(result.status, "blocked");
+});
+
+test("FIFO allocation prevents over-selling an earlier batch from qualifying a newer purchase", () => {
+  const movements = [
+    movement("1", "b2b_receipt_accepted", 100, 0, "receipt-1"),
+    movement("2", "retail_sale", -100, 100, "sale-1"),
+    movement("3", "import_receipt", 100, 0, "receipt-2"),
+    movement("4", "retail_sale", -50, 100, "sale-2"),
+  ];
+  const result = calculateSellThrough(input({ baselineQuantity: 0, currentQuantity: 50, movements }));
+  assert.equal(result.availableCohortQuantity, 100);
+  assert.equal(result.qualifyingSalesQuantity, 50);
+  assert.equal(result.sellThroughPercent, 50);
+  assert.equal(result.remainingSalesQuantity, 25);
+  assert.equal(result.status, "blocked");
 });
 
 test("legacy baselines, reservations, broken ledgers, duplicate sales, and non-sale reductions require review", () => {

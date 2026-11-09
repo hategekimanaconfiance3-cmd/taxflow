@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useTransition } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import type { z } from "zod";
@@ -61,8 +61,8 @@ export function RestockRequestForm({ products, idempotencyKey }: { products: Pro
       </div>
       <input type="hidden" {...form.register("idempotencyKey")} />
       <label className="block space-y-1 text-sm font-medium">
-        Exception reason (optional)
-        <textarea className={`${controlClass} min-h-20`} placeholder="If the threshold is not met, explain why an exception should be reviewed." {...form.register("exceptionReason")} disabled={pending} />
+          Request officer review (optional)
+        <textarea className={`${controlClass} min-h-20`} placeholder="If stock history is incomplete or an exception is needed, explain why an officer should review it." {...form.register("exceptionReason")} disabled={pending} />
         <ErrorText>{form.formState.errors.exceptionReason?.message}</ErrorText>
       </label>
       {products.length === 0 && <p className="text-sm text-muted-foreground">No products are currently available to request.</p>}
@@ -74,22 +74,17 @@ export function RestockRequestForm({ products, idempotencyKey }: { products: Pro
 }
 
 export function SellThroughThresholdForm({
-  products,
-  categories,
   canManageGlobal,
   effectiveAtDefault,
 }: {
-  products: ProductOption[];
-  categories: string[];
   canManageGlobal: boolean;
   effectiveAtDefault: string;
 }) {
   const [pending, startTransition] = useTransition();
   const form = useForm<z.input<typeof stockSellThroughThresholdSchema>, unknown, z.output<typeof stockSellThroughThresholdSchema>>({
     resolver: zodResolver(stockSellThroughThresholdSchema),
-    defaultValues: { scopeType: canManageGlobal ? "default" : "category", scopeKey: canManageGlobal ? "*" : categories[0] ?? "", thresholdPercent: "", effectiveAt: effectiveAtDefault, reason: "" },
+    defaultValues: { scopeType: "default", scopeKey: "*", thresholdPercent: "", effectiveAt: effectiveAtDefault, reason: "" },
   });
-  const [scopeType, setScopeType] = useState<"default" | "category" | "product">(canManageGlobal ? "default" : "category");
 
   const submit = form.handleSubmit((values) => {
     const data = new FormData();
@@ -103,36 +98,9 @@ export function SellThroughThresholdForm({
 
   return (
     <form onSubmit={submit} className="grid gap-4 md:grid-cols-2">
-      <label className="space-y-1 text-sm font-medium">
-        Threshold scope
-        <select className={controlClass} {...form.register("scopeType", { onChange: (event) => setScopeType(event.target.value as "default" | "category" | "product") })} disabled={pending}>
-          {canManageGlobal && <option value="default">System default</option>}
-          <option value="category">Product category</option>
-          <option value="product">Specific product</option>
-        </select>
-        <ErrorText>{form.formState.errors.scopeType?.message}</ErrorText>
-      </label>
-      {scopeType === "default" ? (
-        <input type="hidden" value="*" {...form.register("scopeKey")} />
-      ) : scopeType === "category" ? (
-        <label className="space-y-1 text-sm font-medium">
-          Category
-          <select className={controlClass} {...form.register("scopeKey")} disabled={pending || categories.length === 0}>
-            <option value="">Choose a category</option>
-            {categories.map((category) => <option key={category} value={category}>{category}</option>)}
-          </select>
-          <ErrorText>{form.formState.errors.scopeKey?.message}</ErrorText>
-        </label>
-      ) : (
-        <label className="space-y-1 text-sm font-medium">
-          Product
-          <select className={controlClass} {...form.register("scopeKey")} disabled={pending || products.length === 0}>
-            <option value="">Choose a product</option>
-            {products.map((item) => <option key={item.id} value={item.id}>{item.name} ({item.unit})</option>)}
-          </select>
-          <ErrorText>{form.formState.errors.scopeKey?.message}</ErrorText>
-        </label>
-      )}
+      <input type="hidden" value="default" {...form.register("scopeType")} />
+      <input type="hidden" value="*" {...form.register("scopeKey")} />
+      <p className="text-sm font-medium">Applies globally to all sellers and products</p>
       <label className="space-y-1 text-sm font-medium">
         Sell-through percentage
         <input className={controlClass} type="number" min="0" max="100" step="0.01" {...form.register("thresholdPercent")} disabled={pending} />
@@ -149,8 +117,8 @@ export function SellThroughThresholdForm({
         <ErrorText>{form.formState.errors.reason?.message}</ErrorText>
       </label>
       <div className="md:col-span-2">
-        <button className={buttonClass} type="submit" disabled={pending || (scopeType === "category" && categories.length === 0) || (scopeType === "product" && products.length === 0)}>
-          {pending ? "Saving…" : "Schedule threshold"}
+        <button className={buttonClass} type="submit" disabled={pending || !canManageGlobal}>
+          {pending ? "Saving…" : "Save global threshold"}
         </button>
       </div>
     </form>

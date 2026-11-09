@@ -8,7 +8,7 @@ import { RestockRequestForm } from "@/components/stock-control/forms";
 
 const RESULT_MESSAGES: Record<string, { tone: string; text: string }> = {
   eligible: { tone: "border-emerald-300 bg-emerald-50 text-emerald-900", text: "The request passed the active recorded sell-through check. This result does not create a supplier order, goods receipt, inventory movement, or VAT posting." },
-  blocked: { tone: "border-amber-300 bg-amber-50 text-amber-900", text: "The recorded sales are below the active threshold, so this request did not pass the eligibility check." },
+  blocked: { tone: "border-amber-300 bg-amber-50 text-amber-900", text: "Restocking is currently unavailable for this product. Review the sales percentage, required threshold, and remaining units shown below." },
   review_required: { tone: "border-amber-300 bg-amber-50 text-amber-900", text: "TaxFlow could not verify this stock cohort. An authorized stock officer must review the recorded balance or evidence." },
   exception_pending: { tone: "border-blue-300 bg-blue-50 text-blue-900", text: "Your exception request was recorded and is awaiting an authorized officer’s decision." },
   invalid: { tone: "border-red-300 bg-red-50 text-red-800", text: "The request details were invalid. Check the product, quantity, and exception reason." },
@@ -25,7 +25,7 @@ function statusLabel(status: string): string {
 }
 
 export default async function RestockRequestsPage({ searchParams }: { searchParams: Promise<{ result?: string; reference?: string }> }) {
-  await requireTraderSession(["manufacturer"]);
+  await requireTraderSession(["manufacturer", "wholesaler", "retailer"]);
   const { user, suspended } = await requireApprovedClearance();
   const params = await searchParams;
   const notice = params.result ? RESULT_MESSAGES[params.result] : undefined;
@@ -109,7 +109,7 @@ export default async function RestockRequestsPage({ searchParams }: { searchPara
                   </div>
                 </div>
                 <p className="mt-2 text-sm">{request.eligibilityReason}</p>
-                {request.eligibilityStatus !== "review_required" && request.thresholdPercent !== null && <p className="mt-1 text-sm text-muted-foreground">Recorded sales: {request.qualifyingSalesQuantity.toLocaleString()} of {request.cohortQuantity.toLocaleString()} cohort units; {request.requiredSalesQuantity.toLocaleString()} sales required at the {request.thresholdPercent}% threshold{request.sellThroughPercent === null ? "" : ` (${request.sellThroughPercent.toFixed(1)}% recorded sell-through)`}.</p>}
+                {request.thresholdPercent !== null && <p className="mt-1 text-sm text-muted-foreground">FIFO purchase batch under review: {request.cohortQuantity.toLocaleString()} {request.productUnit}. Sold from this batch: {request.qualifyingSalesQuantity.toLocaleString()} ({request.sellThroughPercent === null ? "unknown" : `${request.sellThroughPercent.toFixed(1)}%`}). Required: {request.thresholdPercent}% ({request.requiredSalesQuantity.toLocaleString()}). Remaining to sell from this batch: {Math.max(0, request.requiredSalesQuantity - request.qualifyingSalesQuantity).toLocaleString()} {request.productUnit}. Eligibility: {statusLabel(request.eligibilityStatus)}.</p>}
                 <p className="mt-1 text-xs text-muted-foreground">Calculation cohort began {request.cycleStartedAt.toLocaleString()}.</p>
                 {request.exceptionReason && <p className="mt-2 text-sm text-muted-foreground">Exception reason: {request.exceptionReason}</p>}
                 {request.reviewReason && <p className="mt-2 text-sm text-muted-foreground">Officer response{request.reviewedAt ? ` · ${request.reviewedAt.toLocaleString()}` : ""}: {request.reviewReason}</p>}

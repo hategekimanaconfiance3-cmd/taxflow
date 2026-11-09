@@ -237,7 +237,7 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 label: "Stock Control",
                 href: "/admin/stock-control",
                 icon: SlidersHorizontal,
-                allowedRoles: ["super_admin", "stock_control_admin"],
+                allowedRoles: ["super_admin", "stock_control_admin", "stock_officer"],
             },
             {
                 label: "Supply Chain",

@@ -1,10 +1,11 @@
 'use server';
 
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, gt, sql } from 'drizzle-orm';
 import db from '@/db/drizzle';
 import { auditLog, b2bDispatch, b2bOrderAcceptance, b2bReceipt, businessRepresentative, product, stock, stockMovement, stockReservation, transaction, user } from '@/db/schema';
 import { assertBusinessActor, assertVerifiedBusinessOwner } from '@/lib/b2b-authorization';
 import { requireTraderSession } from '@/lib/auth-guard';
+import { assertPurchasedStockReceiptEligible } from '@/lib/stock-sell-through-enforcement';
 import { dispatchInputSchema, receiptInputSchema, representativeIdSchema, representativeInviteSchema } from '@/lib/validation/b2b-fulfillment.schema';
 
 function parseOrThrow<T>(schema: { safeParse: (value: unknown) => { success: true; data: T } | { success: false } }, input: unknown): T {
@@ -241,6 +242,17 @@ export async function recordB2BReceipt(input: unknown): Promise<{ success: true;
       .from(b2bReceipt).where(eq(b2bReceipt.dispatchId, dispatch.id));
     if (Number(totals?.quantity ?? 0) + data.quantityReceived - dispatch.quantity > 0.000001) {
       throw new Error('Measured receipt quantity cannot exceed the quantity recorded on this dispatch.');
+    }
+
+    if (data.acceptedQuantity > 0) {
+      const [priorAcceptedPart] = await tx.select({ id: b2bReceipt.id }).from(b2bReceipt).where(and(
+        eq(b2bReceipt.transactionId, txn.id), gt(b2bReceipt.acceptedQuantity, 0),
+      )).limit(1);
+      // Partial deliveries belonging to the same already-accepted purchase are
+      // one purchase batch; only a new purchase is subject to the threshold.
+      if (!priorAcceptedPart) {
+        await assertPurchasedStockReceiptEligible(tx, txn.buyerId, txn.productId, data.acceptedQuantity, session.user.id, "b2b_transaction", txn.id);
+      }
     }
 
     const [saved] = await tx.insert(b2bReceipt).values({

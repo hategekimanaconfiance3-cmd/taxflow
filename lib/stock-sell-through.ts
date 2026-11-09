@@ -55,6 +55,7 @@ export interface SellThroughCalculation {
 const EPSILON = 0.000001;
 const SALE_MOVEMENTS = new Set(["sale", "retail_sale"]);
 const INBOUND_MOVEMENTS = new Set(["production", "import_receipt", "b2b_receipt_accepted"]);
+const PURCHASE_MOVEMENTS = new Set(["import_receipt", "b2b_receipt_accepted"]);
 
 /** Resolve product > category > default, then latest effective record in scope. */
 export function resolveSellThroughThreshold<T extends SellThroughThresholdRecord>(
@@ -96,10 +97,10 @@ function review(input: SellThroughCalculationInput, reason: string): SellThrough
 }
 
 /**
- * Calculate eligibility from one prospective aggregate-stock cohort.
- * Only recorded sales reduce sell-through; inbound movements enlarge its
- * denominator. Unsupported movement types, broken ledger chains, and legacy
- * opening balances fail closed to officer review.
+ * Allocate sales to inventory using FIFO. Each imported or B2B receipt is a
+ * separate purchase lot; production/opening quantities are FIFO lots too, but
+ * only purchase lots contribute to the 75% restock requirement. Unsupported
+ * movements and broken ledgers fail closed to officer review.
  */
 export function calculateSellThrough(input: SellThroughCalculationInput): SellThroughCalculation {
   const threshold = input.thresholdPercent;
@@ -131,8 +132,6 @@ export function calculateSellThrough(input: SellThroughCalculationInput): SellTh
     .sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime() || left.id.localeCompare(right.id));
 
   let expectedBefore = input.baselineQuantity;
-  let availableCohortQuantity = input.baselineQuantity;
-  let qualifyingSalesQuantity = 0;
   let reviewReason: string | null = null;
   const countedSaleSources = new Set<string>();
 
@@ -157,8 +156,6 @@ export function calculateSellThrough(input: SellThroughCalculationInput): SellTh
         continue;
       }
       countedSaleSources.add(movement.sourceId);
-      qualifyingSalesQuantity += Math.abs(movement.quantityDelta);
-      if (!Number.isFinite(qualifyingSalesQuantity)) reviewReason ??= "Recorded sales exceed the supported calculation range.";
       continue;
     }
 
@@ -167,8 +164,6 @@ export function calculateSellThrough(input: SellThroughCalculationInput): SellTh
         reviewReason ??= "An inbound stock movement is missing reliable source evidence.";
         continue;
       }
-      availableCohortQuantity += movement.quantityDelta;
-      if (!Number.isFinite(availableCohortQuantity)) reviewReason ??= "The stock cohort exceeds the supported calculation range.";
       continue;
     }
 
@@ -185,6 +180,11 @@ export function calculateSellThrough(input: SellThroughCalculationInput): SellTh
     reviewReason ??= `Movement type '${movement.movementType}' is not included in the sell-through calculation.`;
   }
 
+  const purchaseSaleSources = new Set<string>();
+  const saleEvents: Array<{ at: number; id: string; quantity: number; sourceId: string }> = movements
+    .filter((movement) => SALE_MOVEMENTS.has(movement.movementType)
+      && movement.quantityDelta < 0 && Boolean(movement.sourceId))
+    .map((movement) => ({ at: movement.createdAt.getTime(), id: movement.id, quantity: Math.abs(movement.quantityDelta), sourceId: movement.sourceId! }));
   for (const sale of input.acceptedB2BSales) {
     const acceptedAt = sale.acceptedAt.getTime();
     if (!Number.isFinite(acceptedAt) || !sale.transactionId || !Number.isFinite(sale.quantity) || sale.quantity <= 0) {
@@ -197,36 +197,82 @@ export function calculateSellThrough(input: SellThroughCalculationInput): SellTh
     if (sale.reservedAt && sale.reservedAt.getTime() < cycleStart) continue;
     if (countedSaleSources.has(sale.transactionId)) continue;
     countedSaleSources.add(sale.transactionId);
-    qualifyingSalesQuantity += sale.quantity;
-    if (!Number.isFinite(qualifyingSalesQuantity)) reviewReason ??= "Recorded sales exceed the supported calculation range.";
+    if (purchaseSaleSources.has(sale.transactionId)) {
+      reviewReason ??= "Duplicate buyer acceptance evidence was found.";
+      continue;
+    }
+    purchaseSaleSources.add(sale.transactionId);
+    saleEvents.push({ at: acceptedAt, id: `accepted:${sale.transactionId}`, quantity: sale.quantity, sourceId: sale.transactionId });
   }
 
   if (Math.abs(expectedBefore - input.currentQuantity) > EPSILON) {
     reviewReason ??= "The movement ledger does not reconcile with current available stock.";
   }
-  if (qualifyingSalesQuantity - availableCohortQuantity > EPSILON) {
-    reviewReason ??= "Recorded sales exceed the stock quantity available in this cohort.";
+  if (reviewReason) return review(input, reviewReason);
+
+  type Lot = { received: number; remaining: number; purchase: boolean };
+  const lots: Lot[] = input.baselineQuantity > EPSILON
+    ? [{ received: input.baselineQuantity, remaining: input.baselineQuantity, purchase: true }]
+    : [];
+  const movementEvents = movements
+    .filter((movement) => INBOUND_MOVEMENTS.has(movement.movementType)
+      || SALE_MOVEMENTS.has(movement.movementType))
+    .map((movement) => ({ at: movement.createdAt.getTime(), id: movement.id, movement }));
+  const acceptedEvents = saleEvents
+    .filter((event) => event.id.startsWith("accepted:"))
+    .map((event) => ({ at: event.at, id: event.id, accepted: event }));
+  const events = [...movementEvents, ...acceptedEvents].sort((left, right) => left.at - right.at || left.id.localeCompare(right.id));
+  for (const event of events) {
+    if ("movement" in event) {
+      const movement = event.movement;
+      if (INBOUND_MOVEMENTS.has(movement.movementType)) {
+        lots.push({ received: movement.quantityDelta, remaining: movement.quantityDelta, purchase: PURCHASE_MOVEMENTS.has(movement.movementType) });
+        continue;
+      }
+    }
+    const saleQuantity = "movement" in event
+      ? Math.abs(event.movement.quantityDelta)
+      : event.accepted.quantity;
+    let remaining = saleQuantity;
+    for (const lot of lots) {
+      if (remaining <= EPSILON) break;
+      const used = Math.min(lot.remaining, remaining);
+      lot.remaining -= used;
+      remaining -= used;
+    }
+    if (remaining > EPSILON) reviewReason ??= "Recorded sales exceed the FIFO stock lots supported by the ledger.";
   }
   if (reviewReason) return review(input, reviewReason);
 
-  const requiredSalesQuantity = availableCohortQuantity * threshold / 100;
-  if (!Number.isFinite(requiredSalesQuantity)) return review(input, "The sell-through requirement exceeds the supported calculation range.");
-  const remainingSalesQuantity = Math.max(0, requiredSalesQuantity - qualifyingSalesQuantity);
+  const purchaseLots = lots.filter((lot) => lot.purchase).map((lot) => ({
+    quantity: lot.received,
+    sold: lot.received - lot.remaining,
+    required: lot.received * threshold / 100,
+  }));
+  const totalRemainingSales = purchaseLots.reduce((sum, lot) => sum + Math.max(0, lot.required - lot.sold), 0);
+  const limitingLot = purchaseLots.find((lot) => lot.required - lot.sold > EPSILON) ?? purchaseLots.at(-1);
+  const availableCohortQuantity = limitingLot?.quantity ?? 0;
+  const lotSalesQuantity = limitingLot?.sold ?? 0;
+  const requiredSalesQuantity = limitingLot?.required ?? 0;
+  if (![totalRemainingSales, availableCohortQuantity, lotSalesQuantity, requiredSalesQuantity].every(Number.isFinite)) {
+    return review(input, "The sell-through requirement exceeds the supported calculation range.");
+  }
+  const remainingSalesQuantity = Math.max(0, requiredSalesQuantity - lotSalesQuantity);
   const sellThroughPercent = availableCohortQuantity > EPSILON
-    ? (qualifyingSalesQuantity / availableCohortQuantity) * 100
+    ? (lotSalesQuantity / availableCohortQuantity) * 100
     : null;
-  const status: SellThroughEligibilityStatus = remainingSalesQuantity <= EPSILON ? "eligible" : "blocked";
-  const reason = availableCohortQuantity <= EPSILON
+  const status: SellThroughEligibilityStatus = totalRemainingSales <= EPSILON ? "eligible" : "blocked";
+  const reason = purchaseLots.length === 0
     ? "No prior recorded stock cohort exists; this initial restock request has no sales requirement."
     : status === "eligible"
-      ? `Recorded sales meet the ${threshold}% threshold for this stock cohort.`
-      : `Recorded sales are short of the ${threshold}% threshold by ${remainingSalesQuantity} units.`;
+      ? `Recorded sales meet the ${threshold}% threshold for every FIFO purchase lot.`
+      : `Recorded sales are short of the ${threshold}% threshold by ${remainingSalesQuantity} units on the oldest unqualified FIFO purchase lot.`;
 
   return {
     status,
     baselineQuantity: input.baselineQuantity,
     availableCohortQuantity,
-    qualifyingSalesQuantity,
+    qualifyingSalesQuantity: lotSalesQuantity,
     requiredSalesQuantity,
     remainingSalesQuantity,
     sellThroughPercent,

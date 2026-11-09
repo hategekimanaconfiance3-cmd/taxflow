@@ -131,7 +131,7 @@ export const SIDEBAR_GROUPS: SidebarGroup[] = [
                 label: "Restock Requests",
                 href: "/dashboard/restock",
                 icon: ClipboardList,
-                roles: ["manufacturer"],
+                roles: ["manufacturer", "wholesaler", "retailer"],
             },
             {
                 label: "Imports",

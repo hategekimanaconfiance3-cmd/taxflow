@@ -64,24 +64,12 @@ async function evaluateRequest(
   if (!stockRow) throw new Error("PRODUCT_NOT_HELD");
   const stockQuantity = Number(stockRow?.quantity ?? 0);
 
-  const thresholdScopes = await Promise.all([
-    tx.select().from(stockSellThroughThreshold).where(and(
-      eq(stockSellThroughThreshold.scopeType, "product"),
-      eq(stockSellThroughThreshold.scopeKey, productId),
-      lte(stockSellThroughThreshold.effectiveAt, at),
-    )).orderBy(desc(stockSellThroughThreshold.effectiveAt), desc(stockSellThroughThreshold.createdAt), desc(stockSellThroughThreshold.id)).limit(1),
-    ...(productRow.categoryCode ? [tx.select().from(stockSellThroughThreshold).where(and(
-      eq(stockSellThroughThreshold.scopeType, "category"),
-      eq(stockSellThroughThreshold.scopeKey, productRow.categoryCode),
-      lte(stockSellThroughThreshold.effectiveAt, at),
-    )).orderBy(desc(stockSellThroughThreshold.effectiveAt), desc(stockSellThroughThreshold.createdAt), desc(stockSellThroughThreshold.id)).limit(1)] : []),
-    tx.select().from(stockSellThroughThreshold).where(and(
+  const thresholdRows = await tx.select().from(stockSellThroughThreshold).where(and(
       eq(stockSellThroughThreshold.scopeType, "default"),
       eq(stockSellThroughThreshold.scopeKey, "*"),
       lte(stockSellThroughThreshold.effectiveAt, at),
-    )).orderBy(desc(stockSellThroughThreshold.effectiveAt), desc(stockSellThroughThreshold.createdAt), desc(stockSellThroughThreshold.id)).limit(1),
-  ]);
-  const threshold = resolveSellThroughThreshold(thresholdScopes.flat() as SellThroughThresholdRecord[], productId, productRow.categoryCode, at);
+    )).orderBy(desc(stockSellThroughThreshold.effectiveAt), desc(stockSellThroughThreshold.createdAt), desc(stockSellThroughThreshold.id)).limit(1);
+  const threshold = resolveSellThroughThreshold(thresholdRows as SellThroughThresholdRecord[], productId, null, at);
 
   const [historicalMovement] = await tx.select({ id: stockMovement.id }).from(stockMovement).where(and(
     eq(stockMovement.businessId, businessId),
@@ -187,7 +175,7 @@ async function evaluateRequest(
 
 /** Create a restock eligibility request using only the signed-in trader identity. */
 export async function createRestockRequestAction(formData: FormData): Promise<void> {
-  const session = await requireTraderSession(["manufacturer"]);
+  const session = await requireTraderSession(["manufacturer", "wholesaler", "retailer"]);
   const requestId = randomUUID();
   const { suspended, clearanceStatus } = await requireApprovedClearance();
   if (suspended) redirect(`/dashboard/restock?result=clearance&status=${encodeURIComponent(clearanceStatus)}`);
@@ -380,9 +368,11 @@ export async function createSellThroughThresholdAction(formData: FormData): Prom
   });
   if (!parsed.success) redirect("/admin/stock-control?result=invalid");
 
-  const managePermission = parsed.data.scopeType === "default"
-    ? "stock.threshold.manage.global"
-    : "stock.threshold.manage.scoped";
+  // This policy is global: scoped revisions could silently exempt one product
+  // or category from the universal seller rule.
+  if (parsed.data.scopeType !== "default") redirect("/admin/stock-control?result=invalid");
+
+  const managePermission = "stock.threshold.manage.global";
   if (!staff.clearanceRoles.some((role) => hasRRAPermission(role, managePermission))) {
     redirect("/admin/stock-control?result=unauthorized");
   }
@@ -395,14 +385,6 @@ export async function createSellThroughThresholdAction(formData: FormData): Prom
 
   try {
     await db.transaction(async (tx) => {
-      if (parsed.data.scopeType === "product") {
-        const [matchedProduct] = await tx.select({ id: product.id }).from(product).where(eq(product.id, key)).limit(1);
-        if (!matchedProduct) throw new Error("THRESHOLD_SCOPE_NOT_FOUND");
-      }
-      if (parsed.data.scopeType === "category") {
-        const [matchedCategory] = await tx.select({ id: product.id }).from(product).where(eq(product.categoryCode, key)).limit(1);
-        if (!matchedCategory) throw new Error("THRESHOLD_SCOPE_NOT_FOUND");
-      }
       const [previousThreshold] = await tx.select({
         id: stockSellThroughThreshold.id,
         thresholdPercent: stockSellThroughThreshold.thresholdPercent,
@@ -419,6 +401,7 @@ export async function createSellThroughThresholdAction(formData: FormData): Prom
         effectiveAt,
         reason: parsed.data.reason,
         createdByUserId: actor.id,
+        createdByRole: staff.clearanceRoles.find((role) => hasRRAPermission(role, managePermission)) ?? null,
       }).returning({ id: stockSellThroughThreshold.id });
       if (!saved) throw new Error("THRESHOLD_NOT_SAVED");
       await tx.insert(auditLog).values({
@@ -438,7 +421,10 @@ export async function createSellThroughThresholdAction(formData: FormData): Prom
           effectiveAt: effectiveAt.toISOString(),
           reason: parsed.data.reason,
         },
-        metadata: JSON.stringify({ globalScope: parsed.data.scopeType === "default" }),
+        metadata: JSON.stringify({
+          globalScope: true,
+          administrativeRole: staff.clearanceRoles.find((role) => hasRRAPermission(role, managePermission)) ?? null,
+        }),
       });
     });
   } catch (error) {

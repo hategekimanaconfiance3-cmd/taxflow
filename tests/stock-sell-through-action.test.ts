@@ -9,12 +9,12 @@ function actionBlock(source: string, name: string): string {
   return source.slice(start, next >= 0 ? next : undefined);
 }
 
-test("manufacturer-only restock request derives the business from the authenticated trader and writes request plus audit transactionally", async () => {
+test("all reseller roles can request eligibility using the authenticated business and the action writes transactionally", async () => {
   const source = await readFile(new URL("../lib/actions/stock-sell-through.action.ts", import.meta.url), "utf8");
   const action = actionBlock(source, "createRestockRequestAction");
 
-  assert.match(action, /requireTraderSession\(\["manufacturer"\]\)/);
-  assert.ok(action.indexOf('requireTraderSession(["manufacturer"])') < action.indexOf("const requestId"), "role check must reject unauthorized traders before request processing");
+  assert.match(action, /requireTraderSession\(\["manufacturer", "wholesaler", "retailer"\]\)/);
+  assert.ok(action.indexOf('requireTraderSession(["manufacturer", "wholesaler", "retailer"])') < action.indexOf("const requestId"), "role check must reject unauthorized traders before request processing");
   assert.match(action, /const businessId = session\.user\.id/);
   assert.doesNotMatch(action, /businessId:\s*field\(formData/);
   assert.match(action, /db\.transaction\(async \(tx\) =>/);
@@ -29,7 +29,7 @@ test("manufacturer-only restock request derives the business from the authentica
   assert.match(source, /\.for\("update"\)/);
 });
 
-test("restock navigation and dashboard shortcuts are not offered to wholesalers or retailers; direct page access is restricted", async () => {
+test("restock navigation and page access cover all reseller roles", async () => {
   const [sidebar, quickActions, page] = await Promise.all([
     readFile(new URL("../lib/sidebar-config.ts", import.meta.url), "utf8"),
     readFile(new URL("../components/dashboard/quick-actions/quick-actions.tsx", import.meta.url), "utf8"),
@@ -38,12 +38,12 @@ test("restock navigation and dashboard shortcuts are not offered to wholesalers 
 
   const restockNav = sidebar.match(/label: "Restock Requests",[\s\S]*?roles: (\[[^\]]+\]|"all")/);
   assert.ok(restockNav, "restock navigation should declare its allowed roles");
-  assert.equal(restockNav[1], '["manufacturer"]');
+  assert.equal(restockNav[1], '["manufacturer", "wholesaler", "retailer"]');
   assert.doesNotMatch(quickActions, /label: ['"]Restock['"], href: ['"]\/dashboard\/restock/);
   assert.match(quickActions, /label: 'Sell to Buyer', href: '\/dashboard\/sell'/);
   assert.match(quickActions, /label: 'Record Sale', href: '\/dashboard\/record-sale'/);
-  assert.match(page, /requireTraderSession\(\["manufacturer"\]\)/);
-  assert.ok(page.indexOf('requireTraderSession(["manufacturer"])') < page.indexOf("db.selectDistinct"), "role check must run before restock data is read");
+  assert.match(page, /requireTraderSession\(\["manufacturer", "wholesaler", "retailer"\]\)/);
+  assert.ok(page.indexOf('requireTraderSession(["manufacturer", "wholesaler", "retailer"])') < page.indexOf("db.selectDistinct"), "role check must run before restock data is read");
 });
 
 test("threshold edits enforce explicit global versus scoped RBAC inside the server action", async () => {
@@ -52,9 +52,11 @@ test("threshold edits enforce explicit global versus scoped RBAC inside the serv
 
   assert.match(action, /requireRRAPermission\("stock\.threshold\.read"\)/);
   assert.match(action, /stock\.threshold\.manage\.global/);
-  assert.match(action, /stock\.threshold\.manage\.scoped/);
+  assert.match(action, /stock\.threshold\.manage\.global/);
   assert.match(action, /hasRRAPermission\(role, managePermission\)/);
   assert.match(action, /tx\.insert\(auditLog\)/);
+  assert.match(action, /administrativeRole:/);
+  assert.match(action, /parsed\.data\.scopeType !== "default"/);
   assert.match(action, /effectiveAt\.getTime\(\) < Date\.now\(\)/);
 });
 

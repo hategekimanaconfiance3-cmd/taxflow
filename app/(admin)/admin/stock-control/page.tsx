@@ -57,12 +57,11 @@ export default async function AdminStockControlPage({
   const reviewer = alias(user, "stock_restock_reviewer");
   const thresholdActor = alias(user, "stock_threshold_actor");
   const canManageGlobal = staff.clearanceRoles.some((role) => hasRRAPermission(role, "stock.threshold.manage.global"));
-  const canManageScoped = staff.clearanceRoles.some((role) => hasRRAPermission(role, "stock.threshold.manage.scoped"));
 
   const requestWhere = condition;
-  const [products, activeThresholdRows, thresholdHistory, totalRows] = await Promise.all([
-    db.select({ id: product.id, name: product.name, unit: product.unit, categoryCode: product.categoryCode })
-      .from(product).orderBy(product.name).limit(500),
+  const canManageBaseline = staff.clearanceRoles.some((role) => hasRRAPermission(role, "stock.restock.baseline.attest"));
+  const canReviewExceptions = staff.clearanceRoles.some((role) => hasRRAPermission(role, "stock.restock.exception.review"));
+  const [activeThresholdRows, thresholdHistory, totalRows] = await Promise.all([
     db.selectDistinctOn([stockSellThroughThreshold.scopeType, stockSellThroughThreshold.scopeKey], {
       id: stockSellThroughThreshold.id,
       scopeType: stockSellThroughThreshold.scopeType,
@@ -71,7 +70,10 @@ export default async function AdminStockControlPage({
       effectiveAt: stockSellThroughThreshold.effectiveAt,
       reason: stockSellThroughThreshold.reason,
       createdAt: stockSellThroughThreshold.createdAt,
-    }).from(stockSellThroughThreshold).where(lte(stockSellThroughThreshold.effectiveAt, now))
+    }).from(stockSellThroughThreshold).where(and(
+      eq(stockSellThroughThreshold.scopeType, "default"), eq(stockSellThroughThreshold.scopeKey, "*"),
+      lte(stockSellThroughThreshold.effectiveAt, now),
+    ))
       .orderBy(asc(stockSellThroughThreshold.scopeType), asc(stockSellThroughThreshold.scopeKey), desc(stockSellThroughThreshold.effectiveAt), desc(stockSellThroughThreshold.createdAt), desc(stockSellThroughThreshold.id)),
     db.select({
       id: stockSellThroughThreshold.id,
@@ -81,9 +83,12 @@ export default async function AdminStockControlPage({
       effectiveAt: stockSellThroughThreshold.effectiveAt,
       reason: stockSellThroughThreshold.reason,
       createdAt: stockSellThroughThreshold.createdAt,
+      actorRole: stockSellThroughThreshold.createdByRole,
       actorName: thresholdActor.name,
-    }).from(stockSellThroughThreshold)
-      .innerJoin(thresholdActor, eq(stockSellThroughThreshold.createdByUserId, thresholdActor.id))
+    }).from(stockSellThroughThreshold).where(and(
+      eq(stockSellThroughThreshold.scopeType, "default"), eq(stockSellThroughThreshold.scopeKey, "*"),
+    ))
+      .leftJoin(thresholdActor, eq(stockSellThroughThreshold.createdByUserId, thresholdActor.id))
       .orderBy(desc(stockSellThroughThreshold.createdAt)).limit(20),
     db.select({ total: count() }).from(stockRestockRequest).where(requestWhere),
   ]);
@@ -135,8 +140,6 @@ export default async function AdminStockControlPage({
       .where(and(inArray(stockSellThroughCycle.businessId, businessIds), inArray(stockSellThroughCycle.productId, productIds)))
     : [];
   const cycleStatus = new Map(cycles.map((cycle) => [`${cycle.businessId}:${cycle.productId}`, cycle.baselineStatus]));
-  const productById = new Map(products.map((item) => [item.id, item]));
-  const categories = [...new Set(products.map((item) => item.categoryCode).filter((value): value is string => Boolean(value)))].sort();
   const result = params.result ? RESULT_MESSAGES[params.result] : undefined;
 
   return (
@@ -152,10 +155,10 @@ export default async function AdminStockControlPage({
           <SlidersHorizontal className="h-5 w-5" aria-hidden="true" />
           <h2 className="text-lg font-semibold">Add a threshold revision</h2>
         </div>
-        {canManageScoped || canManageGlobal ? (
+        {canManageGlobal ? (
           <>
-            <p className="mb-4 text-sm text-muted-foreground">Threshold changes are prospective and append-only. Precedence is product, then category, then system default. Stock Control Administrators can manage product/category scopes; only Super Admin can manage the system default.</p>
-            <SellThroughThresholdForm products={products} categories={categories} canManageGlobal={canManageGlobal} effectiveAtDefault={new Date(now.getTime() + 120_000).toISOString().slice(0, 16)} />
+            <p className="mb-4 text-sm text-muted-foreground">This proposed TaxFlow policy applies globally to all reseller roles and products. Changes are prospective, database-stored, and append-only. RRA Super Administrators and Stock Officers can manage the threshold.</p>
+            <SellThroughThresholdForm canManageGlobal={canManageGlobal} effectiveAtDefault={new Date(now.getTime() + 120_000).toISOString().slice(0, 16)} />
           </>
         ) : (
           <p className="text-sm text-muted-foreground">Your current role can review requests but cannot change threshold settings.</p>
@@ -165,7 +168,7 @@ export default async function AdminStockControlPage({
       <section className="rounded-xl border bg-card p-4 shadow-sm sm:p-6">
         <div className="mb-4 flex items-center gap-2">
           <SlidersHorizontal className="h-5 w-5" aria-hidden="true" />
-          <h2 className="text-lg font-semibold">Active threshold scopes</h2>
+          <h2 className="text-lg font-semibold">Current global threshold</h2>
         </div>
         {activeThresholdRows.length === 0 ? (
           <p className="rounded-md border border-dashed p-5 text-sm text-muted-foreground">No active threshold is configured. Requests will require officer review until a policy is scheduled and effective.</p>
@@ -173,10 +176,7 @@ export default async function AdminStockControlPage({
           <div className="overflow-x-auto">
             <table className="w-full min-w-[38rem] text-left text-sm">
               <thead><tr className="border-b text-muted-foreground"><th className="py-2 pr-3">Scope</th><th className="py-2 pr-3">Threshold</th><th className="py-2 pr-3">Effective</th><th className="py-2">Reason</th></tr></thead>
-              <tbody>{activeThresholdRows.map((row) => {
-                const item = row.scopeType === "product" ? productById.get(row.scopeKey) : undefined;
-                return <tr key={row.id} className="border-b last:border-0"><td className="py-3 pr-3 font-medium">{row.scopeType === "default" ? "System default" : row.scopeType === "category" ? `Category · ${row.scopeKey}` : `Product · ${item?.name ?? row.scopeKey}`}</td><td className="py-3 pr-3">{row.thresholdPercent}%</td><td className="py-3 pr-3">{row.effectiveAt.toLocaleString()}</td><td className="py-3 text-muted-foreground">{row.reason}</td></tr>;
-              })}</tbody>
+              <tbody>{activeThresholdRows.map((row) => <tr key={row.id} className="border-b last:border-0"><td className="py-3 pr-3 font-medium">All sellers and products</td><td className="py-3 pr-3">{row.thresholdPercent}%</td><td className="py-3 pr-3">{row.effectiveAt.toLocaleString()}</td><td className="py-3 text-muted-foreground">{row.reason}</td></tr>)}</tbody>
             </table>
           </div>
         )}
@@ -207,7 +207,7 @@ export default async function AdminStockControlPage({
               const baselineNeedsReview = cycleStatus.get(`${request.businessId}:${request.productId}`) === "needs_review";
               const reasonNeedsManualStockAction = request.eligibilityReason.startsWith("An open reservation")
                 || request.eligibilityReason.startsWith("A reliable non-negative current stock balance");
-              const canAttestBaseline = canManageScoped
+              const canAttestBaseline = canManageBaseline
                 && !reasonNeedsManualStockAction
                 && (baselineNeedsReview || (
                   request.eligibilityStatus === "review_required"
@@ -226,12 +226,12 @@ export default async function AdminStockControlPage({
                     </div>
                   </div>
                   <p className="mt-2 text-sm">{request.eligibilityReason}</p>
-                  {request.eligibilityStatus !== "review_required" && request.thresholdPercent !== null && <p className="mt-1 text-sm text-muted-foreground">Recorded sales {request.qualifyingSalesQuantity.toLocaleString()} of {request.cohortQuantity.toLocaleString()} cohort units · required {request.requiredSalesQuantity.toLocaleString()} · threshold {request.thresholdPercent}%{request.sellThroughPercent === null ? "" : ` · cohort sell-through ${request.sellThroughPercent.toFixed(1)}%`}</p>}
+                  {request.eligibilityStatus !== "review_required" && request.thresholdPercent !== null && <p className="mt-1 text-sm text-muted-foreground">FIFO batch: sold {request.qualifyingSalesQuantity.toLocaleString()} of {request.cohortQuantity.toLocaleString()} units · remaining to sell {Math.max(0, request.requiredSalesQuantity - request.qualifyingSalesQuantity).toLocaleString()} · required {request.requiredSalesQuantity.toLocaleString()} at {request.thresholdPercent}%{request.sellThroughPercent === null ? "" : ` · batch sell-through ${request.sellThroughPercent.toFixed(1)}%`}</p>}
                   <p className="mt-1 text-xs text-muted-foreground">Calculation cohort began {request.cycleStartedAt.toLocaleString()}.</p>
                   {request.exceptionReason && <p className="mt-2 text-sm text-muted-foreground">Trader’s exception reason: {request.exceptionReason}</p>}
                   {request.reviewReason && <p className="mt-2 text-sm text-muted-foreground">Officer decision by {request.reviewerName ?? "authorized officer"}{request.reviewedAt ? ` · ${request.reviewedAt.toLocaleString()}` : ""}: {request.reviewReason}</p>}
 
-                  {request.exceptionStatus === "pending" && <><p className="mt-3 text-xs text-muted-foreground">Approving an exception records this request’s exception outcome only. It does not post stock or tax.</p><RestockExceptionReviewForm requestId={request.id} /></>}
+                  {request.exceptionStatus === "pending" && canReviewExceptions && <><p className="mt-3 text-xs text-muted-foreground">Approving an exception records this request’s exception outcome only. It does not post stock or tax.</p><RestockExceptionReviewForm requestId={request.id} /></>}
                   {canAttestBaseline && (
                     <div className="mt-4 rounded-md bg-amber-50 p-3">
                       <div className="flex items-center gap-2 text-sm font-medium text-amber-950"><ShieldAlert className="h-4 w-4" aria-hidden="true" />Recorded stock needs review</div>
@@ -256,7 +256,7 @@ export default async function AdminStockControlPage({
       <section className="rounded-xl border bg-card p-4 shadow-sm sm:p-6">
         <div className="mb-4 flex items-center gap-2"><Package className="h-5 w-5" aria-hidden="true" /><h2 className="text-lg font-semibold">Recent threshold changes</h2></div>
         {thresholdHistory.length === 0 ? <p className="text-sm text-muted-foreground">No threshold revisions have been recorded.</p> : (
-          <div className="space-y-2">{thresholdHistory.map((row) => <div key={row.id} className="flex flex-wrap justify-between gap-2 border-b py-2 text-sm last:border-0"><div><span className="font-medium">{row.scopeType === "default" ? "System default" : row.scopeType === "category" ? `Category · ${row.scopeKey}` : `Product · ${productById.get(row.scopeKey)?.name ?? row.scopeKey}`}</span><span className="ml-2">{row.thresholdPercent}%</span><p className="text-xs text-muted-foreground">{row.reason}</p></div><p className="text-xs text-muted-foreground">{row.actorName} · {row.createdAt.toLocaleString()} · effective {row.effectiveAt.toLocaleString()}</p></div>)}</div>
+          <div className="space-y-2">{thresholdHistory.map((row) => <div key={row.id} className="flex flex-wrap justify-between gap-2 border-b py-2 text-sm last:border-0"><div><span className="font-medium">Previous {thresholdHistory[thresholdHistory.indexOf(row) + 1]?.thresholdPercent ?? "—"}% → {row.thresholdPercent}%</span><p className="text-xs text-muted-foreground">{row.reason}</p></div><p className="text-xs text-muted-foreground">{row.actorName ?? "TaxFlow initial default"} · {row.actorRole ?? "system"} · {row.createdAt.toLocaleString()} · effective {row.effectiveAt.toLocaleString()}</p></div>)}</div>
         )}
       </section>
     </main>
