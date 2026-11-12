@@ -16,6 +16,7 @@ import { checkAndAlertCompliance } from '@/lib/actions/compliance.action';
 import { getBusinessComplianceStatus } from '@/lib/compliance-status';
 import { getSystemConfig } from '@/lib/actions/system-config.action';
 import { validatePriceFloor } from '@/lib/ai/price-suggestion';
+import { triggerManufacturerAICheck } from '@/lib/ai/manufacturer-hooks';
 import { calculateVat } from '@/lib/intelligence/tax-engine';
 
 /** Pending transactions expire after 10 minutes (ms). */
@@ -228,6 +229,15 @@ export async function createTransaction(data: {
     message: `${session.user.name} sent you ${data.quantity} units (${totalAmount.toLocaleString()} RWF). Please confirm.`,
     link: '/dashboard/pending',
   });
+
+  // AI hook — check for rapid depletion and other signals
+  triggerManufacturerAICheck({
+    businessId: session.user.id,
+    event: 'SALE_CREATED',
+    referenceId: txn.id,
+    productId: data.productId,
+    quantity: data.quantity,
+  }).catch((error) => console.error('[ManufacturerHook] fire error:', error));
 
   return txn;
 }

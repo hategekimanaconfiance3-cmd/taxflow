@@ -1006,4 +1006,37 @@ export const aiAuditLogRelations = relations(aiAuditLog, ({ one }) => ({
 }));
 
 // ---------------------------------------------------------------------------
+// AI Event Trigger — audit log of AI hook executions per business event
+// ---------------------------------------------------------------------------
+
+export const aiEventTrigger = pgTable(
+  'ai_event_trigger',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    businessId: text('business_id').notNull().references(() => user.id),
+    event: text('event').notNull(),
+    // 'PRODUCTION_RECORDED' | 'SALE_CREATED' | 'PURCHASE_CONFIRMED' | 'PURCHASE_REJECTED' |
+    // 'IMPORT_SUBMITTED' | 'IMPORT_RECEIVED' | 'STOCK_ADJUSTED' | 'STOCK_LOSS_DECLARED' |
+    // 'TAX_PAYMENT_MADE' | 'DISPUTE_FILED'
+    referenceId: text('reference_id'),
+    signalsChecked: text('signals_checked'), // JSON string[]
+    findingsCreated: text('findings_created'), // JSON string[] of aiFinding IDs
+    staffNotified: text('staff_notified'),    // JSON string[] of user IDs notified
+    severity: text('severity'),              // highest severity found: 'info' | 'warning' | 'critical'
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('ai_event_trigger_business_created_idx').on(table.businessId, table.createdAt),
+    index('ai_event_trigger_event_created_idx').on(table.event, table.createdAt),
+  ],
+);
+
+export const aiEventTriggerRelations = relations(aiEventTrigger, ({ one }) => ({
+  business: one(user, {
+    fields: [aiEventTrigger.businessId],
+    references: [user.id],
+  }),
+}));
+
+// ---------------------------------------------------------------------------
 

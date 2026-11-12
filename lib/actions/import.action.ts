@@ -1,4 +1,4 @@
-ï»¿"use server";
+"use server";
 
 import { eq, desc, and, sql } from "drizzle-orm";
 import db from "@/db/drizzle";
@@ -15,6 +15,7 @@ import {
     rejectImportArrivalSchema,
     submitImportArrivalSchema,
 } from "@/lib/validation/import.schema";
+import { triggerManufacturerAICheck } from '@/lib/ai/manufacturer-hooks';
 
 async function requireApprovedImportTrader() {
     const session = await requireTraderSession(["manufacturer", "wholesaler"]);
@@ -26,7 +27,7 @@ async function requireApprovedImportTrader() {
 }
 
 // ---------------------------------------------------------------------------
-// Declare Import â€” manufacturer or wholesaler declares expected goods
+// Declare Import — manufacturer or wholesaler declares expected goods
 // ---------------------------------------------------------------------------
 
 export async function declareImport(data: {
@@ -102,8 +103,8 @@ export async function declareImport(data: {
 }
 
 // ---------------------------------------------------------------------------
-// Submit Arrival â€” trader enters actual quantity + supporting documents
-// Goes to status "submitted" â€” awaiting RRA confirmation
+// Submit Arrival — trader enters actual quantity + supporting documents
+// Goes to status "submitted" — awaiting RRA confirmation
 // ---------------------------------------------------------------------------
 
 export async function submitImportArrival(
@@ -131,7 +132,7 @@ export async function submitImportArrival(
         throw new Error("The uploaded invoice could not be found. Please upload it again.");
     }
 
-    // Get the declaration â€” must belong to this user
+    // Get the declaration — must belong to this user
     await db.transaction(async (tx) => {
         const [declaration] = await tx
             .select()
@@ -172,7 +173,7 @@ export async function submitImportArrival(
 }
 
 // ---------------------------------------------------------------------------
-// RRA: Confirm Import â€” only RRA officer can approve, activating stock
+// RRA: Confirm Import — only RRA officer can approve, activating stock
 // Uses a DB transaction with FOR UPDATE lock to prevent TOCTOU races (C2 fix)
 // ---------------------------------------------------------------------------
 
@@ -216,7 +217,7 @@ export async function confirmImportArrival(
             : 0;
         const discrepancyFlag = discrepancyPct > 10;
 
-        // Atomic status check + update â€” prevents double-activation
+        // Atomic status check + update — prevents double-activation
         const [activated] = await tx
             .update(importDeclaration)
             .set({
@@ -289,7 +290,7 @@ export async function confirmImportArrival(
         return { declaration, quantityToActivate, discrepancy };
     });
 
-    // Notify the trader (outside transaction â€” non-critical)
+    // Notify the trader (outside transaction — non-critical)
     await createNotification({
         userId: declaration.businessId,
         type: "system",
@@ -303,6 +304,14 @@ export async function confirmImportArrival(
         quantityToActivate,
     });
 
+    // Fire AI hook — check import vs stock mismatch
+    triggerManufacturerAICheck({
+        businessId: declaration.businessId,
+        event: 'IMPORT_RECEIVED',
+        referenceId: safeDeclarationId,
+        declarationId: safeDeclarationId,
+    }).catch((err) => console.error('[ManufacturerHook] import hook error:', err));
+
     return {
         success: true,
         quantityToActivate,
@@ -312,7 +321,7 @@ export async function confirmImportArrival(
 }
 
 // ---------------------------------------------------------------------------
-// RRA: Reject Import â€” uses DB transaction + FOR UPDATE lock (C2/TOCTOU fix)
+// RRA: Reject Import — uses DB transaction + FOR UPDATE lock (C2/TOCTOU fix)
 // ---------------------------------------------------------------------------
 
 export async function rejectImportArrival(
@@ -374,7 +383,7 @@ export async function rejectImportArrival(
         return declaration;
     });
 
-    // Notify trader (outside transaction â€” non-critical)
+    // Notify trader (outside transaction — non-critical)
     await createNotification({
         userId: declaration.businessId,
         type: "compliance_alert",
@@ -479,7 +488,7 @@ export async function getImportDeclaration(declarationId: string) {
 }
 
 // ---------------------------------------------------------------------------
-// RRA: Get all import declarations â€” filtered at DB level (C3 fix)
+// RRA: Get all import declarations — filtered at DB level (C3 fix)
 // ---------------------------------------------------------------------------
 
 export async function getAllImportDeclarations(statusFilter?: string) {

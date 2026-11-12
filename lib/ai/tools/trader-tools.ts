@@ -7,11 +7,12 @@
 
 import { tool } from "ai";
 import { z } from "zod";
-import { eq, sql, desc, and, inArray, or } from "drizzle-orm";
+import { eq, sql, desc, and, gte, inArray, or } from "drizzle-orm";
 import db from "@/db/drizzle";
 import {
     user, transaction, stock, product, vatRecord,
-    taxPayment, auditLog,
+    taxPayment, auditLog, productionBatch, importDeclaration,
+    stockAdjustment, aiFinding,
 } from "@/db/schema";
 import { buildRiskAlerts } from "@/lib/intelligence/risk-rules";
 import { getSystemConfig } from "@/lib/actions/system-config.action";
@@ -452,6 +453,272 @@ export function createTraderTools(userId: string) {
         },
     });
 
+
+    // -----------------------------------------------------------------------
+    // Tool: getMyProductionHistory
+    // -----------------------------------------------------------------------
+    const getMyProductionHistory = tool({
+        description: 'Get the production batch history for the logged-in manufacturer. Returns declared production quantities per product and period for the last 90 days.',
+        inputSchema: z.object({
+            productId: z.string().optional().describe('Filter to a specific product ID.'),
+            limit: z.number().int().min(1).max(50).default(20),
+        }),
+        execute: async ({ productId, limit }: { productId?: string; limit: number }) => {
+            const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+            const rows = await db
+                .select({
+                    id: productionBatch.id,
+                    productId: productionBatch.productId,
+                    productName: product.name,
+                    declaredQuantity: productionBatch.declaredQuantity,
+                    periodStart: productionBatch.periodStart,
+                    periodEnd: productionBatch.periodEnd,
+                    status: productionBatch.status,
+                })
+                .from(productionBatch)
+                .leftJoin(product, eq(product.id, productionBatch.productId))
+                .where(
+                    and(
+                        eq(productionBatch.manufacturerId, userId),
+                        gte(productionBatch.periodStart, ninetyDaysAgo),
+                        productId ? eq(productionBatch.productId, productId) : sql`true`,
+                    ),
+                )
+                .orderBy(desc(productionBatch.periodStart))
+                .limit(limit);
+            return {
+                batches: rows,
+                note: 'Declared production quantities only. Must be reconciled against stock movements for compliance.',
+            };
+        },
+    });
+
+    // -----------------------------------------------------------------------
+    // Tool: getMyImportDeclarations
+    // -----------------------------------------------------------------------
+    const getMyImportDeclarations = tool({
+        description: 'Get import declarations for the logged-in manufacturer or wholesaler, including expected vs actual quantities and current status.',
+        inputSchema: z.object({
+            status: z.enum(['pending', 'submitted', 'approved', 'rejected']).optional().describe('Filter by status.'),
+            limit: z.number().int().min(1).max(50).default(20),
+        }),
+        execute: async ({ status, limit }: { status?: 'pending' | 'submitted' | 'approved' | 'rejected'; limit: number }) => {
+            const rows = await db
+                .select({
+                    id: importDeclaration.id,
+                    declarationRef: importDeclaration.declarationRef,
+                    productId: importDeclaration.productId,
+                    productName: product.name,
+                    expectedQuantity: importDeclaration.expectedQuantity,
+                    actualQuantity: importDeclaration.actualQuantity,
+                    inspectedQuantity: importDeclaration.inspectedQuantity,
+                    status: importDeclaration.status,
+                    supplier: importDeclaration.supplier,
+                    originCountry: importDeclaration.originCountry,
+                    createdAt: importDeclaration.createdAt,
+                })
+                .from(importDeclaration)
+                .leftJoin(product, eq(product.id, importDeclaration.productId))
+                .where(
+                    and(
+                        eq(importDeclaration.businessId, userId),
+                        status ? eq(importDeclaration.status, status) : sql`true`,
+                    ),
+                )
+                .orderBy(desc(importDeclaration.createdAt))
+                .limit(limit);
+            return {
+                declarations: rows,
+                note: 'Discrepancies between expected and actual/inspected quantities may be flagged by RRA for review.',
+            };
+        },
+    });
+
+    // -----------------------------------------------------------------------
+    // Tool: getMyStockLossHistory
+    // -----------------------------------------------------------------------
+    const getMyStockLossHistory = tool({
+        description: 'Get the stock loss declaration history for the logged-in business. Repeated losses trigger AI monitoring flags.',
+        inputSchema: z.object({
+            productId: z.string().optional().describe('Filter by product ID.'),
+            limit: z.number().int().min(1).max(50).default(20),
+        }),
+        execute: async ({ productId, limit }: { productId?: string; limit: number }) => {
+            const rows = await db
+                .select({
+                    id: stockAdjustment.id,
+                    productId: stockAdjustment.productId,
+                    productName: product.name,
+                    quantityDelta: stockAdjustment.quantityDelta,
+                    adjustmentType: stockAdjustment.adjustmentType,
+                    reason: stockAdjustment.reason,
+                    createdAt: stockAdjustment.createdAt,
+                })
+                .from(stockAdjustment)
+                .leftJoin(product, eq(product.id, stockAdjustment.productId))
+                .where(
+                    and(
+                        eq(stockAdjustment.businessId, userId),
+                        eq(stockAdjustment.adjustmentType, 'loss'),
+                        productId ? eq(stockAdjustment.productId, productId) : sql`true`,
+                    ),
+                )
+                .orderBy(desc(stockAdjustment.createdAt))
+                .limit(limit);
+            const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+            const recentCount = rows.filter((r) => new Date(r.createdAt) >= thirtyDaysAgo).length;
+            const warningMsg = `WARNING: ${recentCount} loss events in the last 30 days. This pattern triggers an automatic AI flag for RRA review.`;
+            return {
+                losses: rows,
+                recentCount,
+                warningThreshold: 3,
+                note: recentCount >= 3 ? warningMsg : 'Loss history is within normal range.',
+            };
+        },
+    });
+
+    // -----------------------------------------------------------------------
+    // Tool: getMyAIFindings
+    // -----------------------------------------------------------------------
+    const getMyAIFindings = tool({
+        description: 'Get open AI-generated compliance findings for the logged-in business. These are review signals, not accusations.',
+        inputSchema: z.object({
+            severity: z.enum(['info', 'warning', 'critical']).optional().describe('Filter by severity level.'),
+            limit: z.number().int().min(1).max(20).default(10),
+        }),
+        execute: async ({ severity, limit }: { severity?: 'info' | 'warning' | 'critical'; limit: number }) => {
+            const rows = await db
+                .select({
+                    id: aiFinding.id,
+                    findingType: aiFinding.findingType,
+                    severity: aiFinding.severity,
+                    explanation: aiFinding.explanation,
+                    observedValue: aiFinding.observedValue,
+                    expectedValue: aiFinding.expectedValue,
+                    reviewStatus: aiFinding.reviewStatus,
+                    createdAt: aiFinding.createdAt,
+                    updatedAt: aiFinding.updatedAt,
+                })
+                .from(aiFinding)
+                .where(
+                    and(
+                        eq(aiFinding.businessId, userId),
+                        severity ? eq(aiFinding.severity, severity) : sql`true`,
+                    ),
+                )
+                .orderBy(desc(aiFinding.createdAt))
+                .limit(limit);
+            return {
+                findings: rows,
+                openCount: rows.filter((f) => f.reviewStatus === 'open').length,
+                note: 'System-generated review signals only. Human RRA officer review required before any action.',
+            };
+        },
+    });
+
+    // -----------------------------------------------------------------------
+    // Tool: getMyComplianceSnapshot
+    // -----------------------------------------------------------------------
+    const getMyComplianceSnapshot = tool({
+        description: 'Get a 30-day compliance snapshot: production declared, sales, stock balances, and open AI findings count.',
+        inputSchema: z.object({}),
+        execute: async () => {
+            const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+            const [productionTotal] = await db
+                .select({ total: sql<number>`COALESCE(SUM(${productionBatch.declaredQuantity}), 0)::float8` })
+                .from(productionBatch)
+                .where(and(eq(productionBatch.manufacturerId, userId), gte(productionBatch.periodStart, thirtyDaysAgo)));
+            const [salesTotal] = await db
+                .select({ total: sql<number>`COALESCE(SUM(${transaction.quantity}), 0)::float8` })
+                .from(transaction)
+                .where(and(
+                    eq(transaction.sellerId, userId),
+                    inArray(transaction.status, ['confirmed', 'completed']),
+                    gte(transaction.createdAt, thirtyDaysAgo),
+                ));
+            const stockRows = await db
+                .select({ productId: stock.productId, quantity: stock.quantity, productName: product.name })
+                .from(stock)
+                .leftJoin(product, eq(product.id, stock.productId))
+                .where(eq(stock.businessId, userId));
+            const [openFindings] = await db
+                .select({ count: sql<number>`COUNT(*)::int` })
+                .from(aiFinding)
+                .where(and(eq(aiFinding.businessId, userId), eq(aiFinding.reviewStatus, 'open')));
+            const [criticalFindings] = await db
+                .select({ count: sql<number>`COUNT(*)::int` })
+                .from(aiFinding)
+                .where(and(
+                    eq(aiFinding.businessId, userId),
+                    eq(aiFinding.reviewStatus, 'open'),
+                    eq(aiFinding.severity, 'critical'),
+                ));
+            return {
+                period: 'last 30 days',
+                productionDeclared: productionTotal?.total ?? 0,
+                salesConfirmed: salesTotal?.total ?? 0,
+                stockBalances: stockRows,
+                openAIFindings: openFindings?.count ?? 0,
+                criticalAIFindings: criticalFindings?.count ?? 0,
+                note: 'If salesConfirmed exceeds productionDeclared with no matching purchases, an AI signal may have been generated for RRA review.',
+            };
+        },
+    });
+
+    // -----------------------------------------------------------------------
+    // Tool: explainAIFinding
+    // -----------------------------------------------------------------------
+    const explainAIFinding = tool({
+        description: 'Explain what a specific AI finding type means, why it was triggered, and what the manufacturer should do.',
+        inputSchema: z.object({
+            findingType: z.string().describe('Finding type code, e.g. rapid_stock_depletion or sales_without_production'),
+        }),
+        execute: async ({ findingType }: { findingType: string }) => {
+            const explanations: Record<string, { what: string; why: string; action: string }> = {
+                rapid_stock_depletion: {
+                    what: 'More than 80% of your stock was sold in a single transaction.',
+                    why: 'Sudden large sales can indicate stock diversion outside proper tax channels.',
+                    action: 'Ensure all large sales are invoiced and your buyer is registered. Keep transaction records.',
+                },
+                sales_without_production: {
+                    what: 'Sales recorded with no declared production or purchases in the same 30-day window.',
+                    why: 'All sales require a declared source. Missing declarations suggest possible off-system stock.',
+                    action: 'Review and submit any missing production batch declarations.',
+                },
+                import_vs_stock_mismatch: {
+                    what: 'Import declaration shows less than 90% of declared quantity received.',
+                    why: 'Goods declared at the border but not stocked may have been diverted.',
+                    action: 'Verify receiving records match your import declaration and document any shortfall.',
+                },
+                production_efficiency_anomaly: {
+                    what: 'Latest production batch is more than 50% above or below your 90-day average.',
+                    why: 'Large deviations may indicate over- or under-declaration of output.',
+                    action: 'Ensure declared quantities match actual factory output with supporting records.',
+                },
+                repeated_stock_loss: {
+                    what: '3 or more stock loss declarations in the last 30 days.',
+                    why: 'Frequent losses can be used to reduce taxable stock. The pattern triggers review.',
+                    action: 'Maintain detailed loss records (cause, quantity, date, witnesses).',
+                },
+                inventory_discrepancy: {
+                    what: 'Mismatch detected between recorded transactions and your current stock level.',
+                    why: 'Stock should equal opening + production/purchases minus sales/losses.',
+                    action: 'Review recent movements and reconcile against your physical inventory count.',
+                },
+            };
+            const info = explanations[findingType] ?? {
+                what: `Finding type '${findingType}' detected by the AI monitoring system.`,
+                why: 'An anomaly was detected in your business data relative to expected patterns.',
+                action: 'Review recent transactions and declarations. Contact your RRA officer if needed.',
+            };
+            return {
+                findingType,
+                ...info,
+                disclaimer: 'AI findings are review signals only. Human RRA officer review is required before any action. A finding does not constitute a tax assessment, penalty, or accusation.',
+            };
+        },
+    });
+
     return {
         getDashboardOverview,
         getMyRiskAlerts,
@@ -462,5 +729,11 @@ export function createTraderTools(userId: string) {
         explainVat,
         systemHelp,
         getMonthlyStats,
+        getMyProductionHistory,
+        getMyImportDeclarations,
+        getMyStockLossHistory,
+        getMyAIFindings,
+        getMyComplianceSnapshot,
+        explainAIFinding,
     };
 }
