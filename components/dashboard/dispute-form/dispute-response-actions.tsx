@@ -129,7 +129,7 @@ export function DisputeResponseActions({
                                 autoFocus
                             />
                             <p className="text-xs text-muted-foreground">
-                                This will still be escalated to RRA for review along with your response.
+                                This will still be escalated to TF for review along with your response.
                             </p>
                         </div>
                     </div>

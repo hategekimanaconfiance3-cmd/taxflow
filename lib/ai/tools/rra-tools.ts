@@ -1,28 +1,40 @@
-﻿// Server-only — RRA Intelligence Agent Tools
+﻿// Server-only — TF Intelligence Agent Tools
 
 import { tool } from "ai";
 import { z } from "zod";
-import { eq, sql, desc, and, or, gte, ilike, inArray } from "drizzle-orm";
+import { eq, sql, desc, and, or, gte, lte, ilike, inArray } from "drizzle-orm";
 import db from "@/db/drizzle";
 import {
-    user, transaction, stock, product, vatRecord,
-    taxPayment, auditLog, importDeclaration, dispute,
+    user, transaction, stock, stockMovement, product, vatRecord,
+    taxPayment, importDeclaration, dispute,
 } from "@/db/schema";
 import tinDb from "@/db/tin-drizzle";
 import { tinRecord } from "@/db/tin-schema";
 import { computeRiskScore } from "@/lib/ai/risk-scoring";
+import { presentRiskAssessmentForAI } from "@/lib/ai/risk-assessment-presentation";
 import { getRevenueForecast } from "@/lib/ai/revenue-forecast";
 import { analyzeMerchantBehavior } from "@/lib/ai/behavioral-analysis";
 import { searchProductJourney } from "@/lib/actions/product-journey.action";
+import { getTaxpayerIntelligenceForAI } from "@/lib/actions/admin-tin-lookup.action";
+import { getProductionHistoryAnalysis } from "@/lib/ai/production-history-service";
 
 // ---------------------------------------------------------------------------
-// AI Tools — Database query tools for the RRA Intelligence Agent.
+// AI Tools — Database query tools for TF Intelligence Agent.
 // Each tool gives the LLM read-only access to one domain of data.
 // ---------------------------------------------------------------------------
 
-/** Look up a trader by TIN, name, or email. */
+/** Search a TIN and return only the modules permitted for the signed-in TF employee. */
+export const getTaxpayerIntelligence = tool({
+    description: "Get an authorized, role-filtered taxpayer summary by TIN. Use for questions asking what is known about a taxpayer, a taxpayer summary, recent activity, compliance, stock, production, or related records. The server verifies the employee's session and permissions before querying; only authorized modules are returned. Never infer data from missing modules.",
+    inputSchema: z.object({
+        tin: z.string().trim().min(5).max(32).describe("Taxpayer TIN"),
+    }),
+    execute: async ({ tin }) => getTaxpayerIntelligenceForAI({ tin }),
+});
+
+/** Find a trader directory record. Use the filtered intelligence tool for detail. */
 export const lookupTrader = tool({
-    description: "Look up a trader/merchant by TIN number, business name, or email. Returns their profile, role, clearance status, and district.",
+    description: "Find a registered trader by TIN, business name, or email and return only basic directory fields plus district. For a taxpayer summary or any compliance, stock, production, transaction, or history question, prefer getTaxpayerIntelligence, which enforces module permissions before retrieval.",
     inputSchema: z.object({
         query: z.string().describe("TIN number, business name, or email to search for"),
     }),
@@ -30,7 +42,6 @@ export const lookupTrader = tool({
         const q = `%${query}%`;
         const traders = await db
             .select({
-                id: user.id,
                 name: user.name,
                 businessName: user.businessName,
                 tinNumber: user.tinNumber,
@@ -69,7 +80,7 @@ export const lookupTrader = tool({
 
 /** Search the entire registered trader directory, across all business tiers. */
 export const searchTraders = tool({
-    description: "Search or list registered manufacturers, wholesalers, and retailers in the TaxFlow database. Use this for RRA-wide trader discovery. Filters are optional; without a search term it lists traders by recent registration. Returns at most 50 rows per page.",
+    description: "Search or list registered manufacturers, wholesalers, and retailers in the TaxFlow database. Use this for TF-wide trader discovery. Filters are optional; without a search term it lists traders by recent registration. Returns at most 50 rows per page.",
     inputSchema: z.object({
         query: z.string().trim().max(100).optional().describe("Optional TIN, business name, or trader name search"),
         role: z.enum(["manufacturer", "wholesaler", "retailer"]).optional(),
@@ -93,7 +104,6 @@ export const searchTraders = tool({
 
         const traders = await db
             .select({
-                id: user.id,
                 name: user.name,
                 businessName: user.businessName,
                 tinNumber: user.tinNumber,
@@ -119,10 +129,16 @@ export const getTransactions = tool({
         sellerTin: z.string().optional().describe("Filter by seller TIN number"),
         productName: z.string().optional().describe("Filter by product name"),
         status: z.enum(["pending", "confirmed", "completed", "rejected", "expired"]).optional(),
+        from: z.iso.datetime().optional().describe("Inclusive start date/time in ISO 8601 format"),
+        to: z.iso.datetime().optional().describe("Inclusive end date/time in ISO 8601 format"),
         limit: z.number().min(1).max(50).default(20),
     }),
-    execute: async ({ traderTin, sellerTin, productName, status, limit }) => {
+    execute: async ({ traderTin, sellerTin, productName, status, from, to, limit }) => {
         const conditions = [];
+
+        if (from && to && new Date(from).getTime() > new Date(to).getTime()) {
+            return { count: 0, transactions: [], summary: { totalValue: 0, totalVat: 0 }, message: "The start date must be before the end date." };
+        }
 
         if (traderTin) {
             const [trader] = await db
@@ -151,12 +167,15 @@ export const getTransactions = tool({
         }
 
         if (status) conditions.push(eq(transaction.status, status));
+        if (from) conditions.push(gte(transaction.createdAt, new Date(from)));
+        if (to) conditions.push(lte(transaction.createdAt, new Date(to)));
 
-        let query = db
+        const query = db
             .select({
                 id: transaction.id,
                 productName: product.name,
                 sellerName: user.businessName,
+                buyerName: transaction.buyerName,
                 quantity: transaction.quantity,
                 unitPrice: transaction.unitPrice,
                 totalAmount: transaction.totalAmount,
@@ -181,6 +200,7 @@ export const getTransactions = tool({
 
         return {
             count: txns.length,
+            period: { from: from ?? null, to: to ?? null },
             transactions: txns,
             summary: {
                 totalValue: txns.reduce((s, t) => s + t.totalAmount, 0),
@@ -225,6 +245,41 @@ export const getStockLevels = tool({
             inventory,
             totalStockValue: inventory.reduce((s, i) => s + (i.quantity * (i.price ?? 0)), 0),
         };
+    },
+});
+
+/** Explain inventory changes using append-only stock movement evidence. */
+export const getStockMovements = tool({
+    description: "Get recorded inventory movements for a taxpayer by TIN, optionally filtered by product name. Use to explain when and how stock changed. A movement reason is only recorded evidence; do not invent a cause when it is missing.",
+    inputSchema: z.object({
+        traderTin: z.string().trim().min(5).max(32),
+        productName: z.string().trim().min(1).max(100).optional(),
+        limit: z.number().int().min(1).max(100).default(30),
+    }),
+    execute: async ({ traderTin, productName, limit }) => {
+        const [trader] = await db.select({ id: user.id, businessName: user.businessName })
+            .from(user)
+            .where(and(eq(user.tinNumber, traderTin), sql`${user.role} IN ('manufacturer', 'wholesaler', 'retailer')`))
+            .limit(1);
+        if (!trader) return { found: false, message: "No registered trader was found with that TIN." };
+
+        const conditions = [eq(stockMovement.businessId, trader.id)];
+        if (productName) conditions.push(ilike(product.name, `%${productName}%`));
+        const movements = await db.select({
+            productName: product.name,
+            movementType: stockMovement.movementType,
+            quantityDelta: stockMovement.quantityDelta,
+            quantityBefore: stockMovement.quantityBefore,
+            quantityAfter: stockMovement.quantityAfter,
+            sourceType: stockMovement.sourceType,
+            reason: stockMovement.reason,
+            createdAt: stockMovement.createdAt,
+        }).from(stockMovement)
+            .innerJoin(product, eq(stockMovement.productId, product.id))
+            .where(and(...conditions))
+            .orderBy(desc(stockMovement.createdAt))
+            .limit(limit);
+        return { found: true, businessName: trader.businessName, tin: traderTin, count: movements.length, movements };
     },
 });
 
@@ -276,7 +331,7 @@ export const getTaxStatus = tool({
 
 /** Get AI risk score for a trader. */
 export const getRiskAssessment = tool({
-    description: "Get the AI-computed fraud risk score for a trader. Returns a 0-100 score with detailed signal breakdown.",
+    description: "Get TaxFlow's existing system-generated risk signal for a trader. This is an uncalibrated review indicator, never proof of fraud or an official finding. The tool withholds the composite score if any component is unavailable or has insufficient data, and lists the component signals and limitations.",
     inputSchema: z.object({
         traderTin: z.string().describe("Trader TIN number"),
     }),
@@ -289,8 +344,8 @@ export const getRiskAssessment = tool({
 
         if (!trader) return { found: false, message: "Trader not found" };
 
-        const score = await computeRiskScore(trader.id);
-        return score;
+        const assessment = await computeRiskScore(trader.id);
+        return presentRiskAssessmentForAI(assessment);
     },
 });
 
@@ -597,7 +652,7 @@ export const traceSupplyChain = tool({
 });
 
 export const traceProductJourney = tool({
-    description: "Trace a recorded product journey for an RRA audit or stock officer. Returns persisted transaction records and origin declarations separately. Batch declarations are not linked to transactions unless the database contains that relationship; do not infer allocations, missing quantities, or fraud.",
+    description: "Trace a recorded product journey for a TF audit or stock officer. Returns persisted transaction records and origin declarations separately. Batch declarations are not linked to transactions unless the database contains that relationship; do not infer allocations, missing quantities, or fraud.",
     inputSchema: z.object({
         query: z.string().trim().min(2).max(120).describe("Product name or ID, batch reference, business name/TIN, transaction, or import reference"),
         status: z.enum(["all", "pending", "confirmed", "completed", "rejected", "expired", "disputed"]).default("all"),
@@ -648,7 +703,7 @@ export const getImportDeclarations = tool({
             productName: product.name,
             unit: product.unit,
             expectedQuantity: importDeclaration.expectedQuantity,
-            actualQuantity: importDeclaration.actualQuantity,
+            inspectedQuantity: importDeclaration.inspectedQuantity,
             status: importDeclaration.status,
             customsReference: importDeclaration.customsRef,
             invoiceReference: importDeclaration.invoiceRef,
@@ -667,4 +722,18 @@ export const getImportDeclarations = tool({
             .limit(20);
         return { count: rows.length, declarations: rows, readOnly: true };
     },
+});
+
+/** Historical recipe-scoped manufacturing comparisons for the explicitly authorized formula roles. */
+export const getProductionHistoryAnalysisTool = tool({
+    description: "Analyze a manufacturer's recipe-linked production against earlier batches for the exact same recipe version. This tool is available only to roles with production.formula.read and may return confidential ingredient names and quantities. Use a manufacturer's TIN, optionally a specific batch reference or product name, and a bounded recent window. Baselines include only earlier batches already marked independently_supported and within_tolerance; unverified or flagged records are never used to train the baseline. Treat signals as human-review leads, not proof of wrongdoing. State the sample size, exact recipe version, rule version, limitations, and evidence batch references.",
+    inputSchema: z.object({
+        tin: z.string().trim().min(5).max(32).regex(/^[A-Za-z0-9-]+$/).describe("Manufacturer TIN"),
+        batchReference: z.string().trim().min(1).max(128).optional().describe("Optional exact production batch reference"),
+        productName: z.string().trim().min(2).max(160).optional().describe("Optional manufacturer product name filter"),
+        lookbackDays: z.union([z.literal(30), z.literal(90), z.literal(180), z.literal(365)]).default(90)
+            .describe("Recent candidate-batch window, default 90 days; verified baseline batches are selected separately"),
+    }),
+    execute: async ({ tin, batchReference, productName, lookbackDays }) =>
+        getProductionHistoryAnalysis({ tin, batchReference, productName, lookbackDays }),
 });

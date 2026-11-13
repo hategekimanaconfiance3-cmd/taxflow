@@ -8,103 +8,70 @@ import {
     TableHeader,
     TableRow,
 } from "@/components/ui/table";
-
-interface ProductWithStock {
-    id: string;
-    name: string;
-    unit: string;
-    categoryCode: string | null;
-    createdAt: Date;
-    quantity: number;
-    latestUnitPrice?: number | null;
-}
+import type { ProductionHistoryItem } from "@/lib/production-service";
+import { ProductionMaterialTraceability } from "@/components/dashboard/production-register/production-material-traceability";
 
 interface ProductionRegisterProps {
-    products: ProductWithStock[];
+    records: ProductionHistoryItem[];
 }
 
-export function ProductionRegister({ products }: ProductionRegisterProps) {
+export function ProductionRegister({ records }: ProductionRegisterProps) {
     return (
         <Card>
             <CardHeader>
-                <CardTitle className="text-base font-semibold">
-                    Production Register
-                </CardTitle>
+                <CardTitle className="text-base font-semibold">Production Register</CardTitle>
             </CardHeader>
             <CardContent>
-                {products.length === 0 ? (
-                    <p className="text-sm text-muted-foreground py-8 text-center">
-                        No products registered yet. Create your first product
-                        above.
-                    </p>
+                {records.length === 0 ? (
+                    <div className="py-8 text-center">
+                        <p className="text-sm font-medium">No production recorded yet.</p>
+                        <p className="mt-1 text-sm text-muted-foreground">Record a production run to see its batch and inventory trace here.</p>
+                    </div>
                 ) : (
-                    <Table>
-                        <TableHeader>
-                            <TableRow>
-                                <TableHead className="w-12">#</TableHead>
-                                <TableHead>Product</TableHead>
-                                <TableHead className="text-right">
-                                    Quantity
-                                </TableHead>
-                                <TableHead className="text-right">
-                                    Unit Price
-                                </TableHead>
-                                <TableHead className="text-right">
-                                    Total Value
-                                </TableHead>
-                                <TableHead className="text-right">
-                                    Potential Tax
-                                </TableHead>
-                                <TableHead className="text-right">
-                                    Date
-                                </TableHead>
-                            </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                            {products.map((prod, idx) => {
-                                const price = prod.latestUnitPrice
-                                    ? Number(prod.latestUnitPrice)
-                                    : 0;
-                                const totalValue = prod.quantity * price;
-                                const potentialTax = Math.round(
-                                    totalValue * 0.18,
-                                );
-                                return (
-                                    <TableRow key={prod.id}>
-                                        <TableCell className="text-muted-foreground">
-                                            {idx + 1}
+                    <div className="overflow-x-auto">
+                        <Table>
+                            <TableHeader>
+                                <TableRow>
+                                    <TableHead>Product</TableHead>
+                                    <TableHead>Product ID</TableHead>
+                                    <TableHead>Batch ID</TableHead>
+                                    <TableHead className="text-right">Manufacturer-reported output</TableHead>
+                                    <TableHead className="text-right">Unit Price</TableHead>
+                                    <TableHead className="text-right">Total Value</TableHead>
+                                    <TableHead className="text-right">Potential Tax</TableHead>
+                                    <TableHead>Production check</TableHead>
+                                    <TableHead>Date</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {records.map((record) => (
+                                    <TableRow key={record.id}>
+                                        <TableCell className="min-w-32 font-medium">{record.productName}</TableCell>
+                                        <TableCell className="whitespace-nowrap font-mono text-xs">{record.productId}</TableCell>
+                                        <TableCell className="whitespace-nowrap font-mono text-xs">{record.batchReference}</TableCell>
+                                        <TableCell className="text-right font-mono">{record.quantity.toLocaleString()} {record.unit}</TableCell>
+                                        <TableCell className="text-right font-mono">{formatRWF(record.unitPrice)}</TableCell>
+                                        <TableCell className="text-right font-mono font-medium">{formatRWF(record.totalValue)}</TableCell>
+                                        <TableCell className="text-right font-mono text-emerald-600">{formatRWF(record.potentialTax)}</TableCell>
+                                        <TableCell className="whitespace-nowrap text-sm">
+                                            <div>{record.productionValidationStatus === "review_required" ? <span className="text-amber-700">Review required</span> : record.productionValidationStatus === "within_tolerance" ? <span className="text-emerald-700">Within tolerance</span> : <span className="text-muted-foreground">No recipe evidence</span>}</div>
+                                            {record.materialReviewStatus === "pending" && <div className="text-xs text-amber-700">Awaiting officer review · excluded from available stock</div>}
+                                            {record.materialReviewStatus === "released" && <div className="text-xs text-emerald-700">Officer released to stock</div>}
+                                            {record.materialReviewStatus === "rejected" && <div className="text-xs text-destructive">Officer review rejected · not released to stock</div>}
+                                            {record.materialReviewStatus === "not_required" && <div className="text-xs text-muted-foreground">Legacy record · independent verification status unavailable</div>}
+                                            {record.reportedGoodOutputQuantity !== null && <div className="text-xs text-muted-foreground">Manufacturer reported: {record.reportedGoodOutputQuantity} good / {record.reportedRejectedOutputQuantity ?? "—"} rejected</div>}
+                                            {record.materialReviewStatus === "released" && <div className="text-xs text-muted-foreground">Officer verified: {record.goodOutputQuantity ?? "—"} good / {record.rejectedOutputQuantity ?? "—"} rejected</div>}
+                                            {record.materialShortageCount > 0 && <div className="text-xs text-destructive">{record.materialShortageCount} material shortage{record.materialShortageCount === 1 ? "" : "s"} against verified stock</div>}
+                                            {record.materialReviewStatus !== "not_required" && <ProductionMaterialTraceability batchId={record.id} />}
                                         </TableCell>
-                                        <TableCell className="font-medium">
-                                            {prod.name}
-                                        </TableCell>
-                                        <TableCell className="text-right font-mono">
-                                            {prod.quantity.toLocaleString()}
-                                        </TableCell>
-                                        <TableCell className="text-right font-mono text-sm">
-                                            {price > 0
-                                                ? formatRWF(price)
-                                                : "—"}
-                                        </TableCell>
-                                        <TableCell className="text-right font-mono font-medium">
-                                            {totalValue > 0
-                                                ? formatRWF(totalValue)
-                                                : "—"}
-                                        </TableCell>
-                                        <TableCell className="text-right font-mono text-emerald-600">
-                                            {potentialTax > 0
-                                                ? formatRWF(potentialTax)
-                                                : "—"}
-                                        </TableCell>
-                                        <TableCell className="text-right text-sm text-muted-foreground">
-                                            {new Date(
-                                                prod.createdAt,
-                                            ).toLocaleDateString()}
+                                        <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
+                                            {new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(new Date(record.createdAt))}
                                         </TableCell>
                                     </TableRow>
-                                );
-                            })}
-                        </TableBody>
-                    </Table>
+                                ))}
+                            </TableBody>
+                        </Table>
+                    </div>
                 )}
             </CardContent>
         </Card>

@@ -59,7 +59,7 @@ export function DisputeRealtimeWrapper({
             showFlash(
                 "success",
                 "Dispute Acknowledged",
-                `${d.referenceNumber || "Dispute"} acknowledged. Escalated to RRA.`,
+                `${d.referenceNumber || "Dispute"} acknowledged. Escalated to TF.`,
             );
             refresh();
         },
@@ -68,7 +68,7 @@ export function DisputeRealtimeWrapper({
             showFlash(
                 "warning",
                 "Dispute Contested",
-                `${d.referenceNumber || "Dispute"} contested by counterparty. Escalated to RRA.`,
+                `${d.referenceNumber || "Dispute"} contested by counterparty. Escalated to TF.`,
             );
             refresh();
         },
@@ -82,7 +82,7 @@ export function DisputeRealtimeWrapper({
             };
             showFlash(
                 "info",
-                "RRA Decision Issued",
+                "TF Decision Issued",
                 `${d.referenceNumber || "Dispute"}: ${actionLabel[d.action || ""] || "Resolved"}`,
             );
             refresh();

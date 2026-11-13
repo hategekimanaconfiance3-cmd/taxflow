@@ -1,10 +1,9 @@
 "use server";
 
-import { sql, eq, desc, and, gte } from "drizzle-orm";
+import { sql, eq, desc, gte } from "drizzle-orm";
 import db from "@/db/drizzle";
 import { transaction, stock, product, user } from "@/db/schema";
-import { requireRRASession } from "@/lib/auth-guard";
-import { computeAllRiskScores } from "@/lib/ai/risk-scoring";
+import { requireRRAPermission } from "@/lib/auth-guard";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -35,7 +34,7 @@ export type Anomaly = {
 // ---------------------------------------------------------------------------
 
 export async function detectAnomalies(): Promise<Anomaly[]> {
-    await requireRRASession("compliance_officer", "audit_officer", "audit_investigation_officer", "data_ai_analyst");
+    await requireRRAPermission("transaction.read");
 
     const anomalies: Anomaly[] = [];
     const thirtyDaysAgo = new Date();
@@ -195,7 +194,9 @@ export async function detectAnomalies(): Promise<Anomaly[]> {
     }
 
     // ── 5. AI Risk Scores: merchants with high/critical risk ──────────
+    // Dynamic import to avoid crashing the page if TIN_DATABASE_URL is not configured
     try {
+        const { computeAllRiskScores } = await import("@/lib/ai/risk-scoring");
         const riskScores = await computeAllRiskScores();
         const flaggedMerchants = riskScores.filter(
             (s) => s.level === "critical" || s.level === "high",
@@ -217,6 +218,7 @@ export async function detectAnomalies(): Promise<Anomaly[]> {
         }
     } catch (error) {
         console.error("AI risk score computation in anomaly detection failed:", error);
+        // Continue without risk scores — the deterministic anomalies still render
     }
 
     // Sort: critical first, then by date

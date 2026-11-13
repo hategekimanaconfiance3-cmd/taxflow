@@ -9,6 +9,8 @@ import {
 } from "@/lib/actions/notification.action";
 import { useSocket } from "@/lib/socket-client";
 import { useSocketContext } from "@/components/providers/socket-provider";
+import { translate } from "@/lib/language";
+import { useLanguagePreference } from "@/lib/use-language";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -81,6 +83,7 @@ export function NotificationsClient({
     unreadCount: initialUnread,
 }: NotificationsClientProps) {
     const router = useRouter();
+    const [lang] = useLanguagePreference();
     const { userId } = useSocketContext();
     const [isPending, startTransition] = useTransition();
     const [filter, setFilter] = useState<"all" | "unread">("all");
@@ -213,7 +216,7 @@ export function NotificationsClient({
                                     <div className="flex-1 min-w-0">
                                         <div className="flex items-center gap-2">
                                             <p className="text-sm font-medium truncate">
-                                                {notif.title}
+                                                {notif.type === "message_received" ? translate(notif.title, lang) : notif.title}
                                             </p>
                                             {!notif.read && (
                                                 <Badge
@@ -225,7 +228,7 @@ export function NotificationsClient({
                                             )}
                                         </div>
                                         <p className="text-[13px] text-muted-foreground mt-0.5 line-clamp-2">
-                                            {notif.message}
+                                            {notif.type === "message_received" ? translate(notif.message, lang) : notif.message}
                                         </p>
                                         <p className="text-[11px] text-muted-foreground/60 mt-1">
                                             {timeAgo(notif.createdAt)}

@@ -45,14 +45,14 @@ function getImpactTier(m: AuditRecommendation): ImpactTier {
 }
 
 function getReasoning(reasons: string[]): string {
-  if (reasons.length === 0) return "Elevated composite risk score from multiple signals.";
+  if (reasons.length === 0) return "Potential review indicator based on multiple signals; verify the source records.";
   const r = reasons[0].toLowerCase();
-  if (r.includes("vat") || r.includes("tax")) return `Underreported VAT — ${reasons[0]}`;
-  if (r.includes("stock") || r.includes("inventory")) return `Stock anomaly — ${reasons[0]}`;
-  if (r.includes("price") || r.includes("pricing")) return `Pricing irregularity — ${reasons[0]}`;
-  if (r.includes("transaction") || r.includes("spike")) return `Unconfirmed transactions — ${reasons[0]}`;
-  if (r.includes("compliance") || r.includes("filing")) return `Non-compliance — ${reasons[0]}`;
-  return reasons[0];
+  if (r.includes("vat") || r.includes("tax")) return `Potential tax-record discrepancy — ${reasons[0]}`;
+  if (r.includes("stock") || r.includes("inventory")) return `Potential inventory signal — ${reasons[0]}`;
+  if (r.includes("price") || r.includes("pricing")) return `Potential pricing variance — ${reasons[0]}`;
+  if (r.includes("transaction") || r.includes("spike")) return `Transaction pattern for review — ${reasons[0]}`;
+  if (r.includes("compliance") || r.includes("filing")) return `Compliance indicator for review — ${reasons[0]}`;
+  return `Potential finding — ${reasons[0]}`;
 }
 
 export function AuditRecommendations() {
@@ -78,8 +78,8 @@ export function AuditRecommendations() {
       <Card>
         <CardContent className="py-8 text-center">
           <Target className="h-8 w-8 mx-auto text-emerald-500 mb-2" />
-          <p className="text-sm font-medium">No audits recommended</p>
-          <p className="text-xs text-muted-foreground mt-1">All merchants within acceptable risk parameters.</p>
+          <p className="text-sm font-medium">No review indicators surfaced</p>
+          <p className="text-xs text-muted-foreground mt-1">This does not constitute a compliance decision or clearance.</p>
         </CardContent>
       </Card>
     );
@@ -97,8 +97,8 @@ export function AuditRecommendations() {
   const TIER_CONFIG: Record<ImpactTier, Omit<ImpactGroup, "merchants" | "totalEstimatedRecovery">> = {
     high: {
       tier: "high",
-      label: "High Impact",
-      description: "Risk score ≥70 or estimated gap >500K RWF — audit immediately",
+      label: "Higher Review Priority",
+      description: "Indicator score ≥70 or estimated gap >500K RWF — verify evidence before deciding next steps",
       icon: <AlertTriangle className="h-3.5 w-3.5" />,
       color: "text-red-600",
       badgeColor: "bg-red-100 text-red-700",
@@ -106,8 +106,8 @@ export function AuditRecommendations() {
     },
     medium: {
       tier: "medium",
-      label: "Medium Impact",
-      description: "Risk score 45–70 or gap 100K–500K RWF — schedule within 30 days",
+      label: "Moderate Review Priority",
+      description: "Indicator score 45–70 or estimated gap 100K–500K RWF — review supporting records",
       icon: <AlertTriangle className="h-3.5 w-3.5" />,
       color: "text-amber-600",
       badgeColor: "bg-amber-100 text-amber-700",
@@ -115,8 +115,8 @@ export function AuditRecommendations() {
     },
     low: {
       tier: "low",
-      label: "Low Impact",
-      description: "Elevated signals but below critical threshold — routine quarterly review",
+      label: "Routine Review Signal",
+      description: "Signals below the higher-priority range — officer judgment is required",
       icon: <Info className="h-3.5 w-3.5" />,
       color: "text-blue-600",
       badgeColor: "bg-blue-100 text-blue-700",
@@ -134,7 +134,8 @@ export function AuditRecommendations() {
 
   const toggleTier = (tier: ImpactTier) => setExpandedTiers(prev => {
     const n = new Set(prev);
-    n.has(tier) ? n.delete(tier) : n.add(tier);
+    if (n.has(tier)) n.delete(tier);
+    else n.add(tier);
     return n;
   });
 
@@ -142,7 +143,8 @@ export function AuditRecommendations() {
     e.stopPropagation();
     setShowAll(prev => {
       const n = new Set(prev);
-      n.has(tier) ? n.delete(tier) : n.add(tier);
+      if (n.has(tier)) n.delete(tier);
+      else n.add(tier);
       return n;
     });
   };
@@ -153,16 +155,16 @@ export function AuditRecommendations() {
         <div className="flex items-center justify-between flex-wrap gap-2">
           <CardTitle className="text-base font-semibold flex items-center gap-2">
             <Brain className="h-4 w-4 text-violet-500" />
-            AI Audit Recommendations
+            AI Findings — Requires Human Review
           </CardTitle>
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <span className="flex items-center gap-1">
               <Target className="h-3 w-3" />
-              {plan.totalMerchants} targets
+              {plan.totalMerchants} records to review
             </span>
             <span className="flex items-center gap-1 text-emerald-600 font-medium">
               <TrendingUp className="h-3 w-3" />
-              {formatCompact(plan.totalEstimatedRecovery)} est. recovery
+              {formatCompact(plan.totalEstimatedRecovery)} unverified estimated gap
             </span>
           </div>
         </div>
@@ -187,10 +189,10 @@ export function AuditRecommendations() {
           <div className="flex items-center justify-between rounded-lg border border-red-200 bg-red-50/40 px-3 py-2.5">
             <div>
               <p className="text-xs font-semibold text-red-700">
-                {groups.high.length} high-risk trader{groups.high.length !== 1 ? "s" : ""} require immediate audit
+                {groups.high.length} record{groups.high.length !== 1 ? "s" : ""} have indicators for human review
               </p>
               <p className="text-[10px] text-muted-foreground">
-                Potential recovery: {formatCompact(groups.high.reduce((s, m) => s + m.estimatedTaxGap, 0))} RWF
+                Unverified estimated gap: {formatCompact(groups.high.reduce((s, m) => s + m.estimatedTaxGap, 0))} RWF
               </p>
             </div>
             <Button
@@ -199,7 +201,7 @@ export function AuditRecommendations() {
               onClick={() => window.open("/admin/traders", "_blank")}
             >
               <Zap className="h-3 w-3 mr-1" />
-              Audit All High-Risk
+              Review Evidence
             </Button>
           </div>
         )}
@@ -262,7 +264,7 @@ export function AuditRecommendations() {
                         {m.estimatedTaxGap > 0 ? (
                           <>
                             <p className="font-mono text-red-600 font-semibold">-{formatCompact(m.estimatedTaxGap)}</p>
-                            <p className="text-[9px] text-muted-foreground">potential recovery</p>
+                      <p className="text-[9px] text-muted-foreground">unverified estimate</p>
                           </>
                         ) : (
                           <CheckCircle2 className="h-4 w-4 text-muted-foreground/30 mt-1" />

@@ -1,4 +1,4 @@
-"use server";
+﻿"use server";
 
 import { sql, eq, and } from "drizzle-orm";
 import db from "@/db/drizzle";
@@ -121,48 +121,47 @@ export async function getKPIProgress(): Promise<KPIProgressReport> {
     const revenueCollected = revResult?.total || 0;
 
     // ── Metric 2: Compliance Rate (% of traders above 95%) ────────────
-    const traders = await db
-        .select({ id: user.id })
+    // -- Metric 2: Compliance Rate (2-query aggregate, replaces N+1 loop)
+    const complianceRows = await db
+        .select({
+            traderId: user.id,
+            vatOutput: sql<number>`COALESCE(SUM(CASE WHEN ${vatRecord.vatType} = 'output' AND NOT ${vatRecord.isFrozen} THEN ${vatRecord.amount} ELSE 0 END), 0)::float8`.as("vatOutput"),
+            vatInput: sql<number>`COALESCE(SUM(CASE WHEN ${vatRecord.vatType} = 'input' AND NOT ${vatRecord.isFrozen} THEN ${vatRecord.amount} ELSE 0 END), 0)::float8`.as("vatInput"),
+        })
         .from(user)
-        .where(sql`${user.role} IN ('manufacturer', 'wholesaler', 'retailer')`);
+        .leftJoin(vatRecord, eq(vatRecord.businessId, user.id))
+        .where(sql`${user.role} IN ('manufacturer', 'wholesaler', 'retailer')`)
+        .groupBy(user.id);
 
     let compliantCount = 0;
-    for (const trader of traders) {
-        const vatResult = await db
+    if (complianceRows.length > 0) {
+        const traderIdList = complianceRows.map((r) => r.traderId);
+        const paymentRows = await db
             .select({
-                vatType: vatRecord.vatType,
-                total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`.as("total"),
-            })
-            .from(vatRecord)
-            .where(and(eq(vatRecord.businessId, trader.id), eq(vatRecord.isFrozen, false)))
-            .groupBy(vatRecord.vatType);
-
-        const output = Number(vatResult.find((r) => r.vatType === "output")?.total) || 0;
-        const input = Number(vatResult.find((r) => r.vatType === "input")?.total) || 0;
-        const owed = Math.max(0, output - input);
-
-        if (owed === 0) {
-            compliantCount++;
-            continue;
-        }
-
-        const [payResult] = await db
-            .select({
+                businessId: taxPayment.businessId,
                 paid: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)::float8`.as("paid"),
             })
             .from(taxPayment)
-            .where(sql`${taxPayment.businessId} = ${trader.id} AND ${taxPayment.status} = 'confirmed'`);
+            .where(and(
+                sql`${taxPayment.businessId} = ANY(${traderIdList})`,
+                eq(taxPayment.status, "confirmed"),
+            ))
+            .groupBy(taxPayment.businessId);
 
-        const paid = Number(payResult?.paid) || 0;
-        if ((paid / owed) * 100 >= 95) compliantCount++;
+        const paymentMap = new Map(paymentRows.map((r) => [r.businessId, Number(r.paid)]));
+        for (const row of complianceRows) {
+            const owed = Math.max(0, Number(row.vatOutput) - Number(row.vatInput));
+            const paid = paymentMap.get(row.traderId) ?? 0;
+            if (owed === 0 || (paid / owed) * 100 >= 95) compliantCount++;
+        }
     }
 
-    const complianceRate = traders.length > 0
-        ? Math.round((compliantCount / traders.length) * 100)
+    const complianceRate = complianceRows.length > 0
+        ? Math.round((compliantCount / complianceRows.length) * 100)
         : 100;
 
-    // ── Metric 3: Registered Traders ──────────────────────────────────
-    const registeredTraders = traders.length;
+    // -- Metric 3: Registered Traders
+    const registeredTraders = complianceRows.length;
 
     // ── Metric 4: Dispute Resolution Rate (% resolved) ────────────────
     const [disputeStats] = await db

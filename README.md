@@ -1,13 +1,13 @@
 # TaxFlow Rwanda
 
-TaxFlow is a role-based tax and supply-chain support platform for manufacturers, wholesalers, retailers, and authorized RRA staff. It is designed to improve transaction traceability, stock visibility, tax calculations, payment review, and explainable risk monitoring. It complements—not replaces—official RRA systems.
+TaxFlow is a role-based tax and supply-chain support platform for manufacturers, wholesalers, retailers, and authorized TF staff. It is designed to improve transaction traceability, stock visibility, tax calculations, payment review, and explainable risk monitoring. It complements—not replaces—official RRA systems.
 
 ## Current application capabilities
 
 - **Role-based business workflows:** manufacturer production, B2B sales, buyer confirmation, retailer consumer sales, inventory, tax reports, disputes, and notifications.
 - **Configurable VAT calculation:** transaction creation uses the deterministic VAT engine and the configured VAT rate. Monetary totals are stored as whole RWF.
 - **Tax Intelligence dashboard:** visit `/dashboard/intelligence` to review explainable alerts for stale pending transactions, transaction arithmetic, VAT calculation differences, invalid stock balances, unsettled payment submissions, price deviations, and the recorded compliance position.
-- **AI business assistant:** the existing assistant uses authenticated, allow-listed read-only tools. It can explain the same risk alerts without making changes to records.
+- **AI business assistant:** assistant capabilities depend on the authenticated role and enabled tools. Review each action's permission checks; AI output must not replace authorized human decisions.
 - **Payment review workflow:** authorized compliance/audit staff can open `/admin/payments` to review pending submissions. Verification requires a reference checked against independent evidence and creates an audit entry.
 - **Audit evidence:** production changes, transaction confirmations, and retail sales record stock deltas and before/after quantities in audit events.
 - **Existing risk and supply-chain tools:** the codebase includes price suggestions, risk scoring, revenue forecasts, behavioral analysis, and supply-chain tracing tools.
@@ -41,19 +41,40 @@ Requirements: Node.js 24 or compatible, pnpm 10+, PostgreSQL/Neon databases for 
 
    Set `DATABASE_URL`, `TIN_DATABASE_URL`, `BETTER_AUTH_URL`, a strong `BETTER_AUTH_SECRET`, and the provider keys/services you intend to use. Do not commit secrets. See [.env.example](.env.example) for the full list.
 
-3. Apply the existing Drizzle schemas to your development databases:
+   Set `PAYMENT_DATA_ENCRYPTION_KEY` before using saved payment methods or registering TF bank accounts. Generate a random 32-byte key (for example, `node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"`) and store its base64 value only in the deployment secret manager. Keep the key stable and backed up; encrypted data cannot be recovered without it.
+
+3. Reconcile and migrate the TaxFlow database:
+
+   ```bash
+   pnpm db:migrate
+   ```
+
+   The journal includes an idempotent repair migration for the saved-payment-method and RRA collection-account schema that had been omitted from earlier journal history.
+
+4. Encrypt any existing payment identifiers and TF bank account numbers after setting the encryption key:
+
+   ```bash
+   pnpm db:encrypt-payment-data
+   pnpm db:encrypt-payment-data -- --apply
+   ```
+
+   The first command reports how many rows need encryption without changing them. The second encrypts those rows in place; encrypted rows are skipped if the command is rerun.
+
+   MTN, Airtel, and bank-gateway adapters remain disabled until provider contracts, credentials, callback-signature details, and sandbox access are configured. The current adapters fail closed and do not mark payments as received.
+
+5. For a fresh disposable development database, you can instead apply the Drizzle schemas:
 
    ```bash
    pnpm db:push:all
    ```
 
-4. If you need demo records, use the seed scripts only against a disposable development database:
+6. If you need demo records, use the seed scripts only against a disposable development database:
 
    ```bash
    pnpm db:seed:all
    ```
 
-5. Start the application:
+7. Start the application:
 
    ```bash
    pnpm dev
@@ -81,7 +102,7 @@ The GitHub Actions quality workflow is intended to run the same checks for pull 
 - Current-rate VAT checks may flag older transactions because applicable tax-rule versions are not yet persisted on each transaction.
 - The payment review screen is a manual authorized workflow, not a payment gateway or bank integration. An officer must independently verify settlement evidence before confirming a submission.
 - Stock movement evidence is written to the append-only audit log; this is not yet a separate normalized stock-ledger table, and historical events may not contain the newer movement details.
-- Import invoice PDFs are stored outside `public/` and served only to the owning trader and active RRA reviewers. Configure `TAXFLOW_PRIVATE_UPLOAD_DIR` to a persistent private volume when deploying; local filesystem storage must be shared by app instances that serve uploads.
+- Import invoice PDFs are stored outside `public/` and served only to the owning trader and active TF reviewers. Configure `TAXFLOW_PRIVATE_UPLOAD_DIR` to a persistent private volume when deploying; local filesystem storage must be shared by app instances that serve uploads.
 - VAT rounding, exemptions, refunds, credit notes, mixed-rate invoices, and official filing treatment require review by qualified tax/accounting specialists before production use.
 - Do not use seeded demo data for real tax decisions. Do not expose production taxpayer data to AI providers without an approved legal basis, privacy review, and retention policy.
 

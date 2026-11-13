@@ -1,7 +1,7 @@
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
-type TransactionStatus = "pending" | "confirmed" | "rejected" | "completed" | "expired";
+type TransactionStatus = "pending" | "confirmed" | "rejected" | "completed" | "expired" | "cancelled";
 
 const STATUS_CONFIG: Record<
     TransactionStatus,
@@ -25,6 +25,10 @@ const STATUS_CONFIG: Record<
     },
     expired: {
         label: "Expired",
+        className: "bg-gray-500/10 text-gray-500 border-gray-200",
+    },
+    cancelled: {
+        label: "Cancelled",
         className: "bg-gray-500/10 text-gray-500 border-gray-200",
     },
 };

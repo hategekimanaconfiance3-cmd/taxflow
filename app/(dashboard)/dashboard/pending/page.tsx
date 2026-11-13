@@ -1,19 +1,18 @@
 import { requireTraderSession } from '@/lib/auth-guard';
 import { getIncomingTransactions, getOutgoingTransactions } from '@/lib/actions/transaction.action';
+import { getB2BFulfillmentQueue } from '@/lib/actions/b2b-fulfillment.action';
 import { PendingPageClient } from '@/components/dashboard/pending-page/pending-page-client';
 
 export default async function PendingPage() {
   await requireTraderSession();
 
-  const [incoming, outgoing] = await Promise.all([
+  const [incoming, outgoing, fulfillment] = await Promise.all([
     getIncomingTransactions(),
     getOutgoingTransactions(),
+    getB2BFulfillmentQueue(),
   ]);
 
-  const pendingIncoming = incoming.filter((t) => t.status === 'pending');
-  const pendingOutgoing = outgoing.filter((t) => t.status === 'pending');
-
   return (
-    <PendingPageClient incoming={pendingIncoming} outgoing={pendingOutgoing} />
+    <PendingPageClient incoming={incoming} outgoing={outgoing} fulfillment={fulfillment} />
   );
 }

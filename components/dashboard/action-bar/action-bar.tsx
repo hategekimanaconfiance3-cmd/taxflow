@@ -24,7 +24,7 @@ export function ActionBar() {
                 </Button>
                 <Button variant="outline" className="gap-2">
                     <RefreshCw className="h-4 w-4" />
-                    RRA Sync
+                    TF Sync
                 </Button>
             </div>
         </div>

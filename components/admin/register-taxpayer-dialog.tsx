@@ -108,7 +108,7 @@ export function RegisterTaxpayerDialog() {
                 ) : (
                     <>
                         <div className="space-y-4">
-                            <div className="grid grid-cols-2 gap-3">
+                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                                 <div className="space-y-2">
                                     <Label>Full Name *</Label>
                                     <Input
@@ -146,7 +146,7 @@ export function RegisterTaxpayerDialog() {
                                     placeholder="Company Ltd"
                                 />
                             </div>
-                            <div className="grid grid-cols-2 gap-3">
+                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                                 <div className="space-y-2">
                                     <Label>Email *</Label>
                                     <Input

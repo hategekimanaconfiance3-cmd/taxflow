@@ -2,15 +2,15 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CircleCheck, CircleX, Loader2, Power, Shield } from "lucide-react";
-import { updateStaffClearance, toggleStaffStatus } from "@/lib/actions/admin-staff.action";
-import { STAFF_ROLE_OPTIONS } from "@/lib/validation/staff.schema";
+import { CircleCheck, CircleX, Loader2, Power, Shield, Settings2 } from "lucide-react";
+import { updateStaffRoles, toggleStaffStatus } from "@/lib/actions/admin-staff.action";
+import { ASSIGNABLE_STAFF_ROLE_OPTIONS, STAFF_ROLE_OPTIONS } from "@/lib/validation/staff.schema";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { StaffAccountDialog } from "@/components/admin/staff-account-dialog";
 import { StaffPasswordResetDialog } from "@/components/admin/staff-password-reset-dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 
 export type StaffManagementMember = {
     id: string;
@@ -19,10 +19,14 @@ export type StaffManagementMember = {
     email: string;
     department: string | null;
     clearanceLevel: string;
+    roles: string[];
     isActive: boolean;
 };
 
 type Notice = { message: string; kind: "success" | "error" };
+
+const assignableRoleValues: ReadonlySet<string> = new Set(ASSIGNABLE_STAFF_ROLE_OPTIONS.map((role) => role.value));
+const getAssignableRoles = (roles: string[]) => roles.filter((role) => assignableRoleValues.has(role));
 
 export function StaffManagement({ staffMembers }: { staffMembers: StaffManagementMember[] }) {
     const router = useRouter();
@@ -64,7 +68,7 @@ export function StaffManagement({ staffMembers }: { staffMembers: StaffManagemen
             {staffMembers.length === 0 ? (
                 <div className="rounded-md border border-dashed p-8 text-center">
                     <Shield className="text-muted-foreground mx-auto size-8" />
-                    <p className="mt-3 font-medium">No RRA staff accounts yet</p>
+                    <p className="mt-3 font-medium">No TF staff accounts yet</p>
                     <p className="text-muted-foreground mt-1 text-sm">Add a staff member to grant admin dashboard access.</p>
                 </div>
             ) : (
@@ -88,21 +92,6 @@ function StaffMemberRow({
     onChanged: () => void;
 }) {
     const [isPending, startTransition] = useTransition();
-    const roleLabel = STAFF_ROLE_OPTIONS.find((role) => role.value === member.clearanceLevel)?.label ?? member.clearanceLevel;
-
-    function handleRoleChange(value: string): void {
-        if (value === member.clearanceLevel) return;
-        startTransition(async () => {
-            const result = await updateStaffClearance(member.id, value);
-            if (!result.success) {
-                onNotice(result.error, "error");
-                return;
-            }
-            onChanged();
-            onNotice(`Role updated for ${member.staffId}.`, "success");
-        });
-    }
-
     function handleToggle(): void {
         startTransition(async () => {
             const result = await toggleStaffStatus(member.id);
@@ -128,24 +117,13 @@ function StaffMemberRow({
                     </div>
                     <p className="text-muted-foreground mt-0.5 text-sm">{member.staffId} · {member.email}</p>
                     <p className="text-muted-foreground text-xs">{member.department || "No department assigned"}</p>
+                    <div className="mt-2 flex flex-wrap gap-1">{member.roles.map((role) => <Badge key={role} variant="outline">{STAFF_ROLE_OPTIONS.find((option) => option.value === role)?.label ?? role}</Badge>)}</div>
                 </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-2 lg:justify-end">
                 <div className="flex items-center gap-2">
-                    <Select value={member.clearanceLevel} onValueChange={handleRoleChange} disabled={isPending}>
-                        <SelectTrigger className="w-[190px]" aria-label={`Role for ${member.staffId}`}>
-                            <SelectValue>{roleLabel}</SelectValue>
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectGroup>
-                                {STAFF_ROLE_OPTIONS.map((role) => (
-                                    <SelectItem key={role.value} value={role.value}>{role.label}</SelectItem>
-                                ))}
-                            </SelectGroup>
-                        </SelectContent>
-                    </Select>
-            {isPending ? <Loader2 className="text-muted-foreground size-4 animate-spin" /> : null}
+                    <StaffRolesDialog member={member} disabled={isPending} onNotice={onNotice} onChanged={onChanged} />
                 </div>
                 <Button variant={member.isActive ? "outline" : "default"} size="sm" className="gap-1.5" onClick={handleToggle} disabled={isPending}>
                     {isPending ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Power data-icon="inline-start" />}
@@ -154,5 +132,72 @@ function StaffMemberRow({
                 <StaffPasswordResetDialog staffRecordId={member.id} staffId={member.staffId} onNotice={onNotice} />
             </div>
         </div>
+    );
+}
+
+function StaffRolesDialog({
+    member,
+    disabled,
+    onNotice,
+    onChanged,
+}: {
+    member: StaffManagementMember;
+    disabled: boolean;
+    onNotice: (message: string, kind: Notice["kind"]) => void;
+    onChanged: () => void;
+}) {
+    const [open, setOpen] = useState(false);
+    const [roles, setRoles] = useState(() => getAssignableRoles(member.roles));
+    const [isPending, startTransition] = useTransition();
+
+    function toggleRole(value: string, checked: boolean) {
+        setRoles((current) => {
+            if (value === "super_admin" && checked) return [value];
+            if (current.includes("super_admin")) return checked ? [value] : [];
+            return checked ? [...current, value] : current.filter((role) => role !== value);
+        });
+    }
+
+    function save() {
+        startTransition(async () => {
+            const result = await updateStaffRoles(member.id, roles);
+            if (!result.success) {
+                onNotice(result.error, "error");
+                return;
+            }
+            setOpen(false);
+            onChanged();
+            onNotice(`Roles updated for ${member.staffId}.`, "success");
+        });
+    }
+
+    return (
+        <Dialog open={open} onOpenChange={(next) => { setOpen(next); if (next) setRoles(getAssignableRoles(member.roles)); }}>
+            <DialogTrigger asChild><Button type="button" variant="outline" size="sm" className="gap-1.5" disabled={disabled}><Settings2 className="size-4" />Manage roles</Button></DialogTrigger>
+            <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
+                <DialogHeader>
+                    <DialogTitle>Role assignments · {member.staffId}</DialogTitle>
+                    <DialogDescription>Select the predefined permission bundles this worker needs. Super Admin must be assigned alone.</DialogDescription>
+                </DialogHeader>
+                {member.roles.some((role) => !assignableRoleValues.has(role)) ? (
+                    <p className="text-sm text-amber-700">This staff member has a legacy role. Choose current roles below and save to replace the legacy assignment; historical role access remains supported until then.</p>
+                ) : null}
+                <div className="space-y-2">
+                    {ASSIGNABLE_STAFF_ROLE_OPTIONS.map((role) => (
+                        <label key={role.value} className="flex cursor-pointer items-start gap-3 rounded-md border p-3 hover:bg-muted/50">
+                            <input type="checkbox" className="mt-1 size-4 accent-primary" checked={roles.includes(role.value)} disabled={isPending}
+                                onChange={(event) => toggleRole(role.value, event.target.checked)} />
+                            <span><span className="text-sm font-medium">{role.label}</span><span className="mt-0.5 block text-xs text-muted-foreground">{role.permissions}</span></span>
+                        </label>
+                    ))}
+                </div>
+                <DialogFooter>
+                    <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={isPending}>Cancel</Button>
+                    <Button type="button" onClick={save} disabled={isPending || roles.length === 0}>
+                        {isPending ? <Loader2 className="animate-spin" /> : null}Save role assignments
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
     );
 }

@@ -1,4 +1,4 @@
-import { requireRRASession } from '@/lib/auth-guard';
+import { requireAnyRRAPermission } from '@/lib/auth-guard';
 import { getAllDisputes } from '@/lib/actions/dispute.action';
 import { AdminDisputeActions } from '@/components/admin/admin-dispute-actions';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Scale } from 'lucide-react';
 
 export default async function AdminDisputesPage() {
-  await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
+  await requireAnyRRAPermission("compliance.followup.manage", "investigation.case.manage");
   const disputes = await getAllDisputes();
 
   return (
@@ -27,7 +27,7 @@ export default async function AdminDisputesPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           {disputes.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No disputes to review.</p>
+            <p className="text-sm text-muted-foreground">No active disputes to review.</p>
           ) : (
             disputes.map((dispute) => (
               <div
@@ -58,6 +58,7 @@ export default async function AdminDisputesPage() {
                   reason={dispute.reason}
                   counterpartyResponse={dispute.counterpartyResponse ?? 'pending'}
                   counterpartyNote={dispute.counterpartyNote}
+                  hasFulfillmentAcceptance={dispute.hasFulfillmentAcceptance}
                 />
               </div>
             ))

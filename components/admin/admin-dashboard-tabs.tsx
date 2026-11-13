@@ -36,7 +36,7 @@ interface AdminDashboardTabsProps {
         businessName: string | null;
         productName: string;
         expectedQuantity: number;
-        actualQuantity: number | null;
+        inspectedQuantity: number | null;
         status: string;
         createdAt: Date;
     }[];
@@ -242,7 +242,7 @@ export function AdminDashboardTabs({
                                             {i.productName}
                                         </TableCell>
                                         <TableCell className="text-right font-mono text-sm">
-                                            {(i.actualQuantity ?? i.expectedQuantity).toLocaleString()}
+                                            {i.inspectedQuantity == null ? "Awaiting inspection" : i.inspectedQuantity.toLocaleString()}
                                         </TableCell>
                                         <TableCell>
                                             <Badge

@@ -14,7 +14,7 @@ export default async function RootPage() {
     redirect('/sign-in');
   }
 
-  // Check if user is RRA staff
+  // Check if user is TF staff
   const staffRecords = await db.select().from(rraStaff).where(eq(rraStaff.userId, session.user.id)).limit(1);
 
   const isRRAStaff = staffRecords.length > 0 && staffRecords[0].isActive;

@@ -1,5 +1,5 @@
 import { relations, sql } from 'drizzle-orm';
-import { pgTable, text, timestamp, boolean, integer, real, jsonb, index, uniqueIndex, bigint } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, boolean, integer, real, jsonb, index, uniqueIndex, bigint, check, numeric } from 'drizzle-orm/pg-core';
 
 // auth models
 
@@ -28,9 +28,10 @@ export const user = pgTable(
     phoneNumber: text('phone_number').unique(), // From phoneNumber plugin
     phoneNumberVerified: boolean('phone_number_verified').default(false),
     role: text('role').notNull().default('retailer'), // manufacturer, wholesaler, retailer, rra_staff
+    businessType: text('business_type').notNull().default('registered_business'), // registered_business, institution, government, large_bulk_buyer
     clearanceStatus: text('clearance_status').default('pending').notNull(),
     // "pending" | "approved" | "under_review" | "suspended"
-    // New traders start as "pending" - RRA staff must approve before they can trade
+    // New traders start as "pending" - TF staff must approve before they can trade
     email: text('email').notNull().unique(),
     emailVerified: boolean('email_verified').default(false).notNull(),
     image: text('image'),
@@ -104,7 +105,7 @@ export const verification = pgTable(
 );
 
 // ---------------------------------------------------------------------------
-// RRA Staff
+// TF Staff
 // ---------------------------------------------------------------------------
 
 export const rraStaff = pgTable(
@@ -132,6 +133,23 @@ export const rraStaff = pgTable(
   ],
 );
 
+// A worker may hold several predefined TF role bundles. clearanceLevel stays
+// as the primary/legacy role while this table records every effective role.
+export const rraStaffRole = pgTable(
+  'rra_staff_role',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    staffRecordId: text('staff_record_id').notNull().references(() => rraStaff.id, { onDelete: 'cascade' }),
+    role: text('role').notNull(),
+    assignedBy: text('assigned_by').references(() => user.id),
+    assignedAt: timestamp('assigned_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('rra_staff_role_staff_role_uniq').on(table.staffRecordId, table.role),
+    index('rra_staff_role_role_idx').on(table.role),
+  ],
+);
+
 // ---------------------------------------------------------------------------
 // Products
 // ---------------------------------------------------------------------------
@@ -144,7 +162,7 @@ export const product = pgTable(
       .$defaultFn(() => crypto.randomUUID()),
     name: text('name').notNull(),
     unit: text('unit').notNull(), // "kg", "piece", "liter", etc.
-    categoryCode: text('category_code'), // RRA tax classification
+    categoryCode: text('category_code'), // TF tax classification
     createdByUserId: text('created_by_user_id')
       .notNull()
       .references(() => user.id, { onDelete: 'cascade' }),
@@ -155,6 +173,30 @@ export const product = pgTable(
     createdAt: timestamp('created_at').defaultNow().notNull(),
   },
   (table) => [index('product_created_by_idx').on(table.createdByUserId)],
+);
+
+// A business-owned customer directory. This stores customer details entered by
+// that business; a record is not proof of TIN validity or RRA registration.
+export const customer = pgTable(
+  'customer',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    businessId: text('business_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    customerType: text('customer_type').notNull().default('individual'),
+    tinNumber: text('tin_number'),
+    phone: text('phone'),
+    email: text('email'),
+    isActive: boolean('is_active').notNull().default(true),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().$onUpdate(() => new Date()).notNull(),
+  },
+  (table) => [
+    index('customer_business_active_name_idx').on(table.businessId, table.isActive, table.name),
+    uniqueIndex('customer_business_tin_uniq').on(table.businessId, table.tinNumber),
+    check('customer_type_check', sql`${table.customerType} IN ('individual', 'business', 'institution')`),
+    check('customer_tin_format_check', sql`${table.tinNumber} IS NULL OR ${table.tinNumber} ~ '^[0-9]{9}$'`),
+  ],
 );
 
 // ---------------------------------------------------------------------------
@@ -212,6 +254,102 @@ export const stockMovement = pgTable(
   ],
 );
 
+// Effective-dated sell-through policy. Rows are immutable history; a change is
+// represented by inserting a new row rather than rewriting prior decisions.
+export const stockSellThroughThreshold = pgTable(
+  'stock_sell_through_threshold',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    scopeType: text('scope_type').notNull(), // default | category | product
+    scopeKey: text('scope_key').notNull(), // '*' for default, otherwise category code or product ID
+    thresholdPercent: real('threshold_percent').notNull(),
+    effectiveAt: timestamp('effective_at').notNull(),
+    reason: text('reason').notNull(),
+    createdByUserId: text('created_by_user_id').references(() => user.id),
+    createdByRole: text('created_by_role'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('stock_sell_through_threshold_scope_effective_idx').on(table.scopeType, table.scopeKey, table.effectiveAt),
+    check('stock_sell_through_threshold_scope_check', sql`${table.scopeType} IN ('default', 'category', 'product')`),
+    check('stock_sell_through_threshold_key_check', sql`(${table.scopeType} = 'default' AND ${table.scopeKey} = '*') OR (${table.scopeType} IN ('category', 'product') AND ${table.scopeKey} <> '*')`),
+    check('stock_sell_through_threshold_percent_check', sql`${table.thresholdPercent} >= 0 AND ${table.thresholdPercent} <= 100`),
+  ],
+);
+
+// A cycle describes the prospective recorded-stock cohort used for one
+// business/product pair. A legacy opening balance starts in review until an
+// authorized officer attests the recorded TaxFlow quantity.
+export const stockSellThroughCycle = pgTable(
+  'stock_sell_through_cycle',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    businessId: text('business_id').notNull().references(() => user.id),
+    productId: text('product_id').notNull().references(() => product.id),
+    baselineQuantity: real('baseline_quantity').notNull(),
+    cycleStartedAt: timestamp('cycle_started_at').notNull(),
+    baselineStatus: text('baseline_status').notNull(), // needs_review | ledger_verified
+    baselineVerifiedByUserId: text('baseline_verified_by_user_id').references(() => user.id),
+    baselineVerifiedAt: timestamp('baseline_verified_at'),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('stock_sell_through_cycle_business_product_uniq').on(table.businessId, table.productId),
+    index('stock_sell_through_cycle_business_idx').on(table.businessId),
+    check('stock_sell_through_cycle_baseline_check', sql`${table.baselineQuantity} >= 0`),
+    check('stock_sell_through_cycle_status_check', sql`${table.baselineStatus} IN ('needs_review', 'ledger_verified')`),
+  ],
+);
+
+// Restock requests record the sell-through decision, not receipt of goods.
+// Exception review is separately mutable and every decision is audit-logged.
+export const stockRestockRequest = pgTable(
+  'stock_restock_request',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    businessId: text('business_id').notNull().references(() => user.id),
+    productId: text('product_id').notNull().references(() => product.id),
+    requestedQuantity: real('requested_quantity').notNull(),
+    requestedByUserId: text('requested_by_user_id').notNull().references(() => user.id),
+    idempotencyKey: text('idempotency_key').notNull(),
+    cycleId: text('cycle_id').notNull().references(() => stockSellThroughCycle.id),
+    cycleStartedAt: timestamp('cycle_started_at').notNull(),
+    thresholdId: text('threshold_id').references(() => stockSellThroughThreshold.id),
+    thresholdPercent: real('threshold_percent'), // immutable decision snapshot; null means no active policy
+    baselineQuantity: real('baseline_quantity').notNull(),
+    cohortQuantity: real('cohort_quantity').notNull(),
+    qualifyingSalesQuantity: real('qualifying_sales_quantity').notNull(),
+    requiredSalesQuantity: real('required_sales_quantity').notNull(),
+    sellThroughPercent: real('sell_through_percent'),
+    eligibilityStatus: text('eligibility_status').notNull(), // eligible | blocked | review_required
+    eligibilityReason: text('eligibility_reason').notNull(),
+    sourceEvidenceRefs: text('source_evidence_refs').notNull(), // bounded JSON refs to movement and accepted-transaction rows used
+    evaluatedAt: timestamp('evaluated_at').defaultNow().notNull(),
+    exceptionReason: text('exception_reason'),
+    exceptionStatus: text('exception_status').notNull().default('none'), // none | pending | approved | rejected
+    reviewedByUserId: text('reviewed_by_user_id').references(() => user.id),
+    reviewedAt: timestamp('reviewed_at'),
+    reviewReason: text('review_reason'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('stock_restock_request_business_idempotency_uniq').on(table.businessId, table.idempotencyKey),
+    index('stock_restock_request_status_created_idx').on(table.eligibilityStatus, table.createdAt),
+    index('stock_restock_request_exception_created_idx').on(table.exceptionStatus, table.createdAt),
+    index('stock_restock_request_business_product_created_idx').on(table.businessId, table.productId, table.createdAt),
+    check('stock_restock_request_quantity_check', sql`${table.requestedQuantity} > 0 AND ${table.requestedQuantity} <= 1000000000`),
+    check('stock_restock_request_owner_check', sql`${table.requestedByUserId} = ${table.businessId}`),
+    check('stock_restock_request_quantities_check', sql`${table.baselineQuantity} >= 0 AND ${table.cohortQuantity} >= 0 AND ${table.qualifyingSalesQuantity} >= 0 AND ${table.requiredSalesQuantity} >= 0`),
+    check('stock_restock_request_eligibility_check', sql`${table.eligibilityStatus} IN ('eligible', 'blocked', 'review_required')`),
+    check('stock_restock_request_exception_check', sql`${table.exceptionStatus} IN ('none', 'pending', 'approved', 'rejected', 'consumed')`),
+    check('stock_restock_request_threshold_check', sql`${table.thresholdPercent} IS NULL OR (${table.thresholdPercent} >= 0 AND ${table.thresholdPercent} <= 100)`),
+    check('stock_restock_request_sell_through_check', sql`${table.sellThroughPercent} IS NULL OR (${table.sellThroughPercent} >= 0 AND ${table.sellThroughPercent} <= 100)`),
+    check('stock_restock_request_exception_reason_check', sql`${table.exceptionStatus} = 'none' OR ${table.exceptionReason} IS NOT NULL`),
+    check('stock_restock_request_review_pair_check', sql`(${table.reviewedByUserId} IS NULL) = (${table.reviewedAt} IS NULL)`),
+  ],
+);
+
 // ---------------------------------------------------------------------------
 // Transactions
 // ---------------------------------------------------------------------------
@@ -227,6 +365,12 @@ export const transaction = pgTable(
       .references(() => user.id),
     buyerId: text('buyer_id').references(() => user.id), // null for retail → consumer
     buyerName: text('buyer_name'), // final consumer name (retailer sales only)
+    customerId: text('customer_id').references(() => customer.id, { onDelete: 'set null' }),
+    transactionType: text('transaction_type').notNull().default('STANDARD_B2B_SALE'), // STANDARD_B2B_SALE | DIRECT_BULK_SALE | RETAIL_SALE
+    buyerType: text('buyer_type').notNull().default('registered_business'), // individual_consumer | registered_business | institution | government | large_bulk_buyer
+    invoiceReference: text('invoice_reference'),
+    deliveryInformation: jsonb('delivery_information').$type<{ address?: string; schedule?: string; notes?: string }>(),
+    paymentStatus: text('payment_status').notNull().default('unpaid'), // unpaid | partial | paid
     productId: text('product_id')
       .notNull()
       .references(() => product.id),
@@ -254,6 +398,115 @@ export const transaction = pgTable(
   ],
 );
 
+// B2B inventory holds. Creation removes the full reserved quantity from seller
+// available stock. Order acceptance retains the hold; full dispatch converts it.
+// Pending-only cancellation/expiry releases it exactly once before acceptance.
+export const stockReservation = pgTable(
+  'stock_reservation',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    transactionId: text('transaction_id').notNull().unique().references(() => transaction.id, { onDelete: 'cascade' }),
+    productId: text('product_id').notNull().references(() => product.id),
+    quantity: real('quantity').notNull(),
+    sellerId: text('seller_id').notNull().references(() => user.id),
+    buyerId: text('buyer_id').notNull().references(() => user.id),
+    status: text('status').notNull().default('active'),
+    reservedAt: timestamp('reserved_at').defaultNow().notNull(),
+    expiresAt: timestamp('expires_at').notNull(),
+    releasedAt: timestamp('released_at'),
+  },
+  (table) => [
+    index('stock_reservation_seller_status_expires_idx').on(table.sellerId, table.status, table.expiresAt),
+    index('stock_reservation_buyer_status_expires_idx').on(table.buyerId, table.status, table.expiresAt),
+    check('stock_reservation_status_check', sql`${table.status} IN ('active', 'converted', 'released', 'expired', 'cancelled')`),
+    check('stock_reservation_quantity_check', sql`${table.quantity} > 0`),
+  ],
+);
+
+// A business is represented by its verified owner account (the existing user
+// row). Representatives use their own verified user account; this table does
+// not create a second business identity or trust client-supplied business data.
+export const businessRepresentative = pgTable(
+  'business_representative',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    businessId: text('business_id').notNull().references(() => user.id),
+    representativeUserId: text('representative_user_id').notNull().references(() => user.id),
+    status: text('status').notNull().default('pending'),
+    invitedByUserId: text('invited_by_user_id').notNull().references(() => user.id),
+    invitedAt: timestamp('invited_at').defaultNow().notNull(),
+    acceptedAt: timestamp('accepted_at'),
+    revokedAt: timestamp('revoked_at'),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('business_representative_business_user_uniq').on(table.businessId, table.representativeUserId),
+    index('business_representative_user_status_idx').on(table.representativeUserId, table.status),
+    check('business_representative_status_check', sql`${table.status} IN ('pending', 'active', 'revoked')`),
+    check('business_representative_not_owner_check', sql`${table.businessId} <> ${table.representativeUserId}`),
+  ],
+);
+
+// B2B acceptance is distinct from physical dispatch and measured receipt.
+// Existing transaction rows intentionally receive no fabricated acceptance.
+export const b2bOrderAcceptance = pgTable(
+  'b2b_order_acceptance',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    transactionId: text('transaction_id').notNull().unique().references(() => transaction.id),
+    buyerBusinessId: text('buyer_business_id').notNull().references(() => user.id),
+    actorUserId: text('actor_user_id').notNull().references(() => user.id),
+    acceptedAt: timestamp('accepted_at').defaultNow().notNull(),
+  },
+  (table) => [index('b2b_order_acceptance_buyer_time_idx').on(table.buyerBusinessId, table.acceptedAt)],
+);
+
+export const b2bDispatch = pgTable(
+  'b2b_dispatch',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    transactionId: text('transaction_id').notNull().references(() => transaction.id),
+    sellerBusinessId: text('seller_business_id').notNull().references(() => user.id),
+    actorUserId: text('actor_user_id').notNull().references(() => user.id),
+    quantity: real('quantity').notNull(),
+    dispatchReference: text('dispatch_reference'),
+    idempotencyKey: text('idempotency_key').notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('b2b_dispatch_transaction_key_uniq').on(table.transactionId, table.idempotencyKey),
+    index('b2b_dispatch_transaction_created_idx').on(table.transactionId, table.createdAt),
+    uniqueIndex('b2b_dispatch_business_reference_uniq').on(table.sellerBusinessId, table.dispatchReference),
+    check('b2b_dispatch_quantity_check', sql`${table.quantity} > 0`),
+  ],
+);
+
+export const b2bReceipt = pgTable(
+  'b2b_receipt',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    dispatchId: text('dispatch_id').notNull().references(() => b2bDispatch.id),
+    transactionId: text('transaction_id').notNull().references(() => transaction.id),
+    buyerBusinessId: text('buyer_business_id').notNull().references(() => user.id),
+    actorUserId: text('actor_user_id').notNull().references(() => user.id),
+    quantityReceived: real('quantity_received').notNull(),
+    acceptedQuantity: real('accepted_quantity').notNull(),
+    damagedQuantity: real('damaged_quantity').notNull().default(0),
+    rejectedQuantity: real('rejected_quantity').notNull().default(0),
+    disputedQuantity: real('disputed_quantity').notNull().default(0),
+    notes: text('notes'),
+    idempotencyKey: text('idempotency_key').notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('b2b_receipt_dispatch_key_uniq').on(table.dispatchId, table.idempotencyKey),
+    index('b2b_receipt_transaction_created_idx').on(table.transactionId, table.createdAt),
+    check('b2b_receipt_quantity_positive_check', sql`${table.quantityReceived} > 0`),
+    check('b2b_receipt_classification_nonnegative_check', sql`${table.acceptedQuantity} >= 0 AND ${table.damagedQuantity} >= 0 AND ${table.rejectedQuantity} >= 0 AND ${table.disputedQuantity} >= 0`),
+    check('b2b_receipt_classification_total_check', sql`abs(${table.acceptedQuantity} + ${table.damagedQuantity} + ${table.rejectedQuantity} + ${table.disputedQuantity} - ${table.quantityReceived}) < 0.000001`),
+  ],
+);
+
 // ---------------------------------------------------------------------------
 // Transaction Items — line items within a transaction (multi-product support)
 // ---------------------------------------------------------------------------
@@ -274,6 +527,43 @@ export const transactionItem = pgTable(
     vatAmount: integer('vat_amount').notNull(), // totalPrice × 0.18
   },
   (table) => [index('txn_item_txn_idx').on(table.transactionId)],
+);
+
+// Issued sales invoices are immutable snapshots of a completed TaxFlow sale.
+// Recipient email and delivery attempts are deliberately stored separately.
+export const salesInvoice = pgTable(
+  'sales_invoice',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    invoiceNumber: text('invoice_number').notNull().unique(),
+    transactionId: text('transaction_id').notNull().unique().references(() => transaction.id),
+    sellerId: text('seller_id').notNull().references(() => user.id),
+    buyerId: text('buyer_id').references(() => user.id),
+    snapshot: jsonb('snapshot').$type<Record<string, unknown>>().notNull(),
+    issuedAt: timestamp('issued_at').defaultNow().notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('sales_invoice_seller_issued_idx').on(table.sellerId, table.issuedAt),
+    index('sales_invoice_buyer_issued_idx').on(table.buyerId, table.issuedAt),
+  ],
+);
+
+export const salesInvoiceEmailDelivery = pgTable(
+  'sales_invoice_email_delivery',
+  {
+    invoiceId: text('invoice_id').primaryKey().references(() => salesInvoice.id),
+    status: text('status').notNull().default('pending'),
+    attemptCount: integer('attempt_count').notNull().default(0),
+    lastAttemptAt: timestamp('last_attempt_at'),
+    providerMessageId: text('provider_message_id'),
+    lastErrorCode: text('last_error_code'),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => [
+    check('sales_invoice_email_status_check', sql`${table.status} IN ('pending', 'sending', 'sent', 'failed', 'not_available')`),
+    check('sales_invoice_email_attempt_count_check', sql`${table.attemptCount} >= 0`),
+  ],
 );
 
 // ---------------------------------------------------------------------------
@@ -306,6 +596,34 @@ export const vatRecord = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// Saved Payment Methods — per-business saved Mobile Money / bank accounts
+// ---------------------------------------------------------------------------
+
+export const paymentMethod = pgTable(
+  'payment_method',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    businessId: text('business_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+    /** 'mtn_mobile_money' | 'airtel_money' | 'bank_transfer' */
+    provider: text('provider').notNull(),
+    /** User-defined nickname e.g. "My MTN", "Office Bank" */
+    label: text('label'),
+    /** Masked for display: "+250 78* *** 456" */
+    maskedIdentifier: text('masked_identifier').notNull(),
+    /** Full phone/account stored server-side — never returned raw to client */
+    fullIdentifier: text('full_identifier').notNull(),
+    isDefault: boolean('is_default').notNull().default(false),
+    isActive: boolean('is_active').notNull().default(true),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().$onUpdate(() => /* @__PURE__ */ new Date()).notNull(),
+  },
+  (table) => [
+    index('payment_method_business_idx').on(table.businessId),
+    index('payment_method_business_provider_idx').on(table.businessId, table.provider),
+  ],
+);
+
+// ---------------------------------------------------------------------------
 // Tax Payments — actual payments made to RRA
 // ---------------------------------------------------------------------------
 
@@ -318,11 +636,22 @@ export const taxPayment = pgTable(
     businessId: text('business_id')
       .notNull()
       .references(() => user.id),
-    amount: integer('amount').notNull(), // RWF
+    amount: integer('amount').notNull(), // RWF — actual requested payment amount (95–100% of outstanding)
     method: text('method').notNull(), // "mobile_money", "bank_transfer", "cash"
+    paymentReference: text('payment_reference').notNull().$defaultFn(() => `TF-${crypto.randomUUID()}`),
     reference: text('reference').unique(), // payment reference / receipt number
     idempotencyKey: text('idempotency_key'),
-    status: text('status').default('confirmed').notNull(), // "pending", "confirmed", "rejected"
+    status: text('status').default('pending').notNull(), // legacy compatibility: pending | confirmed | rejected
+    workflowStatus: text('workflow_status').default('AWAITING_CONFIRMATION').notNull(),
+    /** Percentage of outstanding balance paid (95.00–100.00) */
+    paymentPercentage: numeric('payment_percentage', { precision: 5, scale: 2 }),
+    /** Outstanding balance snapshot at submission time — for receipts */
+    outstandingAtSubmission: integer('outstanding_at_submission'),
+    /** FK to saved payment method used (NULL = one-off or cash) */
+    paymentMethodId: text('payment_method_id').references(() => paymentMethod.id, { onDelete: 'set null' }),
+    /** Masked payer identifier for display on receipts */
+    payerDisplay: text('payer_display'),
+    rraAccountId: text('rra_account_id').references(() => rraCollectionAccount.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at')
       .defaultNow()
@@ -332,7 +661,69 @@ export const taxPayment = pgTable(
   (table) => [
     index('tax_payment_business_idx').on(table.businessId),
     index('tax_payment_status_idx').on(table.status),
+    uniqueIndex('tax_payment_reference_uniq').on(table.paymentReference),
     uniqueIndex('tax_payment_business_idempotency_uniq').on(table.businessId, table.idempotencyKey),
+    check('tax_payment_workflow_status_check', sql`${table.workflowStatus} IN ('DRAFT','ELIGIBILITY_CHECKED','READY_FOR_PAYMENT','PAYMENT_INITIATED','AWAITING_CONFIRMATION','PROVIDER_CONFIRMED','RECONCILIATION_PENDING','PAID','REVIEW_REQUIRED','FAILED','EXPIRED','CANCELLED','REFUND_PENDING','REFUNDED')`),
+  ],
+);
+
+/** Append-only event history for the payment state machine; audit_log remains the cross-domain audit trail. */
+export const taxPaymentEvent = pgTable(
+  'tax_payment_event',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    paymentId: text('payment_id').notNull().references(() => taxPayment.id),
+    eventKey: text('event_key').notNull().unique(),
+    eventType: text('event_type').notNull(),
+    fromStatus: text('from_status'),
+    toStatus: text('to_status').notNull(),
+    actorUserId: text('actor_user_id').references(() => user.id),
+    details: jsonb('details').$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [index('tax_payment_event_payment_created_idx').on(table.paymentId, table.createdAt)],
+);
+
+// ---------------------------------------------------------------------------
+// TF Collection Accounts
+// ---------------------------------------------------------------------------
+
+export const rraCollectionAccount = pgTable(
+  'rra_collection_account',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    accountType: text('account_type').notNull(), // 'bank_account' | 'mobile_money'
+    displayName: text('display_name').notNull(),
+    currency: text('currency').notNull().default('RWF'),
+    description: text('description'),
+    providerName: text('provider_name').notNull(),
+    providerIntegration: text('provider_integration'),
+    // Bank-specific
+    bankAccountHolder: text('bank_account_holder'),
+    bankAccountNumber: text('bank_account_number'), // stored masked or encrypted
+    maskedAccountNumber: text('masked_account_number'),
+    bankBranch: text('bank_branch'),
+    // Mobile Money specific
+    merchantCode: text('merchant_code'),
+    registeredName: text('registered_name'),
+    // Verification workflow
+    verificationStatus: text('verification_status').notNull().default('pending'),
+    // 'pending' | 'verified' | 'rejected' | 'reverification_required'
+    submittedBy: text('submitted_by').notNull().references(() => user.id),
+    reviewedBy: text('reviewed_by').references(() => user.id),
+    reviewDate: timestamp('review_date'),
+    rejectionReason: text('rejection_reason'),
+    verifiedAt: timestamp('verified_at'),
+    // Active flag — only verified+active accounts accept payments
+    isActive: boolean('is_active').notNull().default(false),
+    isDeleted: boolean('is_deleted').notNull().default(false),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().$onUpdate(() => /* @__PURE__ */ new Date()).notNull(),
+  },
+  (table) => [
+    index('rra_collection_account_type_idx').on(table.accountType),
+    index('rra_collection_account_status_idx').on(table.verificationStatus),
+    index('rra_collection_account_active_idx').on(table.isActive, table.isDeleted),
   ],
 );
 
@@ -363,6 +754,115 @@ export const auditLog = pgTable(
     index('audit_user_idx').on(table.userId),
     index('audit_action_idx').on(table.action),
     index('audit_target_idx').on(table.targetType, table.targetId),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// TF Case Management
+// ---------------------------------------------------------------------------
+
+export const rraCase = pgTable(
+  'rra_case',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    traderId: text('trader_id').notNull().references(() => user.id),
+    title: text('title').notNull(),
+    reason: text('reason').notNull(),
+    status: text('status').notNull().default('open'),
+    priority: text('priority').notNull().default('normal'),
+    assignedStaffId: text('assigned_staff_id').references(() => rraStaff.id, { onDelete: 'set null' }),
+    createdByStaffId: text('created_by_staff_id').references(() => rraStaff.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+    closedAt: timestamp('closed_at'),
+  },
+  (table) => [
+    index('rra_case_status_updated_idx').on(table.status, table.updatedAt),
+    index('rra_case_trader_created_idx').on(table.traderId, table.createdAt),
+    index('rra_case_assigned_status_idx').on(table.assignedStaffId, table.status),
+  ],
+);
+
+export const rraCaseEvent = pgTable(
+  'rra_case_event',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    caseId: text('case_id').notNull().references(() => rraCase.id, { onDelete: 'cascade' }),
+    actorStaffId: text('actor_staff_id').references(() => rraStaff.id, { onDelete: 'set null' }),
+    eventType: text('event_type').notNull(),
+    note: text('note'),
+    fromValue: text('from_value'),
+    toValue: text('to_value'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [index('rra_case_event_case_created_idx').on(table.caseId, table.createdAt)],
+);
+
+// Taxpayer profile corrections are requests and review records only. The
+// workflow deliberately has no final-decision or taxpayer-mutation fields.
+export const taxpayerCorrectionRequest = pgTable(
+  'taxpayer_correction_request',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    reference: text('reference').notNull().unique(),
+    taxpayerId: text('taxpayer_id').notNull().references(() => user.id),
+    submissionKey: text('submission_key').notNull(),
+    category: text('category').notNull(),
+    fieldKey: text('field_key').notNull(),
+    originalValue: text('original_value').notNull(),
+    requestedValue: text('requested_value').notNull(),
+    reason: text('reason').notNull(),
+    status: text('status').notNull().default('submitted'),
+    assignedStaffId: text('assigned_staff_id').references(() => rraStaff.id, { onDelete: 'set null' }),
+    recommendation: text('recommendation'),
+    recommendationReason: text('recommendation_reason'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('taxpayer_correction_owner_created_idx').on(table.taxpayerId, table.createdAt),
+    uniqueIndex('taxpayer_correction_owner_submission_key_uniq').on(table.taxpayerId, table.submissionKey),
+    index('taxpayer_correction_assigned_status_idx').on(table.assignedStaffId, table.status, table.updatedAt),
+    index('taxpayer_correction_status_created_idx').on(table.status, table.createdAt),
+    check('taxpayer_correction_field_key_check', sql`${table.fieldKey} IN ('name', 'businessName', 'email', 'phoneNumber', 'businessType')`),
+    check('taxpayer_correction_category_check', sql`${table.category} IN ('personal_identity', 'business_profile')`),
+    check('taxpayer_correction_status_check', sql`${table.status} IN ('submitted', 'under_review', 'awaiting_evidence', 'recommended_approval', 'recommended_rejection')`),
+    check('taxpayer_correction_recommendation_check', sql`${table.recommendation} IS NULL OR ${table.recommendation} IN ('RECOMMEND_APPROVAL', 'RECOMMEND_REJECTION')`),
+  ],
+);
+
+export const taxpayerCorrectionEvent = pgTable(
+  'taxpayer_correction_event',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    requestId: text('request_id').notNull().references(() => taxpayerCorrectionRequest.id),
+    actorUserId: text('actor_user_id').notNull().references(() => user.id),
+    eventType: text('event_type').notNull(),
+    fromStatus: text('from_status'),
+    toStatus: text('to_status'),
+    reason: text('reason'),
+    details: jsonb('details').$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [index('taxpayer_correction_event_request_created_idx').on(table.requestId, table.createdAt)],
+);
+
+export const taxpayerCorrectionEvidence = pgTable(
+  'taxpayer_correction_evidence',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    requestId: text('request_id').notNull().references(() => taxpayerCorrectionRequest.id),
+    uploaderUserId: text('uploader_user_id').notNull().references(() => user.id),
+    blobPathname: text('blob_pathname').notNull().unique(),
+    filename: text('filename').notNull(),
+    sizeBytes: integer('size_bytes').notNull(),
+    contentType: text('content_type').notNull().default('application/pdf'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('taxpayer_correction_evidence_request_created_idx').on(table.requestId, table.createdAt),
+    check('taxpayer_correction_evidence_size_check', sql`${table.sizeBytes} > 0 AND ${table.sizeBytes} <= 10485760`),
+    check('taxpayer_correction_evidence_content_type_check', sql`${table.contentType} = 'application/pdf'`),
   ],
 );
 
@@ -423,15 +923,16 @@ export const importDeclaration = pgTable(
     productId: text('product_id')
       .notNull()
       .references(() => product.id),
+    productionMaterialId: text('production_material_id').references(() => productionMaterial.id),
     expectedQuantity: real('expected_quantity').notNull(),
-    actualQuantity: real('actual_quantity'), // filled by trader on arrival
+    actualQuantity: real('actual_quantity'), // RRA-inspected quantity; mirrors inspected_quantity for compatibility
     status: text('status').notNull().default('pending'),
-    // "pending" → "submitted" → "activated" | "rejected"
+    // "pending" (legacy "submitted") → "activated" | "rejected"; trader submissions never approve arrivals
     customsRef: text('customs_ref'), // customs reference number
     originCountry: text('origin_country'), // country of origin
     invoiceRef: text('invoice_ref'), // invoice or import document reference
     supportingDoc: text('supporting_doc'), // description of supporting documents
-    reviewedById: text('reviewed_by_id').references(() => user.id), // RRA officer who confirmed/rejected
+    reviewedById: text('reviewed_by_id').references(() => user.id), // TF officer who confirmed/rejected
 
     // ── Smart Customs enhancement fields ─────────────────────────────────────
     declarationRef: text('declaration_ref').unique(), // unique pre-travel reference, e.g. DECL-XXXXXXXX
@@ -439,7 +940,7 @@ export const importDeclaration = pgTable(
     estimatedValue: real('estimated_value'),            // declared value in chosen currency
     currency: text('currency').default('USD'),          // ISO-4217 currency code
     expectedReturnDate: timestamp('expected_return_date'), // expected arrival date
-    reviewerNote: text('reviewer_note'),                // RRA officer inspection note
+    reviewerNote: text('reviewer_note'),                // TF officer inspection note
     inspectedQuantity: real('inspected_quantity'),      // physically verified quantity (set by RRA)
     discrepancyFlag: boolean('discrepancy_flag').notNull().default(false), // >10% variance detected
     discrepancyPct: real('discrepancy_pct'),            // |expected - inspected| / expected * 100
@@ -546,10 +1047,18 @@ export const accountRelations = relations(account, ({ one }) => ({
   }),
 }));
 
-export const rraStaffRelations = relations(rraStaff, ({ one }) => ({
+export const rraStaffRelations = relations(rraStaff, ({ one, many }) => ({
   user: one(user, {
     fields: [rraStaff.userId],
     references: [user.id],
+  }),
+  roleAssignments: many(rraStaffRole),
+}));
+
+export const rraStaffRoleRelations = relations(rraStaffRole, ({ one }) => ({
+  staff: one(rraStaff, {
+    fields: [rraStaffRole.staffRecordId],
+    references: [rraStaff.id],
   }),
 }));
 
@@ -706,9 +1215,12 @@ export const supportTicket = pgTable(
       .primaryKey()
       .$defaultFn(() => crypto.randomUUID()),
     traderId: text('trader_id')
-      .notNull()
       .references(() => user.id),
+    threadType: text('thread_type').notNull().default('taxpayer'), // taxpayer | staff
     category: text('category').notNull().default('general'), // general | tax_query | account_issue | system_bug | other
+    routingCategory: text('routing_category'),
+    routingDepartment: text('routing_department'),
+    routingReason: text('routing_reason'),
     subject: text('subject').notNull(),
     description: text('description').notNull(),
     status: text('status').notNull().default('open'), // open | in_progress | resolved | closed
@@ -723,6 +1235,54 @@ export const supportTicket = pgTable(
     index('support_ticket_trader_idx').on(t.traderId),
     index('support_ticket_status_idx').on(t.status),
     index('support_ticket_assigned_idx').on(t.assignedToId),
+      index('support_ticket_category_status_idx').on(t.category, t.status, t.updatedAt),
+    index('support_ticket_routing_status_idx').on(t.routingCategory, t.routingDepartment, t.status, t.updatedAt),
+      check('support_ticket_thread_type_check', sql`${t.threadType} IN ('taxpayer', 'staff')`),
+  ],
+);
+
+// Messages are append-only. The legacy support_ticket.description remains the
+// original opening message and is backfilled into this table by migration.
+export const supportTicketMessage = pgTable(
+  'support_ticket_message',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    ticketId: text('ticket_id').notNull().references(() => supportTicket.id, { onDelete: 'cascade' }),
+      // Kept as a compatibility alias for older deployed messaging code.
+      authorId: text('author_id').references(() => user.id),
+    senderUserId: text('sender_user_id').notNull().references(() => user.id),
+    senderType: text('sender_type').notNull(), // taxpayer | staff
+    body: text('body').notNull(),
+    clientMessageId: text('client_message_id'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('support_ticket_message_chronology_idx').on(table.ticketId, table.createdAt, table.id),
+    index('support_ticket_message_sender_idx').on(table.senderUserId, table.createdAt),
+      uniqueIndex('support_ticket_message_idempotency_uniq').on(table.senderUserId, table.clientMessageId)
+        .where(sql`${table.clientMessageId} IS NOT NULL`),
+      check('support_ticket_message_sender_type_check', sql`${table.senderType} IN ('taxpayer', 'staff')`),
+  ],
+);
+
+// This table stores participant membership and per-user read/archive state.
+// Queue visibility is decided separately from this row by server-side routing
+// rules; opening an unassigned queue item never grants permanent access.
+export const supportTicketParticipant = pgTable(
+  'support_ticket_participant',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    ticketId: text('ticket_id').notNull().references(() => supportTicket.id, { onDelete: 'cascade' }),
+    userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+    participantType: text('participant_type').notNull(), // taxpayer | staff | queue
+    lastReadAt: timestamp('last_read_at'),
+    archivedAt: timestamp('archived_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('support_ticket_participant_ticket_user_uniq').on(table.ticketId, table.userId),
+    index('support_ticket_participant_user_read_idx').on(table.userId, table.lastReadAt),
+      check('support_ticket_participant_type_check', sql`${table.participantType} IN ('taxpayer', 'staff', 'queue')`),
   ],
 );
 
@@ -758,6 +1318,24 @@ export const productionBatch = pgTable(
       .references(() => product.id),
     batchReference: text('batch_reference').notNull().unique(), // e.g. BATCH-SOAP-2026-000123
     declaredQuantity: real('declared_quantity').notNull(),
+    unitPrice: integer('unit_price').notNull().default(0),
+    vatRateBasisPoints: integer('vat_rate_basis_points').notNull().default(0),
+    recipeVersionId: text('recipe_version_id'),
+    plannedOutputQuantity: real('planned_output_quantity'),
+    reportedGoodOutputQuantity: numeric('reported_good_output_quantity', { precision: 24, scale: 6, mode: 'string' }),
+    reportedRejectedOutputQuantity: numeric('reported_rejected_output_quantity', { precision: 24, scale: 6, mode: 'string' }),
+    goodOutputQuantity: numeric('good_output_quantity', { precision: 24, scale: 6, mode: 'string' }),
+    rejectedOutputQuantity: numeric('rejected_output_quantity', { precision: 24, scale: 6, mode: 'string' }),
+    yieldToleranceStandardId: text('yield_tolerance_standard_id').references(() => productionToleranceStandard.id),
+    productionValidationStatus: text('production_validation_status').notNull().default('not_applicable'),
+    recipeInputHash: text('recipe_input_hash'),
+    materialPlanId: text('material_plan_id').references(() => productionMaterialPlan.id),
+    materialReviewStatus: text('material_review_status').notNull().default('not_required'),
+    materialReviewNote: text('material_review_note'),
+    materialReviewedById: text('material_reviewed_by_id').references(() => user.id),
+    materialReviewedAt: timestamp('material_reviewed_at'),
+    materialPostedAt: timestamp('material_posted_at'),
+    idempotencyKey: text('idempotency_key'),
     openingStock: real('opening_stock').default(0),
     approvedLosses: real('approved_losses').default(0),
     status: text('status').default('declared'), // 'declared' | 'reconciled' | 'independently_supported'
@@ -774,7 +1352,281 @@ export const productionBatch = pgTable(
     index('prod_batch_manufacturer_idx').on(table.manufacturerId),
     index('prod_batch_product_idx').on(table.productId),
     index('prod_batch_status_idx').on(table.status),
+    check('production_batch_output_pair_check', sql`(${table.goodOutputQuantity} IS NULL AND ${table.rejectedOutputQuantity} IS NULL) OR (${table.goodOutputQuantity} IS NOT NULL AND ${table.rejectedOutputQuantity} IS NOT NULL AND ${table.goodOutputQuantity} >= 0 AND ${table.rejectedOutputQuantity} >= 0)`),
+    check('production_batch_reported_output_pair_check', sql`(${table.reportedGoodOutputQuantity} IS NULL AND ${table.reportedRejectedOutputQuantity} IS NULL) OR (${table.reportedGoodOutputQuantity} IS NOT NULL AND ${table.reportedRejectedOutputQuantity} IS NOT NULL AND ${table.reportedGoodOutputQuantity} >= 0 AND ${table.reportedRejectedOutputQuantity} >= 0)`),
     uniqueIndex('prod_batch_ref_uniq').on(table.batchReference),
+    uniqueIndex('prod_batch_idempotency_key_uniq').on(table.idempotencyKey),
+    uniqueIndex('prod_batch_material_plan_uniq').on(table.materialPlanId).where(sql`${table.materialPlanId} IS NOT NULL`),
+  ],
+);
+
+// Confidential manufacturer recipe data is stored outside the general
+// production batch read model. Recipe versions and their lines are immutable.
+export const productionMaterial = pgTable(
+  'production_material',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    materialCode: text('material_code').notNull(),
+    confidentialName: text('confidential_name').notNull(),
+    unit: text('unit').notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('production_material_manufacturer_code_uniq').on(table.manufacturerId, table.materialCode),
+    uniqueIndex('production_material_manufacturer_name_uniq').on(table.manufacturerId, sql`lower(${table.confidentialName})`),
+    index('production_material_manufacturer_idx').on(table.manufacturerId),
+  ],
+);
+
+export const productionRecipe = pgTable(
+  'production_recipe',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    productId: text('product_id').notNull().references(() => product.id),
+    recipeCode: text('recipe_code').notNull(),
+    version: integer('version').notNull(),
+    outputQuantity: real('output_quantity').notNull(),
+    yieldToleranceBasisPoints: integer('yield_tolerance_basis_points').notNull().default(0),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    createdByUserId: text('created_by_user_id').notNull().references(() => user.id),
+  },
+  (table) => [
+    uniqueIndex('production_recipe_manufacturer_product_version_uniq').on(table.manufacturerId, table.productId, table.version),
+    uniqueIndex('production_recipe_manufacturer_code_version_uniq').on(table.manufacturerId, table.recipeCode, table.version),
+    index('production_recipe_manufacturer_product_idx').on(table.manufacturerId, table.productId),
+  ],
+);
+
+export const productionRecipeMaterial = pgTable(
+  'production_recipe_material',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    recipeVersionId: text('recipe_version_id').notNull().references(() => productionRecipe.id),
+    materialId: text('material_id').notNull().references(() => productionMaterial.id),
+    quantity: real('quantity').notNull(),
+    consumptionToleranceBasisPoints: integer('consumption_tolerance_basis_points'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('production_recipe_material_recipe_material_uniq').on(table.recipeVersionId, table.materialId),
+    index('production_recipe_material_recipe_idx').on(table.recipeVersionId),
+  ],
+);
+
+// Official versioned manufacturing standards are administered only by the
+// Super Admin governance routes. Recipe and material references preserve the
+// exact applicability without storing confidential ingredient names here.
+export const productionToleranceStandard = pgTable(
+  'production_tolerance_standard',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    productId: text('product_id').notNull().references(() => product.id),
+    recipeVersionId: text('recipe_version_id').notNull().references(() => productionRecipe.id),
+    materialId: text('material_id').references(() => productionMaterial.id),
+    toleranceType: text('tolerance_type').notNull(),
+    version: integer('version').notNull(),
+    toleranceBasisPoints: integer('tolerance_basis_points').notNull(),
+    toleranceUnit: text('tolerance_unit').notNull().default('basis_points'),
+    effectiveAt: timestamp('effective_at').notNull(),
+    status: text('status').notNull().default('draft'),
+    justification: text('justification').notNull(),
+    evidenceReference: text('evidence_reference').notNull(),
+    createdByUserId: text('created_by_user_id').notNull().references(() => user.id),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    approvedByUserId: text('approved_by_user_id').references(() => user.id),
+    approvedAt: timestamp('approved_at'),
+    approvalNote: text('approval_note'),
+    activatedByUserId: text('activated_by_user_id').references(() => user.id),
+    activatedAt: timestamp('activated_at'),
+    activationNote: text('activation_note'),
+    deactivatedByUserId: text('deactivated_by_user_id').references(() => user.id),
+    deactivatedAt: timestamp('deactivated_at'),
+    deactivationNote: text('deactivation_note'),
+  },
+  (table) => [
+    index('production_tolerance_standard_scope_effective_idx').on(table.manufacturerId, table.productId, table.recipeVersionId, table.toleranceType, table.effectiveAt),
+    index('production_tolerance_standard_status_created_idx').on(table.status, table.createdAt),
+    check('production_tolerance_standard_type_check', sql`${table.toleranceType} IN ('yield', 'material_consumption')`),
+    check('production_tolerance_standard_scope_check', sql`(${table.toleranceType} = 'yield' AND ${table.materialId} IS NULL) OR (${table.toleranceType} = 'material_consumption' AND ${table.materialId} IS NOT NULL)`),
+    check('production_tolerance_standard_version_positive', sql`${table.version} > 0`),
+    check('production_tolerance_standard_value_check', sql`${table.toleranceBasisPoints} BETWEEN 0 AND 10000`),
+    check('production_tolerance_standard_unit_check', sql`${table.toleranceUnit} = 'basis_points'`),
+    check('production_tolerance_standard_status_check', sql`${table.status} IN ('draft', 'approved', 'active', 'inactive')`),
+    uniqueIndex('production_tolerance_standard_yield_version_uniq').on(table.manufacturerId, table.productId, table.recipeVersionId, table.version).where(sql`${table.toleranceType} = 'yield' AND ${table.materialId} IS NULL`),
+    uniqueIndex('production_tolerance_standard_material_version_uniq').on(table.manufacturerId, table.productId, table.recipeVersionId, table.materialId, table.version).where(sql`${table.toleranceType} = 'material_consumption' AND ${table.materialId} IS NOT NULL`),
+  ],
+);
+
+export const productionBatchMaterialUsage = pgTable(
+  'production_batch_material_usage',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    productionBatchId: text('production_batch_id').notNull().references(() => productionBatch.id),
+    recipeMaterialId: text('recipe_material_id').notNull().references(() => productionRecipeMaterial.id),
+    materialId: text('material_id').notNull().references(() => productionMaterial.id),
+    plannedQuantity: real('planned_quantity').notNull(),
+    actualQuantity: real('actual_quantity').notNull(),
+    consumptionToleranceBasisPoints: integer('consumption_tolerance_basis_points'),
+    consumptionToleranceStandardId: text('consumption_tolerance_standard_id').references(() => productionToleranceStandard.id),
+    wasteQuantity: numeric('waste_quantity', { precision: 24, scale: 6, mode: 'string' }),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('production_batch_material_usage_batch_line_uniq').on(table.productionBatchId, table.recipeMaterialId),
+    index('production_batch_material_usage_batch_idx').on(table.productionBatchId),
+    index('production_batch_material_usage_material_idx').on(table.materialId),
+  ],
+);
+
+// Raw-material accounting is intentionally separate from ordinary product stock.
+// Quantities use PostgreSQL numeric strings so ledger arithmetic is exact.
+export const productionMaterialPlan = pgTable(
+  'production_material_plan',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    productId: text('product_id').notNull().references(() => product.id),
+    recipeVersionId: text('recipe_version_id').notNull().references(() => productionRecipe.id),
+    plannedOutputQuantity: numeric('planned_output_quantity', { precision: 24, scale: 6, mode: 'string' }).notNull(),
+    idempotencyKey: text('idempotency_key').notNull(),
+    createdByUserId: text('created_by_user_id').notNull().references(() => user.id),
+    status: text('status').notNull().default('planned'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('production_material_plan_manufacturer_key_uniq').on(table.manufacturerId, table.idempotencyKey),
+    index('production_material_plan_manufacturer_created_idx').on(table.manufacturerId, table.createdAt),
+    check('production_material_plan_output_positive', sql`${table.plannedOutputQuantity} > 0`),
+    check('production_material_plan_status_check', sql`${table.status} IN ('planned', 'in_progress', 'completed', 'cancelled')`),
+  ],
+);
+
+export const productionMaterialPlanLine = pgTable(
+  'production_material_plan_line',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    planId: text('plan_id').notNull().references(() => productionMaterialPlan.id),
+    recipeMaterialId: text('recipe_material_id').notNull().references(() => productionRecipeMaterial.id),
+    materialId: text('material_id').notNull().references(() => productionMaterial.id),
+    plannedQuantity: numeric('planned_quantity', { precision: 24, scale: 6, mode: 'string' }).notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('production_material_plan_line_uniq').on(table.planId, table.recipeMaterialId),
+    index('production_material_plan_line_material_idx').on(table.materialId),
+    check('production_material_plan_line_quantity_positive', sql`${table.plannedQuantity} > 0`),
+  ],
+);
+
+// Reservations commit verified stock to a plan without posting consumption.
+// Rows are resolved once, retaining their original reserved quantities.
+export const productionMaterialReservation = pgTable(
+  'production_material_reservation',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    planId: text('plan_id').notNull().references(() => productionMaterialPlan.id),
+    planLineId: text('plan_line_id').notNull().references(() => productionMaterialPlanLine.id),
+    materialId: text('material_id').notNull().references(() => productionMaterial.id),
+    reservedQuantity: numeric('reserved_quantity', { precision: 24, scale: 6, mode: 'string' }).notNull(),
+    consumedQuantity: numeric('consumed_quantity', { precision: 24, scale: 6, mode: 'string' }).notNull().default('0'),
+    status: text('status').notNull().default('active'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    resolvedAt: timestamp('resolved_at'),
+    resolvedByUserId: text('resolved_by_user_id').references(() => user.id),
+    resolutionNote: text('resolution_note'),
+  },
+  (table) => [
+    uniqueIndex('production_material_reservation_plan_line_uniq').on(table.planId, table.planLineId),
+    index('production_material_reservation_material_status_idx').on(table.manufacturerId, table.materialId, table.status),
+    check('production_material_reservation_quantity_positive', sql`${table.reservedQuantity} > 0`),
+    check('production_material_reservation_consumed_range', sql`${table.consumedQuantity} >= 0 AND ${table.consumedQuantity} <= ${table.reservedQuantity}`),
+    check('production_material_reservation_status_check', sql`${table.status} IN ('active', 'consumed', 'released')`),
+  ],
+);
+
+export const productionMaterialReceipt = pgTable(
+  'production_material_receipt',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    materialId: text('material_id').notNull().references(() => productionMaterial.id),
+    origin: text('origin').notNull(),
+    importDeclarationId: text('import_declaration_id').references(() => importDeclaration.id),
+    transactionId: text('transaction_id').references(() => transaction.id),
+    supplierReference: text('supplier_reference'),
+    evidenceReference: text('evidence_reference').notNull(),
+    lotReference: text('lot_reference'),
+    unit: text('unit').notNull(),
+    quantity: numeric('quantity', { precision: 24, scale: 6, mode: 'string' }).notNull(),
+    status: text('status').notNull().default('pending'),
+    idempotencyKey: text('idempotency_key').notNull(),
+    submittedByUserId: text('submitted_by_user_id').notNull().references(() => user.id),
+    reviewedByUserId: text('reviewed_by_user_id').references(() => user.id),
+    reviewedAt: timestamp('reviewed_at'),
+    reviewNote: text('review_note'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('production_material_receipt_owner_key_uniq').on(table.manufacturerId, table.idempotencyKey),
+    uniqueIndex('production_material_receipt_import_uniq').on(table.importDeclarationId),
+    index('production_material_receipt_status_created_idx').on(table.status, table.createdAt),
+    index('production_material_receipt_manufacturer_created_idx').on(table.manufacturerId, table.createdAt),
+    check('production_material_receipt_origin_check', sql`${table.origin} IN ('import', 'domestic', 'opening_balance')`),
+    check('production_material_receipt_status_check', sql`${table.status} IN ('pending', 'verified', 'rejected')`),
+    check('production_material_receipt_quantity_positive', sql`${table.quantity} > 0`),
+    check('production_material_receipt_source_check', sql`(${table.origin} = 'import' AND ${table.importDeclarationId} IS NOT NULL AND ${table.transactionId} IS NULL) OR (${table.origin} = 'domestic' AND ${table.transactionId} IS NOT NULL AND ${table.importDeclarationId} IS NULL) OR (${table.origin} = 'opening_balance' AND ${table.importDeclarationId} IS NULL AND ${table.transactionId} IS NULL)`),
+  ],
+);
+
+export const productionMaterialMovement = pgTable(
+  'production_material_movement',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    materialId: text('material_id').notNull().references(() => productionMaterial.id),
+    movementType: text('movement_type').notNull(),
+    quantityDelta: numeric('quantity_delta', { precision: 24, scale: 6, mode: 'string' }).notNull(),
+    quantityBefore: numeric('quantity_before', { precision: 24, scale: 6, mode: 'string' }).notNull(),
+    quantityAfter: numeric('quantity_after', { precision: 24, scale: 6, mode: 'string' }).notNull(),
+    receiptId: text('receipt_id').references(() => productionMaterialReceipt.id),
+    productionBatchId: text('production_batch_id').references(() => productionBatch.id),
+    batchUsageId: text('batch_usage_id').references(() => productionBatchMaterialUsage.id),
+    sourceReference: text('source_reference'),
+    actorUserId: text('actor_user_id').notNull().references(() => user.id),
+    reason: text('reason').notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('production_material_movement_receipt_uniq').on(table.receiptId),
+    uniqueIndex('production_material_movement_usage_uniq').on(table.batchUsageId),
+    index('production_material_movement_material_created_idx').on(table.manufacturerId, table.materialId, table.createdAt),
+    check('production_material_movement_type_check', sql`${table.movementType} IN ('receipt', 'consumption', 'adjustment')`),
+    check('production_material_movement_nonzero_check', sql`${table.quantityDelta} <> 0`),
+    check('production_material_movement_balance_check', sql`${table.quantityAfter} = ${table.quantityBefore} + ${table.quantityDelta}`),
+  ],
+);
+
+// Receipt allocations connect each posted consumption movement to the
+// verified acquisition record that supplied it. Historical usage is not
+// backfilled when receipt evidence cannot establish the source.
+export const productionMaterialUsageReceiptAllocation = pgTable(
+  'production_material_usage_receipt_allocation',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    batchUsageId: text('batch_usage_id').notNull().references(() => productionBatchMaterialUsage.id),
+    consumptionMovementId: text('consumption_movement_id').notNull().references(() => productionMaterialMovement.id),
+    sourceMovementId: text('source_movement_id').notNull().references(() => productionMaterialMovement.id),
+    quantity: numeric('quantity', { precision: 24, scale: 6, mode: 'string' }).notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('production_material_usage_receipt_allocation_uniq').on(table.batchUsageId, table.sourceMovementId),
+    index('production_material_usage_receipt_allocation_source_idx').on(table.sourceMovementId),
+    check('production_material_usage_receipt_allocation_quantity_positive', sql`${table.quantity} > 0`),
   ],
 );
 
@@ -850,6 +1702,28 @@ export const aiFinding = pgTable(
     index('ai_finding_severity_idx').on(table.severity),
     index('ai_finding_review_status_idx').on(table.reviewStatus),
     index('ai_finding_created_idx').on(table.createdAt),
+  ],
+);
+
+// Immutable point-in-time comparison evidence captured when a production
+// declaration is recorded. Findings remain in ai_finding for the existing
+// officer review lifecycle; this row preserves the reproducible comparison.
+export const productionHistoryComparison = pgTable(
+  'production_history_comparison',
+  {
+    id: text('id').primaryKey(),
+    productionBatchId: text('production_batch_id').notNull().references(() => productionBatch.id),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    productId: text('product_id').notNull().references(() => product.id),
+    recipeVersionId: text('recipe_version_id').references(() => productionRecipe.id),
+    ruleVersion: text('rule_version').notNull(),
+    snapshot: jsonb('snapshot').$type<Record<string, unknown>>().notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('production_history_comparison_batch_uniq').on(table.productionBatchId),
+    index('production_history_comparison_manufacturer_created_idx').on(table.manufacturerId, table.createdAt),
+    index('production_history_comparison_product_created_idx').on(table.productId, table.createdAt),
   ],
 );
 
@@ -955,6 +1829,31 @@ export const productionBatchRelations = relations(productionBatch, ({ one }) => 
     fields: [productionBatch.productId],
     references: [product.id],
   }),
+  recipeVersion: one(productionRecipe, {
+    fields: [productionBatch.recipeVersionId],
+    references: [productionRecipe.id],
+  }),
+}));
+
+export const productionMaterialRelations = relations(productionMaterial, ({ one }) => ({
+  manufacturer: one(user, { fields: [productionMaterial.manufacturerId], references: [user.id] }),
+}));
+
+export const productionRecipeRelations = relations(productionRecipe, ({ one, many }) => ({
+  manufacturer: one(user, { fields: [productionRecipe.manufacturerId], references: [user.id] }),
+  product: one(product, { fields: [productionRecipe.productId], references: [product.id] }),
+  materials: many(productionRecipeMaterial),
+}));
+
+export const productionRecipeMaterialRelations = relations(productionRecipeMaterial, ({ one }) => ({
+  recipe: one(productionRecipe, { fields: [productionRecipeMaterial.recipeVersionId], references: [productionRecipe.id] }),
+  material: one(productionMaterial, { fields: [productionRecipeMaterial.materialId], references: [productionMaterial.id] }),
+}));
+
+export const productionBatchMaterialUsageRelations = relations(productionBatchMaterialUsage, ({ one }) => ({
+  batch: one(productionBatch, { fields: [productionBatchMaterialUsage.productionBatchId], references: [productionBatch.id] }),
+  recipeMaterial: one(productionRecipeMaterial, { fields: [productionBatchMaterialUsage.recipeMaterialId], references: [productionRecipeMaterial.id] }),
+  material: one(productionMaterial, { fields: [productionBatchMaterialUsage.materialId], references: [productionMaterial.id] }),
 }));
 
 export const stockAdjustmentRelations = relations(stockAdjustment, ({ one }) => ({
@@ -1001,39 +1900,6 @@ export const riskAssessmentRelations = relations(riskAssessment, ({ one }) => ({
 export const aiAuditLogRelations = relations(aiAuditLog, ({ one }) => ({
   requestedBy: one(user, {
     fields: [aiAuditLog.requestedById],
-    references: [user.id],
-  }),
-}));
-
-// ---------------------------------------------------------------------------
-// AI Event Trigger — audit log of AI hook executions per business event
-// ---------------------------------------------------------------------------
-
-export const aiEventTrigger = pgTable(
-  'ai_event_trigger',
-  {
-    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
-    businessId: text('business_id').notNull().references(() => user.id),
-    event: text('event').notNull(),
-    // 'PRODUCTION_RECORDED' | 'SALE_CREATED' | 'PURCHASE_CONFIRMED' | 'PURCHASE_REJECTED' |
-    // 'IMPORT_SUBMITTED' | 'IMPORT_RECEIVED' | 'STOCK_ADJUSTED' | 'STOCK_LOSS_DECLARED' |
-    // 'TAX_PAYMENT_MADE' | 'DISPUTE_FILED'
-    referenceId: text('reference_id'),
-    signalsChecked: text('signals_checked'), // JSON string[]
-    findingsCreated: text('findings_created'), // JSON string[] of aiFinding IDs
-    staffNotified: text('staff_notified'),    // JSON string[] of user IDs notified
-    severity: text('severity'),              // highest severity found: 'info' | 'warning' | 'critical'
-    createdAt: timestamp('created_at').defaultNow().notNull(),
-  },
-  (table) => [
-    index('ai_event_trigger_business_created_idx').on(table.businessId, table.createdAt),
-    index('ai_event_trigger_event_created_idx').on(table.event, table.createdAt),
-  ],
-);
-
-export const aiEventTriggerRelations = relations(aiEventTrigger, ({ one }) => ({
-  business: one(user, {
-    fields: [aiEventTrigger.businessId],
     references: [user.id],
   }),
 }));

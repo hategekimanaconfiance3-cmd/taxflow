@@ -31,7 +31,8 @@
     "db:seed:full": "tsx db/seeds/neon/taxflow-full.seed.ts",
     "db:seed:full:tin": "tsx db/seeds/neon/tin-full.seed.ts",
     "db:seed:full:all": "tsx db/seeds/neon/seed-all-full.ts",
-    "db:seed:test": "tsx db/seeds/test-accounts.seed.ts"
+    "db:seed:test": "tsx db/seeds/test-accounts.seed.ts",
+    "db:encrypt-payment-data": "tsx scripts/encrypt-payment-data.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.63",
@@ -44,6 +45,7 @@
     "@react-email/components": "^1.0.10",
     "@socket.io/redis-adapter": "^8.3.0",
     "@tanstack/react-table": "^8.21.3",
+    "@vercel/blob": "^2.3.0",
     "ai": "^6.0.134",
     "better-auth": "^1.5.5",
     "class-variance-authority": "^0.7.1",
@@ -58,8 +60,9 @@
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.7",
     "lucide-react": "^0.564.0",
-    "next": "16.4.2",
+    "next": "16.2.1",
     "postgres": "^3.4.8",
+    "qrcode": "^1.5.4",
     "radix-ui": "^1.4.3",
     "react": "19.2.4",
     "react-dom": "19.2.3",
@@ -76,6 +79,7 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4.2.2",
     "@types/node": "^25.5.0",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "babel-plugin-react-compiler": "^1.0.0",
@@ -89,4 +93,3 @@
   },
   "packageManager": "pnpm@10.8.1"
 }
-

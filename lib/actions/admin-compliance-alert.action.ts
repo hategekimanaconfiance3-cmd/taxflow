@@ -20,12 +20,23 @@ export type ComplianceAlert = {
     description: string;
 };
 
+/**
+ * Roles authorized to generate and send compliance alerts.
+ * Must match the page guards that call this action.
+ */
+const COMPLIANCE_ROLES = [
+    "compliance_officer",
+    "tax_compliance_officer",
+    "audit_investigation_officer",
+    "super_admin",
+] as const;
+
 // ---------------------------------------------------------------------------
 // Generate compliance alerts based on system-wide checks
 // ---------------------------------------------------------------------------
 
 export async function generateComplianceAlerts(): Promise<ComplianceAlert[]> {
-    await requireRRASession("compliance_officer");
+    await requireRRASession(...COMPLIANCE_ROLES);
 
     const alerts: ComplianceAlert[] = [];
 
@@ -133,7 +144,7 @@ export async function sendComplianceAlert(
     alertType: string,
     description: string,
 ) {
-    const { staff, ...session } = await requireRRASession("compliance_officer");
+    const { staff, ...session } = await requireRRASession(...COMPLIANCE_ROLES);
 
     await sendNotificationToTrader(
         traderId,

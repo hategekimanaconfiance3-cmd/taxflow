@@ -16,14 +16,14 @@ import {
     type RRARole,
     type RRAPermission,
 } from "../lib/rra-rbac";
-import { staffAssignmentRoleSchema } from "../lib/validation/staff.schema";
+import { staffAccountSchema, staffAssignmentRoleSchema, staffRoleSchema, staffRolesSchema } from "../lib/validation/staff.schema";
 
 // ---------------------------------------------------------------------------
 // Role catalogue
 // ---------------------------------------------------------------------------
 
-test("exactly 8 proposed RRA roles are defined in the expected order", () => {
-    assert.equal(RRA_ROLE_OPTIONS.length, 8);
+test("exactly 9 proposed RRA roles are defined in the expected order", () => {
+    assert.equal(RRA_ROLE_OPTIONS.length, 9);
     assert.deepEqual(RRA_ROLE_OPTIONS.map((r) => r.value), [
         "super_admin",
         "director_executive",
@@ -33,6 +33,7 @@ test("exactly 8 proposed RRA roles are defined in the expected order", () => {
         "customs_import_officer",
         "payments_reconciliation_officer",
         "data_ai_analyst",
+        "stock_control_admin",
     ]);
 });
 
@@ -46,6 +47,7 @@ test("all role values (proposed + legacy) are accessible via RRA_ROLE_VALUES", (
         "customs_import_officer",
         "payments_reconciliation_officer",
         "data_ai_analyst",
+        "stock_control_admin",
         "compliance_officer",
         "audit_officer",
         "stock_officer",
@@ -78,16 +80,25 @@ test("isRRARole returns false for trader roles and unknown strings", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Least-privilege: super_admin has ALL permissions (post-hardening)
+// Super Admin does not bypass the separate taxpayer/formula confidentiality permissions.
 // ---------------------------------------------------------------------------
 
-test("super_admin has every defined permission after hardening", () => {
+test("super_admin has explicit permissions without inheriting manufacturing operations or restricted data access", () => {
+    const excluded = new Set<RRAPermission>([
+        "taxpayer.intelligence.search",
+        "production.formula.read",
+        "production.material.receipt.review",
+        "production.batch.review",
+        "production.material.adjust",
+    ]);
     for (const perm of RRA_PERMISSIONS) {
+        if (excluded.has(perm)) continue;
         assert.ok(
             hasRRAPermission("super_admin", perm as RRAPermission),
             `super_admin should have permission: ${perm}`,
         );
     }
+    for (const perm of excluded) assert.equal(hasRRAPermission("super_admin", perm), false);
 });
 
 // ---------------------------------------------------------------------------
@@ -146,6 +157,26 @@ test("data_ai_analyst: analytics, AI findings, data quality, feedback review", (
     assert.ok(hasRRAPermission("data_ai_analyst", "ai.feedback.review"));
 });
 
+test("stock_control_admin receives only sell-through and restock-control permissions", () => {
+    assert.ok(hasRRAPermission("stock_control_admin", "stock.threshold.read"));
+    assert.ok(hasRRAPermission("stock_control_admin", "stock.threshold.manage.scoped"));
+    assert.ok(hasRRAPermission("stock_control_admin", "stock.restock.read"));
+    assert.ok(hasRRAPermission("stock_control_admin", "stock.restock.exception.review"));
+    assert.ok(hasRRAPermission("stock_control_admin", "stock.restock.baseline.attest"));
+    assert.equal(hasRRAPermission("stock_control_admin", "stock.threshold.manage.global"), false);
+    assert.equal(hasRRAPermission("stock_control_admin", "staff.manage"), false);
+    assert.equal(hasRRAPermission("stock_control_admin", "taxpayer.intelligence.search"), false);
+    assert.equal(hasRRAPermission("stock_control_admin", "stock.correction.review"), false);
+});
+
+test("confidential production formula access requires an explicitly assigned investigator permission", () => {
+    assert.ok(hasRRAPermission("audit_investigation_officer", "production.formula.read"));
+    assert.ok(hasRRAPermission("audit_officer", "production.formula.read"));
+    assert.equal(hasRRAPermission("super_admin", "production.formula.read"), false);
+    assert.equal(hasRRAPermission("compliance_officer", "production.formula.read"), false);
+    assert.equal(hasRRAPermission("product_traceability_officer", "production.formula.read"), false);
+});
+
 // ---------------------------------------------------------------------------
 // Least-privilege: denials — roles must NOT have permissions outside scope
 // ---------------------------------------------------------------------------
@@ -183,6 +214,14 @@ test("customs_import_officer cannot reconcile payments, manage staff, or read an
     assert.equal(hasRRAPermission("customs_import_officer", "payments.reconcile"), false);
     assert.equal(hasRRAPermission("customs_import_officer", "analytics.read"), false);
     assert.equal(hasRRAPermission("customs_import_officer", "investigation.case.manage"), false);
+});
+
+test("proposed compliance and investigation roles do not inherit legacy import permissions", () => {
+    assert.equal(hasRRAPermission("tax_compliance_officer", "imports.review"), false);
+    assert.equal(hasRRAPermission("audit_investigation_officer", "imports.read"), false);
+    assert.equal(hasRRAPermission("audit_investigation_officer", "imports.review"), false);
+    assert.equal(hasRRAPermission("customs_import_officer", "imports.read"), true);
+    assert.equal(hasRRAPermission("customs_import_officer", "imports.review"), true);
 });
 
 test("payments_reconciliation_officer cannot manage staff, investigations, or AI feedback", () => {
@@ -232,16 +271,27 @@ test("legacy stock_officer has traceability and stock permissions only", () => {
     assert.equal(hasRRAPermission("stock_officer", "payments.reconcile"), false);
 });
 
+test("legacy correction_officer retains stock correction but no taxpayer, financial, or staff authority", () => {
+    assert.ok(hasRRAPermission("correction_officer", "taxpayer.intelligence.search"));
+    assert.ok(hasRRAPermission("correction_officer", "stock.read"));
+    assert.ok(hasRRAPermission("correction_officer", "stock.correction.review"));
+    assert.equal(hasRRAPermission("correction_officer", "taxpayer.compliance.read"), false);
+    assert.equal(hasRRAPermission("correction_officer", "tax.records.read"), false);
+    assert.equal(hasRRAPermission("correction_officer", "payments.read"), false);
+    assert.equal(hasRRAPermission("correction_officer", "staff.manage"), false);
+    assert.equal(hasRRAPermission("correction_officer", "ai.assistant.use"), true);
+    assert.equal(hasRRAPermission("correction_officer", "ai.feedback.review"), false);
+});
+
 // ---------------------------------------------------------------------------
 // isRRARoleAllowed — legacy guard alias compatibility
 // ---------------------------------------------------------------------------
 
-test("new roles satisfy legacy role guards via alias system", () => {
-    // New role → legacy guard alias
+test("only permission-equivalent proposed roles satisfy legacy role guards", () => {
     assert.ok(isRRARoleAllowed("product_traceability_officer", ["stock_officer"]));
-    assert.ok(isRRARoleAllowed("audit_investigation_officer", ["audit_officer"]));
-    assert.ok(isRRARoleAllowed("tax_compliance_officer", ["compliance_officer"]));
     assert.ok(isRRARoleAllowed("super_admin", ["super_admin"]));
+    assert.equal(isRRARoleAllowed("audit_investigation_officer", ["audit_officer"]), false);
+    assert.equal(isRRARoleAllowed("tax_compliance_officer", ["compliance_officer"]), false);
 });
 
 test("new roles do NOT satisfy unrelated legacy guards", () => {
@@ -270,7 +320,7 @@ test("direct role match always succeeds regardless of aliases", () => {
 // Staff account creation schema — only proposed roles accepted
 // ---------------------------------------------------------------------------
 
-test("new staff accounts can only be assigned one of the 8 proposed roles", () => {
+test("new staff accounts can only be assigned one of the 9 proposed roles", () => {
     for (const role of RRA_ROLE_OPTIONS) {
         assert.ok(
             staffAssignmentRoleSchema.safeParse(role.value).success,
@@ -287,6 +337,19 @@ test("legacy role names are rejected for new staff account creation", () => {
             false,
             `Expected legacy role "${role}" to be rejected by staffAssignmentRoleSchema`,
         );
+        assert.equal(staffRolesSchema.safeParse([role]).success, false,
+            `Expected legacy role "${role}" to be rejected from new role assignments`);
+        assert.equal(staffRoleSchema.safeParse(role).success, true,
+            `Expected historical role "${role}" to remain readable`);
+        assert.equal(staffAccountSchema.safeParse({
+            fullName: "Test Staff",
+            email: "staff@example.test",
+            staffId: "RRA-TEST-01",
+            department: "Compliance",
+            roles: [role],
+            password: "StrongPass1!",
+            confirmPassword: "StrongPass1!",
+        }).success, false, `Expected new staff accounts to reject legacy role "${role}"`);
     }
 });
 
@@ -344,5 +407,15 @@ test("only super_admin can manage staff accounts", () => {
         } else {
             assert.equal(has, false, `"${role}" should NOT have staff.manage`);
         }
+    }
+});
+
+test("only super_admin can govern official manufacturing tolerance standards", () => {
+    for (const role of RRA_ROLE_VALUES) {
+        assert.equal(
+            hasRRAPermission(role as RRARole, "production.tolerance.govern"),
+            role === "super_admin",
+            `Expected only super_admin to govern manufacturing tolerances; received ${role}`,
+        );
     }
 });

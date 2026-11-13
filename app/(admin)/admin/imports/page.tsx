@@ -6,33 +6,40 @@ import { Badge } from '@/components/ui/badge';
 import { Ship, Package, ClipboardList } from 'lucide-react';
 
 const STATUS_BADGE: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
-  pending:   { label: 'Pending',   variant: 'secondary' },
-  submitted: { label: 'Submitted', variant: 'default' },
+  pending:   { label: 'Awaiting inspection', variant: 'secondary' },
+  submitted: { label: 'Awaiting inspection', variant: 'default' },
   activated: { label: 'Activated', variant: 'outline' },
   rejected:  { label: 'Rejected',  variant: 'destructive' },
 };
 
 export default async function AdminImportsPage() {
-  await requireRRASession("compliance_officer", "audit_officer", "customs_import_officer");
+  const { staff } = await requireRRASession("compliance_officer", "audit_officer", "customs_import_officer", "super_admin");
+  const canInspectImports = staff.clearanceRoles.some((role) => role === "customs_import_officer" || role === "super_admin");
 
   const declarations = await getAllImportDeclarations();
-  const submitted = declarations.filter((d) => d.status === 'submitted');
+  const submitted = declarations.filter((d) => d.status === 'pending' || d.status === 'submitted');
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Import Declarations</h1>
         <p className="text-muted-foreground text-sm mt-1">
-          Review, activate, and manage all trader import declarations.
+          Review trader pre-declarations, record the physical inspection, and approve verified arrivals.
         </p>
       </div>
+
+      {!canInspectImports && (
+        <p className="rounded-md border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+          Read-only view. A staff account needs the Customs &amp; Import Officer role to record inspected quantities, approve or reject declarations, or delete unreviewed declarations.
+        </p>
+      )}
 
       {/* ── Pending Review ─────────────────────────────────────── */}
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-base font-semibold flex items-center gap-2">
             <Ship className="h-4 w-4" />
-            Awaiting RRA Review
+            Awaiting Customs Physical Inspection
             {submitted.length > 0 && (
               <Badge variant="default" className="ml-auto">
                 {submitted.length} pending
@@ -57,15 +64,22 @@ export default async function AdminImportsPage() {
                       {d.customsRef && <span className="ml-2">· Customs: {d.customsRef}</span>}
                     </div>
                   </div>
-                  {/* Correctly mapped component with all required properties */}
-                  <AdminImportActions
-                    declarationId={d.id}
-                    productName={`${d.productName} (${d.productUnit})`}
-                    expectedQuantity={d.expectedQuantity}
-                    actualQuantity={d.actualQuantity ?? d.expectedQuantity}
-                    invoiceRef={d.invoiceRef ?? ''}
-                    supportingDoc={d.supportingDoc ?? ''}
-                  />
+                  {canInspectImports ? (
+                    <AdminImportActions
+                      declarationId={d.id}
+                      productName={`${d.productName} (${d.productUnit})`}
+                      expectedQuantity={d.expectedQuantity}
+                      invoiceRef={d.invoiceRef ?? ''}
+                      supportingDoc={d.supportingDoc ?? ''}
+                      materialCode={d.materialCode}
+                    />
+                  ) : (
+                    <div className="space-y-1 text-xs text-muted-foreground">
+                      <p>Expected: {d.expectedQuantity.toLocaleString()} {d.productUnit} · Awaiting Customs physical inspection.</p>
+                      {d.invoiceRef && <p>Invoice reference: {d.invoiceRef}</p>}
+                      {d.supportingDoc?.startsWith('/api/import-invoice/') && <a className="text-primary underline" href={d.supportingDoc} target="_blank" rel="noreferrer">View supporting invoice</a>}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -98,7 +112,7 @@ export default async function AdminImportsPage() {
                         <p className="text-sm font-medium truncate">{d.productName}</p>
                         <p className="text-xs text-muted-foreground">
                           {d.businessName} · Expected: {d.expectedQuantity.toLocaleString()} {d.productUnit}
-                          {d.actualQuantity != null && ` · Actual: ${d.actualQuantity.toLocaleString()} ${d.productUnit}`}
+                          {d.inspectedQuantity != null && ` · TF verified: ${d.inspectedQuantity.toLocaleString()} ${d.productUnit}`}
                         </p>
                       </div>
                     </div>

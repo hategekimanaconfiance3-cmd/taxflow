@@ -72,13 +72,14 @@ export default async function SalesPage() {
                 <TableHead className="text-right">Amount</TableHead>
                 <TableHead className="text-right">VAT</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead>Invoice</TableHead>
                 <TableHead>Date</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {sales.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center py-8 text-muted-foreground text-sm">
+                  <TableCell colSpan={8} className="text-center py-8 text-muted-foreground text-sm">
                     No sales yet. Use the <strong>Sell</strong> page to create your first transaction.
                   </TableCell>
                 </TableRow>
@@ -99,6 +100,13 @@ export default async function SalesPage() {
                     >
                       {sale.status}
                     </Badge>
+                  </TableCell>
+                  <TableCell>
+                    {sale.invoiceId ? (
+                      <a className="text-xs font-medium text-primary underline-offset-4 hover:underline" href={`/dashboard/invoices/${sale.invoiceId}`}>
+                        View invoice
+                      </a>
+                    ) : <span className="text-xs text-muted-foreground">—</span>}
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">
                     {sale.createdAt ? new Date(sale.createdAt).toLocaleDateString() : '—'}

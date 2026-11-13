@@ -71,8 +71,7 @@ function timeAgo(iso: string): string {
 }
 
 function InsightCard({ item }: { item: InsightItem }) {
-  const cfg = LEVEL_CONFIG[item.level];
-  const Icon = cfg.icon;
+  const cfg = LEVEL_CONFIG[item.type];
 
   const inner = (
     <div className={cn("flex items-start gap-3 rounded-lg border px-3 py-3 transition-colors", cfg.border, item.href && "hover:opacity-90 cursor-pointer")}>
@@ -80,16 +79,13 @@ function InsightCard({ item }: { item: InsightItem }) {
         <span className={cn("inline-block h-2 w-2 rounded-full", cfg.dot)} />
       </div>
       <div className="flex-1 min-w-0 space-y-0.5">
-        <p className={cn("text-xs font-semibold leading-snug", cfg.text)}>{item.message}</p>
-        {item.detail && (
-          <p className="text-[10px] text-muted-foreground leading-snug">{item.detail}</p>
+        <p className={cn("text-xs font-semibold leading-snug", cfg.text)}>{item.title}</p>
+        {item.description && (
+          <p className="text-[10px] text-muted-foreground leading-snug">{item.description}</p>
         )}
         <div className="flex items-center gap-2 pt-0.5">
-          <span className={cn("text-[9px] font-mono", cfg.meta)}>{timeAgo(item.timestamp)}</span>
+          <span className={cn("text-[9px] font-mono", cfg.meta)}>{timeAgo(item.createdAt)}</span>
           <Badge variant="secondary" className={cn("text-[9px] px-1.5 h-4", cfg.badge)}>{cfg.label}</Badge>
-          {item.metric && (
-            <span className="text-[9px] font-mono text-muted-foreground">{item.metric}</span>
-          )}
         </div>
       </div>
       {item.href && <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/50 mt-0.5 shrink-0" />}
@@ -113,7 +109,15 @@ export function AIInsightsFeed() {
       .finally(() => { setLoading(false); setRefreshing(false); });
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/ai/insights-feed")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (!cancelled) setData(d); })
+      .catch(() => { if (!cancelled) setData(null); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
 
   if (loading) {
     return <FeedCardSkeleton items={5} />;
@@ -130,15 +134,15 @@ export function AIInsightsFeed() {
             AI Insights Feed
           </CardTitle>
           <div className="flex items-center gap-2">
-            {data.criticalCount > 0 && (
+            {data.items.filter((item) => item.type === "warning").length > 0 && (
               <Badge variant="secondary" className="bg-red-100 text-red-700 text-[10px]">
                 <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse mr-1" />
-                {data.criticalCount} critical
+                {data.items.filter((item) => item.type === "warning").length} findings for review
               </Badge>
             )}
-            {data.warningCount > 0 && (
+            {data.items.filter((item) => item.type === "info").length > 0 && (
               <Badge variant="secondary" className="bg-amber-100 text-amber-700 text-[10px]">
-                {data.warningCount} warnings
+                {data.items.filter((item) => item.type === "info").length} updates
               </Badge>
             )}
             <button
@@ -150,7 +154,7 @@ export function AIInsightsFeed() {
             </button>
           </div>
         </div>
-        <p className="text-[10px] text-muted-foreground">Live system intelligence · click any item to investigate</p>
+        <p className="text-[10px] text-muted-foreground">Potential indicators only. Review records before reaching an official decision.</p>
       </CardHeader>
       <CardContent className="space-y-1.5">
         {data.items.map((item) => (

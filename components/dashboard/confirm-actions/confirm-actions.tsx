@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import {
     confirmTransaction,
     rejectTransaction,
@@ -14,24 +14,33 @@ interface ConfirmActionsProps {
 
 export function ConfirmActions({ transactionId }: ConfirmActionsProps) {
     const [isPending, startTransition] = useTransition();
+    const actionInFlight = useRef(false);
     const [result, setResult] = useState<"confirmed" | "rejected" | null>(null);
+    const [invoiceId, setInvoiceId] = useState<string | null>(null);
     const [error, setError] = useState("");
 
     function handleAction(action: "confirm" | "reject") {
+        if (actionInFlight.current) return;
+        actionInFlight.current = true;
         startTransition(async () => {
             try {
                 setError("");
                 if (action === "confirm") {
-                    await confirmTransaction(transactionId);
+                    const response = await confirmTransaction(transactionId);
+                    if (!response.success) throw new Error(response.error);
+                    setInvoiceId(response.invoiceId ?? null);
                     setResult("confirmed");
                 } else {
-                    await rejectTransaction(transactionId);
+                    const response = await rejectTransaction(transactionId);
+                    if (!response.success) throw new Error(response.error);
                     setResult("rejected");
                 }
             } catch (err) {
                 setError(
                     err instanceof Error ? err.message : `Failed to ${action}`,
                 );
+            } finally {
+                actionInFlight.current = false;
             }
         });
     }
@@ -44,7 +53,10 @@ export function ConfirmActions({ transactionId }: ConfirmActionsProps) {
                         : "text-red-500"
                     }`}
             >
-                {result === "confirmed" ? "✓ Confirmed" : "✕ Rejected"}
+                {result === "confirmed" ? "✓ Order accepted" : "✕ Rejected"}
+                {result === "confirmed" && invoiceId && (
+                    <a className="ml-2 underline underline-offset-2" href={`/dashboard/invoices/${invoiceId}`}>View invoice</a>
+                )}
             </span>
         );
     }
@@ -67,6 +79,7 @@ export function ConfirmActions({ transactionId }: ConfirmActionsProps) {
                 ) : (
                     <Check className="h-3.5 w-3.5" />
                 )}
+                <span className="ml-1 text-xs">Accept order</span>
             </Button>
             <Button
                 variant="ghost"

@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
-import { sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { hashPassword } from 'better-auth/crypto';
 import crypto from 'node:crypto';
 import {
@@ -2613,6 +2613,11 @@ async function seedTaxFlowFull(): Promise<void> {
         createdAt,
         updatedAt: createdAt,
       });
+      if (d.status !== 'resolved' && d.status !== 'dismissed') {
+        await db.update(vatRecord)
+          .set({ isFrozen: true })
+          .where(eq(vatRecord.transactionId, d.transactionId));
+      }
     }
     console.log(`  ✓ ${DISPUTES.length} disputes\n`);
 
@@ -2705,7 +2710,7 @@ async function seedTaxFlowFull(): Promise<void> {
         status: t.status,
         priority: t.priority,
         assignedToId: t.assignedTo ?? null,
-        resolution: (t as any).resolution ?? null,
+        resolution: 'resolution' in t ? t.resolution : null,
         createdAt,
         updatedAt: resolvedAt ?? createdAt,
         resolvedAt,

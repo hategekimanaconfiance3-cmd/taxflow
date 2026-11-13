@@ -28,7 +28,7 @@ export default async function AdminKpiTargetsPage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">KPI Targets</h1>
         <p className="text-muted-foreground text-sm mt-1">
-          Track progress against RRA performance targets for revenue collection, compliance, and operations.
+          Track progress against TF performance targets for revenue collection, compliance, and operations.
         </p>
       </div>
 

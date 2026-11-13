@@ -1,8 +1,8 @@
-import { requireRRASession } from '@/lib/auth-guard';
+import { requireRRAPermission } from '@/lib/auth-guard';
 import { SupplyChainMonitor } from '@/components/admin/supply-chain-monitor';
 
 export default async function AdminSupplyChainPage() {
-  await requireRRASession("audit_officer", "stock_officer", "audit_investigation_officer", "product_traceability_officer", "director_executive");
+  await requireRRAPermission("supply_chain.summary.read");
 
   return (
     <div className="space-y-6">

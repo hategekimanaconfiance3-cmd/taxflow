@@ -1,8 +1,8 @@
 // Server-only — AI Risk Scoring Engine
 
-import { eq, and, sql, gte, desc, inArray } from "drizzle-orm";
+import { eq, and, sql, gte, inArray, ne } from "drizzle-orm";
 import db from "@/db/drizzle";
-import { transaction, stock, vatRecord, taxPayment, user, auditLog, product } from "@/db/schema";
+import { transaction, stock, user, auditLog, product } from "@/db/schema";
 import tinDb from "@/db/tin-drizzle";
 import { tinRecord } from "@/db/tin-schema";
 
@@ -14,8 +14,9 @@ import { tinRecord } from "@/db/tin-schema";
 // ---------------------------------------------------------------------------
 
 export interface RiskScore {
-    score: number;             // 0–100 (higher = riskier)
-    level: "low" | "medium" | "high" | "critical";
+    status: "SUCCESS" | "PARTIAL" | "INSUFFICIENT_DATA" | "UNAVAILABLE";
+    score: number | null;      // withheld unless every required factor is valid
+    level: "low" | "medium" | "high" | "critical" | "unavailable";
     factors: RiskFactor[];
     merchantId: string;
     merchantName: string | null;
@@ -26,7 +27,8 @@ export interface RiskScore {
 export interface RiskFactor {
     signal: string;
     weight: number;            // 0–1 contribution to total
-    value: number;             // raw score for this factor (0–100)
+    value: number | null;      // raw score for this factor (0–100)
+    status: "computed" | "partial" | "insufficient_data" | "unavailable" | "not_applicable";
     description: string;
 }
 
@@ -59,16 +61,28 @@ export async function computeRiskScore(merchantId: string): Promise<RiskScore> {
         { signal: "Historical Flags", weight: 0.15, ...flagScore },
     ];
 
-    const compositeScore = Math.round(
-        factors.reduce((sum, f) => sum + f.value * f.weight, 0),
-    );
+    const complete = factors.every((factor) => factor.status === "computed" && factor.value !== null);
+    const availableFactors = factors.filter((factor) => factor.status === "computed" && factor.value !== null).length;
+    const hasUnavailableSource = factors.some((factor) => factor.status === "unavailable");
+    const hasPartialSource = factors.some((factor) => factor.status === "partial");
+    const status: RiskScore["status"] = complete
+        ? "SUCCESS"
+        : hasUnavailableSource
+          ? "UNAVAILABLE"
+          : hasPartialSource || availableFactors > 0
+            ? "PARTIAL"
+            : "INSUFFICIENT_DATA";
+    const compositeScore = complete
+        ? Math.round(factors.reduce((sum, factor) => sum + (factor.value ?? 0) * factor.weight, 0))
+        : null;
 
-    const level: RiskScore["level"] =
+    const level: RiskScore["level"] = compositeScore === null ? "unavailable" :
         compositeScore >= 75 ? "critical" :
         compositeScore >= 50 ? "high" :
         compositeScore >= 25 ? "medium" : "low";
 
     return {
+        status,
         score: compositeScore,
         level,
         factors,
@@ -92,7 +106,7 @@ export async function computeAllRiskScores(): Promise<RiskScore[]> {
         traders.map((t) => computeRiskScore(t.id)),
     );
 
-    return scores.sort((a, b) => b.score - a.score);
+    return scores.sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
 }
 
 // ---------------------------------------------------------------------------
@@ -102,7 +116,7 @@ export async function computeAllRiskScores(): Promise<RiskScore[]> {
 
 async function computePriceDeviation(
     merchantId: string,
-): Promise<{ value: number; description: string }> {
+): Promise<{ value: number | null; status: RiskFactor["status"]; description: string }> {
     try {
         const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
 
@@ -122,47 +136,45 @@ async function computePriceDeviation(
             );
 
         if (merchantPrices.length === 0) {
-            return { value: 0, description: "No recent transactions" };
+            return { value: null, status: "insufficient_data", description: "No eligible recent transactions" };
         }
 
-        // Get market medians per product
-        let belowMedianCount = 0;
         const productIds = [...new Set(merchantPrices.map((p) => p.productId))];
+        const marketMedians = await db
+            .select({
+                productId: transaction.productId,
+                median: sql<number | null>`PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY ${transaction.unitPrice})`,
+            })
+            .from(transaction)
+            .where(and(
+                inArray(transaction.productId, productIds),
+                ne(transaction.sellerId, merchantId),
+                inArray(transaction.status, ["confirmed", "completed"]),
+                gte(transaction.createdAt, ninetyDaysAgo),
+            ))
+            .groupBy(transaction.productId);
+        const medianByProduct = new Map(marketMedians.map((row) => [row.productId, row.median]));
+        const comparablePrices = merchantPrices.filter((price) => medianByProduct.get(price.productId) != null);
 
-        for (const pid of productIds) {
-            const [marketMedian] = await db
-                .select({
-                    median: sql<number>`PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY ${transaction.unitPrice})`,
-                })
-                .from(transaction)
-                .where(
-                    and(
-                        eq(transaction.productId, pid),
-                        inArray(transaction.status, ["confirmed", "completed"]),
-                        gte(transaction.createdAt, ninetyDaysAgo),
-                    ),
-                );
-
-            if (marketMedian?.median) {
-                const merchantProductPrices = merchantPrices.filter((p) => p.productId === pid);
-                for (const mp of merchantProductPrices) {
-                    if (mp.unitPrice < marketMedian.median * 0.85) {
-                        belowMedianCount++;
-                    }
-                }
-            }
+        if (comparablePrices.length === 0) {
+            return { value: null, status: "insufficient_data", description: "No comparable market transactions" };
         }
 
-        const deviationPct = (belowMedianCount / merchantPrices.length) * 100;
+        const belowMedianCount = comparablePrices.filter((price) => {
+            const median = medianByProduct.get(price.productId);
+            return median !== undefined && median !== null && price.unitPrice < median * 0.85;
+        }).length;
+        const deviationPct = (belowMedianCount / comparablePrices.length) * 100;
         const score = Math.min(100, Math.round(deviationPct * 2));
 
         return {
             value: score,
-            description: `${belowMedianCount}/${merchantPrices.length} prices below 85% of market median`,
+            status: comparablePrices.length === merchantPrices.length ? "computed" : "partial",
+            description: `${belowMedianCount}/${comparablePrices.length} comparable prices below 85% of peer median${comparablePrices.length < merchantPrices.length ? `; ${merchantPrices.length - comparablePrices.length} prices had no peer comparison` : ""}`,
         };
     } catch (error) {
         console.error("Price deviation error:", error);
-        return { value: 0, description: "Unable to compute" };
+        return { value: null, status: "unavailable", description: "Price evidence source unavailable" };
     }
 }
 
@@ -173,54 +185,11 @@ async function computePriceDeviation(
 
 async function computeTaxCompliance(
     merchantId: string,
-): Promise<{ value: number; description: string }> {
-    try {
-        // Total VAT output owed
-        const [vatOwed] = await db
-            .select({
-                total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`,
-            })
-            .from(vatRecord)
-            .where(
-                and(
-                    eq(vatRecord.businessId, merchantId),
-                    eq(vatRecord.isFrozen, false),
-                    eq(vatRecord.vatType, "output"),
-                ),
-            );
-
-        // Total paid
-        const [paid] = await db
-            .select({
-                total: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)::float8`,
-            })
-            .from(taxPayment)
-            .where(
-                and(
-                    eq(taxPayment.businessId, merchantId),
-                    eq(taxPayment.status, "confirmed"),
-                ),
-            );
-
-        const owed = vatOwed?.total ?? 0;
-        const paidAmount = paid?.total ?? 0;
-
-        if (owed <= 0) {
-            return { value: 0, description: "No tax obligations" };
-        }
-
-        const compliancePct = Math.min(100, (paidAmount / owed) * 100);
-        // Higher risk = lower compliance
-        const score = Math.round(Math.max(0, 100 - compliancePct));
-
-        return {
-            value: score,
-            description: `${Math.round(compliancePct)}% tax paid (${paidAmount.toLocaleString()} / ${owed.toLocaleString()} RWF)`,
-        };
-    } catch (error) {
-        console.error("Tax compliance error:", error);
-        return { value: 0, description: "Unable to compute" };
-    }
+): Promise<{ value: number | null; status: RiskFactor["status"]; description: string }> {
+    // There is no finalized obligation-to-payment relationship in the current schema.
+    // Comparing aggregate VAT records with generic payments would misstate compliance.
+    void merchantId;
+    return { value: null, status: "not_applicable", description: "Finalized obligation-linked payment evidence is not available" };
 }
 
 // ---------------------------------------------------------------------------
@@ -230,7 +199,7 @@ async function computeTaxCompliance(
 
 async function computeTransactionPatterns(
     merchantId: string,
-): Promise<{ value: number; description: string }> {
+): Promise<{ value: number | null; status: RiskFactor["status"]; description: string }> {
     try {
         const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
@@ -245,17 +214,18 @@ async function computeTransactionPatterns(
             .where(
                 and(
                     eq(transaction.sellerId, merchantId),
+                    inArray(transaction.status, ["confirmed", "completed"]),
                     gte(transaction.createdAt, thirtyDaysAgo),
                 ),
             )
             .groupBy(sql`DATE(${transaction.createdAt})`);
 
         if (dailyCounts.length === 0) {
-            return { value: 0, description: "No recent activity" };
+            return { value: null, status: "insufficient_data", description: "No recent transaction activity to evaluate" };
         }
 
         // Calculate average and find spikes
-        const avgDaily = dailyCounts.reduce((s, d) => s + d.count, 0) / dailyCounts.length;
+        const avgDaily = dailyCounts.reduce((s, d) => s + d.count, 0) / 30;
         const spikeDays = dailyCounts.filter((d) => d.count > avgDaily * 3).length;
 
         // Check for rejected/expired transactions (red flag)
@@ -270,9 +240,8 @@ async function computeTransactionPatterns(
                 ),
             );
 
-        const rejectedPct = dailyCounts.length > 0
-            ? ((rejectedCount?.count ?? 0) / dailyCounts.reduce((s, d) => s + d.count, 0)) * 100
-            : 0;
+        const eligibleCount = dailyCounts.reduce((sum, day) => sum + day.count, 0) + (rejectedCount?.count ?? 0);
+        const rejectedPct = eligibleCount > 0 ? ((rejectedCount?.count ?? 0) / eligibleCount) * 100 : 0;
 
         const spikeScore = Math.min(50, spikeDays * 15);
         const rejectedScore = Math.min(50, Math.round(rejectedPct * 2));
@@ -284,11 +253,12 @@ async function computeTransactionPatterns(
 
         return {
             value: score,
+            status: "computed",
             description: reasons.length > 0 ? reasons.join("; ") : "Normal patterns",
         };
     } catch (error) {
         console.error("Transaction patterns error:", error);
-        return { value: 0, description: "Unable to compute" };
+        return { value: null, status: "unavailable", description: "Transaction evidence source unavailable" };
     }
 }
 
@@ -299,7 +269,7 @@ async function computeTransactionPatterns(
 
 async function computeStockReconciliation(
     merchantId: string,
-): Promise<{ value: number; description: string }> {
+): Promise<{ value: number | null; status: RiskFactor["status"]; description: string }> {
     try {
         // Check for negative stock (critical red flag)
         const negativeStock = await db
@@ -320,86 +290,15 @@ async function computeStockReconciliation(
         if (negativeStock.length > 0) {
             return {
                 value: 100,
+                status: "computed",
                 description: `${negativeStock.length} product(s) with negative stock`,
             };
         }
 
-        // Check for zero-stock sales in last 30 days
-        const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-
-        const currentStock = await db
-            .select({ productId: stock.productId, quantity: stock.quantity })
-            .from(stock)
-            .where(eq(stock.businessId, merchantId));
-
-        const recentSales = await db
-            .select({
-                productId: transaction.productId,
-                totalSold: sql<number>`SUM(${transaction.quantity})`,
-            })
-            .from(transaction)
-            .where(
-                and(
-                    eq(transaction.sellerId, merchantId),
-                    inArray(transaction.status, ["confirmed", "completed"]),
-                    gte(transaction.createdAt, thirtyDaysAgo),
-                ),
-            )
-            .groupBy(transaction.productId);
-
-        // If merchant has sales but zero current stock for those products, mild flag
-        let zeroStockSalesCount = 0;
-        for (const sale of recentSales) {
-            const currentQty = currentStock.find((s) => s.productId === sale.productId)?.quantity ?? 0;
-            if (currentQty === 0 && sale.totalSold > 0) {
-                zeroStockSalesCount++;
-            }
-        }
-
-        // Check for sell-below-cost (fraud indicator)
-        const stockWithPrices = await db
-            .select({ productId: stock.productId, price: stock.price })
-            .from(stock)
-            .where(and(eq(stock.businessId, merchantId), sql`${stock.price} IS NOT NULL AND ${stock.price} > 0`));
-
-        let belowCostCount = 0;
-        if (stockWithPrices.length > 0) {
-            const costMap = new Map(stockWithPrices.map((s) => [s.productId, s.price ?? 0]));
-            const recentSalesWithPrice = await db
-                .select({ productId: transaction.productId, unitPrice: transaction.unitPrice })
-                .from(transaction)
-                .where(
-                    and(
-                        eq(transaction.sellerId, merchantId),
-                        inArray(transaction.status, ["confirmed", "completed"]),
-                        gte(transaction.createdAt, thirtyDaysAgo),
-                    ),
-                )
-                .limit(100);
-
-            for (const sale of recentSalesWithPrice) {
-                const cost = costMap.get(sale.productId);
-                if (cost && sale.unitPrice < cost * 0.9) {
-                    belowCostCount++;
-                }
-            }
-        }
-
-        const zeroStockScore = Math.min(30, zeroStockSalesCount * 10);
-        const belowCostScore = Math.min(70, belowCostCount * 15);
-        const score = Math.min(100, zeroStockScore + belowCostScore);
-
-        const reasons: string[] = [];
-        if (belowCostCount > 0) reasons.push(`${belowCostCount} sale(s) below purchase cost`);
-        if (zeroStockSalesCount > 0) reasons.push(`${zeroStockSalesCount} product(s) sold to zero stock`);
-
-        return {
-            value: score,
-            description: reasons.length > 0 ? reasons.join("; ") : "Stock levels consistent",
-        };
+        return { value: null, status: "insufficient_data", description: "Complete verified stock-movement reconstruction is not available" };
     } catch (error) {
         console.error("Stock reconciliation error:", error);
-        return { value: 0, description: "Unable to compute" };
+        return { value: null, status: "unavailable", description: "Stock evidence source unavailable" };
     }
 }
 
@@ -410,7 +309,7 @@ async function computeStockReconciliation(
 
 async function computeHistoricalFlags(
     merchantId: string,
-): Promise<{ value: number; description: string }> {
+): Promise<{ value: number | null; status: RiskFactor["status"]; description: string }> {
     try {
         const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
 
@@ -435,11 +334,12 @@ async function computeHistoricalFlags(
 
         return {
             value: score,
-            description: count > 0 ? `${count} flags in last 90 days` : "Clean record",
+            status: "computed",
+            description: count > 0 ? `${count} matching audit flags in last 90 days` : "No matching audit flags found in the queried audit source",
         };
     } catch (error) {
         console.error("Historical flags error:", error);
-        return { value: 0, description: "Unable to compute" };
+        return { value: null, status: "unavailable", description: "Historical audit source unavailable" };
     }
 }
 

@@ -1,15 +1,16 @@
-'use server';
+﻿'use server';
 
 import { eq, desc, sql, and } from 'drizzle-orm';
 import db from '@/db/drizzle';
-import { auditLog, vatRecord, taxPayment, user } from '@/db/schema';
-import { requireTraderSession, requireRRASession } from '@/lib/auth-guard';
+import { auditLog, vatRecord, taxPayment, taxPaymentEvent, user } from '@/db/schema';
+import { requireTraderSession, requireRRAPermission, requireRRASession } from '@/lib/auth-guard';
 import { createNotification } from '@/lib/notifications';
 import { getSystemConfig } from '@/lib/actions/system-config.action';
-import { taxPaymentSubmissionSchema } from '@/lib/validation/tax-payment.schema';
+import { taxPaymentReviewSchema, taxPaymentSubmissionSchema } from '@/lib/validation/tax-payment.schema';
 import { getBusinessComplianceStatus } from '@/lib/compliance-status';
 import { auth } from '@/lib/auth';
 import { headers } from 'next/headers';
+import { assertPaymentTransition, canInitiateTaxPayment, type PaymentStatus } from '@/lib/payment-engine/domain';
 
 const CRITICAL_THRESHOLD = 0.8; // 80% — also notify RRA admins
 
@@ -35,80 +36,76 @@ export async function getTaxComplianceStatus(userId?: string) {
 // Record Tax Payment
 // ---------------------------------------------------------------------------
 
-export async function recordTaxPayment(data: {
-  amount: number;
-  method: 'mobile_money' | 'bank_transfer' | 'cash';
-  reference?: string;
-}, idempotencyKey: string): Promise<typeof taxPayment.$inferSelect> {
+export type RecordTaxPaymentResult =
+  | { success: true; payment: typeof taxPayment.$inferSelect }
+  | { success: false; error: string; reference?: string };
+
+export async function recordTaxPayment(rawData: unknown, idempotencyKey: unknown): Promise<RecordTaxPaymentResult> {
   const session = await requireTraderSession();
-  const parsed = taxPaymentSubmissionSchema.safeParse({ ...data, idempotencyKey });
+  const parsed = taxPaymentSubmissionSchema.safeParse({
+    ...(typeof rawData === 'object' && rawData !== null && !Array.isArray(rawData) ? rawData : {}),
+    idempotencyKey,
+  });
   if (!parsed.success) {
-    throw new Error('Payment details are invalid. Please review them and try again.');
+    return { success: false, error: parsed.error.issues[0]?.message ?? 'Payment details are invalid. Please review them and try again.' };
   }
   const paymentInput = parsed.data;
+  const correlationId = crypto.randomUUID();
+  let payment: typeof taxPayment.$inferSelect;
+  try {
+  payment = await db.transaction(async (tx) => {
+    // Serialize payment requests and reviewer settlement against one taxpayer row.
+    const [lockedBusiness] = await tx.select({ id: user.id }).from(user)
+      .where(eq(user.id, session.user.id)).for('update').limit(1);
+    if (!lockedBusiness) throw new Error('Taxpayer account was not found.');
 
-  const [existingPayment] = await db
-    .select()
-    .from(taxPayment)
-    .where(and(eq(taxPayment.businessId, session.user.id), eq(taxPayment.idempotencyKey, paymentInput.idempotencyKey)))
-    .limit(1);
-  if (existingPayment) {
-    if (
-      existingPayment.amount !== paymentInput.amount ||
-      existingPayment.method !== paymentInput.method ||
-      existingPayment.reference !== (paymentInput.reference || null)
-    ) {
-      throw new Error('This payment request key was already used for different payment details.');
+    const [existingPayment] = await tx.select().from(taxPayment)
+      .where(and(eq(taxPayment.businessId, session.user.id), eq(taxPayment.idempotencyKey, paymentInput.idempotencyKey)))
+      .limit(1);
+    if (existingPayment) {
+      if (existingPayment.method !== paymentInput.method || existingPayment.reference !== (paymentInput.reference || null)) {
+        throw new Error('This payment request key was already used for different payment details.');
+      }
+      return existingPayment;
     }
-    return existingPayment;
-  }
 
-  // ── Re-compute outstanding from DB (never trust client) ────────────
-  const vatResult = await db
-    .select({
+    // This is a recorded VAT balance, not an official TF assessment. Never
+    // accept an amount from the browser or let the eligibility score block it.
+    const vatResult = await tx.select({
       vatType: vatRecord.vatType,
       total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`.as('total'),
-    })
-    .from(vatRecord)
-    .where(and(eq(vatRecord.businessId, session.user.id), eq(vatRecord.isFrozen, false)))
-    .groupBy(vatRecord.vatType);
-
-  const vatOutput = Number(vatResult.find((r) => r.vatType === 'output')?.total) || 0;
-  const vatInput = Number(vatResult.find((r) => r.vatType === 'input')?.total) || 0;
-  const netOwed = Math.max(0, vatOutput - vatInput);
-
-  const [paymentResult] = await db
-    .select({
+    }).from(vatRecord)
+      .where(and(eq(vatRecord.businessId, session.user.id), eq(vatRecord.isFrozen, false)))
+      .groupBy(vatRecord.vatType);
+    const vatOutput = Number(vatResult.find((row) => row.vatType === 'output')?.total) || 0;
+    const vatInput = Number(vatResult.find((row) => row.vatType === 'input')?.total) || 0;
+    const [paymentResult] = await tx.select({
       totalPaid: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)::float8`.as('total_paid'),
-    })
-    .from(taxPayment)
-    .where(sql`${taxPayment.businessId} = ${session.user.id} AND ${taxPayment.status} = 'confirmed'`);
+    }).from(taxPayment)
+      .where(and(eq(taxPayment.businessId, session.user.id), eq(taxPayment.status, 'confirmed')));
+    const outstanding = Math.max(0, vatOutput - vatInput - (Number(paymentResult?.totalPaid) || 0));
+    if (!canInitiateTaxPayment(outstanding)) {
+      throw new Error('No recorded VAT balance is currently outstanding. Payment request was not created.');
+    }
 
-  const totalPaid = Number(paymentResult?.totalPaid) || 0;
-  const outstanding = Math.max(0, netOwed - totalPaid);
+    const [otherPending] = await tx.select({ id: taxPayment.id }).from(taxPayment)
+      .where(and(eq(taxPayment.businessId, session.user.id), eq(taxPayment.status, 'pending')))
+      .limit(1);
+    if (otherPending) {
+      throw new Error('A payment is already awaiting settlement review. Wait for its result before submitting another request.');
+    }
 
-  // ── Validate ───────────────────────────────────────────────────────
-  if (outstanding <= 0) {
-    throw new Error('No tax is currently outstanding. Payment not allowed.');
-  }
-
-  if (paymentInput.amount > outstanding) {
-    throw new Error(
-      `Payment amount (${paymentInput.amount.toLocaleString()} RWF) exceeds outstanding balance of ${outstanding.toLocaleString()} RWF.`,
-    );
-  }
-
-  // ── Insert payment ─────────────────────────────────────────────────
-  const payment = await db.transaction(async (tx) => {
     const [createdPayment] = await tx
       .insert(taxPayment)
       .values({
         businessId: session.user.id,
-        amount: paymentInput.amount,
+        amount: outstanding,
         method: paymentInput.method,
+        paymentReference: `TF-${crypto.randomUUID()}`,
         reference: paymentInput.reference || null,
         idempotencyKey: paymentInput.idempotencyKey,
         status: 'pending',
+        workflowStatus: 'AWAITING_CONFIRMATION',
       })
       .onConflictDoNothing({ target: [taxPayment.businessId, taxPayment.idempotencyKey] })
       .returning();
@@ -120,11 +117,7 @@ export async function recordTaxPayment(data: {
         .where(and(eq(taxPayment.businessId, session.user.id), eq(taxPayment.idempotencyKey, paymentInput.idempotencyKey)))
         .limit(1);
       if (!retryPayment) throw new Error('Payment retry could not be reconciled. Please contact support.');
-      if (
-        retryPayment.amount !== paymentInput.amount ||
-        retryPayment.method !== paymentInput.method ||
-        retryPayment.reference !== (paymentInput.reference || null)
-      ) {
+      if (retryPayment.method !== paymentInput.method || retryPayment.reference !== (paymentInput.reference || null)) {
         throw new Error('This payment request key was already used for different payment details.');
       }
       return retryPayment;
@@ -139,21 +132,56 @@ export async function recordTaxPayment(data: {
       afterState: {
         status: createdPayment.status,
         amount: createdPayment.amount,
+        paymentReference: createdPayment.paymentReference,
         method: createdPayment.method,
         reference: createdPayment.reference,
       },
       metadata: JSON.stringify({
-        amount: paymentInput.amount,
+        amount: outstanding,
         method: paymentInput.method,
         reference: paymentInput.reference,
         outstandingAtSubmission: outstanding,
+        amountSource: 'server_derived_recorded_vat_balance',
       }),
+    });
+
+    await tx.insert(taxPaymentEvent).values({
+      paymentId: createdPayment.id,
+      eventKey: `${createdPayment.id}:submitted`,
+      eventType: 'PAYMENT_SUBMITTED_FOR_REVIEW',
+      fromStatus: null,
+      toStatus: 'AWAITING_CONFIRMATION',
+      actorUserId: session.user.id,
+      details: { amount: outstanding, currency: 'RWF', paymentReference: createdPayment.paymentReference, amountSource: 'server_derived_recorded_vat_balance' },
     });
 
     return createdPayment;
   });
+  } catch (error) {
+    const knownMessages = new Set([
+      'Taxpayer account was not found.',
+      'This payment request key was already used for different payment details.',
+      'No recorded VAT balance is currently outstanding. Payment request was not created.',
+      'A payment is already awaiting settlement review. Wait for its result before submitting another request.',
+      'Payment retry could not be reconciled. Please contact support.',
+    ]);
+    if (error instanceof Error && knownMessages.has(error.message)) {
+      return { success: false, error: error.message };
+    }
+    console.error('Tax payment submission failed', {
+      userId: session.user.id,
+      correlationId,
+      errorName: error instanceof Error ? error.name : typeof error,
+      databaseCode: error && typeof error === 'object' && 'code' in error ? String(error.code) : undefined,
+    });
+    return {
+      success: false,
+      error: 'The payment request could not be recorded. No payment was confirmed. Contact support with the reference below.',
+      reference: correlationId,
+    };
+  }
 
-  return payment;
+  return { success: true, payment };
 }
 
 // ---------------------------------------------------------------------------
@@ -162,7 +190,7 @@ export async function recordTaxPayment(data: {
 
 /** List unverified submissions for authorized compliance/audit staff only. */
 export async function getPendingTaxPaymentsForReview() {
-  await requireRRASession('compliance_officer', 'audit_officer', 'payments_reconciliation_officer');
+  await requireRRAPermission('payments.read');
 
   return db
     .select({
@@ -174,7 +202,9 @@ export async function getPendingTaxPaymentsForReview() {
       amount: taxPayment.amount,
       method: taxPayment.method,
       reference: taxPayment.reference,
+      paymentReference: taxPayment.paymentReference,
       status: taxPayment.status,
+      workflowStatus: taxPayment.workflowStatus,
       createdAt: taxPayment.createdAt,
     })
     .from(taxPayment)
@@ -188,19 +218,13 @@ export async function getPendingTaxPaymentsForReview() {
  * Confirm a payment only after an authorized officer independently checks the
  * bank/provider/cash evidence. The evidence reference and reviewer are audited.
  */
-export async function verifyTaxPayment(input: {
-  paymentId: string;
-  evidenceReference: string;
-}) {
-  const session = await requireRRASession('compliance_officer', 'audit_officer', 'payments_reconciliation_officer');
-  const paymentId = input.paymentId.trim();
-  const evidenceReference = input.evidenceReference.trim();
+export async function verifyTaxPayment(input: unknown) {
+  const session = await requireRRAPermission('payments.reconcile');
+  const parsed = taxPaymentReviewSchema.safeParse(input);
+  if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? 'Payment review details are invalid.');
+  const { paymentId, evidenceReference, evidenceType, settledAmount, reason } = parsed.data;
 
-  if (!paymentId || evidenceReference.length < 5 || evidenceReference.length > 120) {
-    throw new Error('A valid payment and evidence reference (5–120 characters) are required.');
-  }
-
-  const verifiedPayment = await db.transaction(async (tx) => {
+  const verificationResult = await db.transaction(async (tx) => {
     const [existing] = await tx
       .select()
       .from(taxPayment)
@@ -209,7 +233,9 @@ export async function verifyTaxPayment(input: {
       .limit(1);
 
     if (!existing) throw new Error('Payment submission not found.');
-    if (existing.status !== 'pending') throw new Error('Only pending payment submissions can be verified.');
+    if (existing.status !== 'pending' || !['AWAITING_CONFIRMATION', 'REVIEW_REQUIRED'].includes(existing.workflowStatus)) {
+      throw new Error('Only pending payment submissions can be reviewed.');
+    }
 
     const [lockedTrader] = await tx
       .select({ id: user.id })
@@ -219,34 +245,73 @@ export async function verifyTaxPayment(input: {
       .limit(1);
     if (!lockedTrader) throw new Error('Taxpayer account was not found.');
 
-    const vatTotals = await tx
-      .select({
-        vatType: vatRecord.vatType,
-        total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`.as('total'),
-      })
-      .from(vatRecord)
-      .where(and(eq(vatRecord.businessId, existing.businessId), eq(vatRecord.isFrozen, false)))
-      .groupBy(vatRecord.vatType);
-    const outputVat = Number(vatTotals.find((row) => row.vatType === 'output')?.total) || 0;
-    const inputVat = Number(vatTotals.find((row) => row.vatType === 'input')?.total) || 0;
-    const [paidRow] = await tx
-      .select({ total: sql<number>`COALESCE(SUM(${taxPayment.amount}), 0)::float8`.as('total') })
-      .from(taxPayment)
-      .where(and(eq(taxPayment.businessId, existing.businessId), eq(taxPayment.status, 'confirmed')));
-    const outstanding = Math.max(0, outputVat - inputVat - (Number(paidRow?.total) || 0));
-    if (existing.amount > outstanding) {
-      throw new Error("Payment exceeds the taxpayer's current outstanding balance.");
+    let exceptionReason: string | null = null;
+    // The request amount is the server-calculated full balance snapshot from
+    // submission time. VAT records can change while a payment is pending, so
+    // comparing against today's balance incorrectly rejects valid settlement
+    // evidence for an already-created request. The verified amount must still
+    // exactly match that immutable request amount (no partial payment).
+    if (settledAmount !== existing.amount) {
+      exceptionReason = 'Settlement amount does not match the full payment request amount.';
+    } else if ((existing.method === 'cash' && evidenceType !== 'official_cash_receipt')
+      || (existing.method === 'bank_transfer' && evidenceType !== 'bank_settlement')
+      || (existing.method === 'mobile_money' && evidenceType !== 'provider_settlement')) {
+      exceptionReason = 'Evidence type does not match the submitted payment method.';
     }
 
     // If the trader submitted a provider reference, it must match the reviewed evidence.
-    if (existing.reference && existing.reference.trim() !== evidenceReference) {
-      throw new Error('The evidence reference does not match the reference submitted with this payment.');
+    if (!exceptionReason && existing.reference && existing.reference.trim() !== evidenceReference) {
+      exceptionReason = 'The evidence reference does not match the reference submitted with this payment.';
     }
+
+    const fromStatus = existing.workflowStatus as PaymentStatus;
+    if (exceptionReason) {
+      if (fromStatus !== 'REVIEW_REQUIRED') assertPaymentTransition(fromStatus, 'REVIEW_REQUIRED');
+      const [flagged] = await tx
+        .update(taxPayment)
+        .set({ workflowStatus: 'REVIEW_REQUIRED', updatedAt: new Date() })
+        .where(and(eq(taxPayment.id, existing.id), eq(taxPayment.status, 'pending')))
+        .returning();
+      if (!flagged) throw new Error('Payment status changed before the exception could be recorded.');
+
+      await tx.insert(taxPaymentEvent).values({
+        paymentId: existing.id,
+        eventKey: `${existing.id}:exception:${crypto.randomUUID()}`,
+        eventType: 'PAYMENT_EXCEPTION_RAISED',
+        fromStatus,
+        toStatus: 'REVIEW_REQUIRED',
+        actorUserId: session.user.id,
+        details: {
+          evidenceType,
+          evidenceReference,
+          reason,
+          settledAmount,
+          expectedAmount: existing.amount,
+          mismatch: exceptionReason,
+          paymentReference: existing.paymentReference,
+        },
+      });
+      await tx.insert(auditLog).values({
+        userId: session.user.id,
+        action: 'TAX_PAYMENT_EXCEPTION_RAISED',
+        targetType: 'tax_payment',
+        targetId: existing.id,
+        beforeState: { workflowStatus: existing.workflowStatus, status: existing.status },
+        afterState: { workflowStatus: flagged.workflowStatus, status: flagged.status },
+        metadata: JSON.stringify({ reason: exceptionReason, reviewReason: reason, evidenceType, evidenceReference, settledAmount, paymentReference: existing.paymentReference }),
+      });
+      return { payment: flagged, needsReview: true as const, message: exceptionReason };
+    }
+
+    if (fromStatus !== 'REVIEW_REQUIRED') assertPaymentTransition(fromStatus, 'REVIEW_REQUIRED');
+    assertPaymentTransition('REVIEW_REQUIRED', 'RECONCILIATION_PENDING');
+    assertPaymentTransition('RECONCILIATION_PENDING', 'PAID');
 
     const [updated] = await tx
       .update(taxPayment)
       .set({
         status: 'confirmed',
+        workflowStatus: 'PAID',
         reference: existing.reference ?? evidenceReference,
         updatedAt: new Date(),
       })
@@ -254,6 +319,36 @@ export async function verifyTaxPayment(input: {
       .returning();
 
     if (!updated) throw new Error('Payment status changed before verification completed.');
+
+    await tx.insert(taxPaymentEvent).values([
+      {
+        paymentId: existing.id,
+        eventKey: `${existing.id}:manual-review:${crypto.randomUUID()}`,
+        eventType: 'MANUAL_EVIDENCE_REVIEWED',
+        fromStatus,
+        toStatus: 'REVIEW_REQUIRED',
+        actorUserId: session.user.id,
+        details: { evidenceType, evidenceReference, reason, paymentReference: existing.paymentReference },
+      },
+      {
+        paymentId: existing.id,
+        eventKey: `${existing.id}:reconciliation:${crypto.randomUUID()}`,
+        eventType: 'SETTLEMENT_RECONCILED',
+        fromStatus: 'REVIEW_REQUIRED',
+        toStatus: 'RECONCILIATION_PENDING',
+        actorUserId: session.user.id,
+        details: { evidenceType, evidenceReference, settledAmount, currency: 'RWF', paymentReference: existing.paymentReference },
+      },
+      {
+        paymentId: existing.id,
+        eventKey: `${existing.id}:paid:${crypto.randomUUID()}`,
+        eventType: 'TAX_PAYMENT_RECONCILED',
+        fromStatus: 'RECONCILIATION_PENDING',
+        toStatus: 'PAID',
+        actorUserId: session.user.id,
+        details: { evidenceType, evidenceReference, reason, settledAmount, currency: 'RWF', paymentReference: existing.paymentReference },
+      },
+    ]);
 
     await tx.insert(auditLog).values({
       userId: session.user.id,
@@ -274,15 +369,21 @@ export async function verifyTaxPayment(input: {
         traderId: existing.businessId,
         method: existing.method,
         evidenceReference,
+        evidenceType,
+        reason,
+        settledAmount,
+        paymentReference: existing.paymentReference,
         reviewerUserId: session.user.id,
         verificationMode: 'manual_authorized_review',
       }),
     });
 
-    return updated;
+    return { payment: updated, needsReview: false as const, message: null };
   });
 
-  return { success: true, payment: verifiedPayment };
+  return verificationResult.needsReview
+    ? { success: false, needsReview: true, message: verificationResult.message, payment: verificationResult.payment }
+    : { success: true, payment: verificationResult.payment };
 }
 
 // ---------------------------------------------------------------------------
@@ -309,13 +410,15 @@ export async function getTaxPayments() {
  *
  * - Below 95%: notify the trader
  * - Below 80%: also notify all RRA admin users
- * - Below auto_suspension_threshold (50%): auto-suspend trader
+ * - Below the legacy suspension threshold (50% by default): notify TF staff
+ *   that an authorized officer should review the case. This check never changes
+ *   taxpayer status or initiates an enforcement action.
  */
 export async function checkAndAlertCompliance(traderId: string) {
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session?.user) throw new Error('Authentication is required.');
   if (traderId !== session.user.id) {
-    await requireRRASession('compliance_officer', 'audit_officer');
+    await requireRRASession('compliance_officer', 'audit_officer', 'tax_compliance_officer', 'audit_investigation_officer');
   }
   try {
     // Calculate compliance without auth guard (called from server actions)
@@ -353,7 +456,6 @@ export async function checkAndAlertCompliance(traderId: string) {
       .select({
         businessName: user.businessName,
         name: user.name,
-        clearanceStatus: user.clearanceStatus,
       })
       .from(user)
       .where(eq(user.id, traderId))
@@ -361,52 +463,19 @@ export async function checkAndAlertCompliance(traderId: string) {
 
     const traderName = trader?.businessName || trader?.name || 'Unknown';
 
-    // ── Auto-suspend if below suspension threshold ──────────────────
-    if (compliancePct < config.autoSuspensionThreshold * 100) {
-      // Only suspend if not already suspended
-      if (trader && trader.clearanceStatus !== 'suspended') {
-        await db.transaction(async (tx) => {
-          const [updatedTrader] = await tx
-            .update(user)
-            .set({ clearanceStatus: 'suspended' })
-            .where(and(eq(user.id, traderId), eq(user.clearanceStatus, trader.clearanceStatus)))
-            .returning({ id: user.id });
-          if (!updatedTrader) return;
-          await tx.insert(auditLog).values({
-            userId: traderId,
-            action: 'AUTO_SUSPENDED',
-            targetType: 'user',
-            targetId: traderId,
-            metadata: JSON.stringify({
-              compliancePct: Math.round(compliancePct),
-              outstanding,
-              threshold: config.autoSuspensionThreshold * 100,
-              reason: 'Compliance below auto-suspension threshold',
-            }),
-          });
-        });
-
-        // Notify the trader
+    // A threshold crossing is only a signal for human review. Automated
+    // compliance checks must never suspend, restrict, or otherwise decide a
+    // taxpayer's status.
+    if (compliancePct < config.reviewRecommendationThreshold * 100) {
+      const rraUsers = await db.select({ id: user.id }).from(user).where(eq(user.role, 'rra_staff'));
+      for (const rraUser of rraUsers) {
         await createNotification({
-          userId: traderId,
+          userId: rraUser.id,
           type: 'compliance_alert',
-          title: 'Account Suspended — Non-Compliance',
-          message: `Your account has been automatically suspended. Tax compliance is at ${Math.round(compliancePct)}% (minimum: ${config.autoSuspensionThreshold * 100}%). Outstanding: ${outstanding.toLocaleString()} RWF. Pay your outstanding balance to restore trading.`,
-          link: '/dashboard/payments',
+          title: 'Potential Compliance Risk — Requires Human Review',
+          message: `"${traderName}" has a TaxFlow payment indicator of ${Math.round(compliancePct)}%. Recorded outstanding amount: ${outstanding.toLocaleString()} RWF. This is not a confirmed violation or official assessment; review the authorized records before deciding any action.`,
+          link: '/admin/traders',
         });
-
-        // Notify all RRA staff
-        const rraUsers = await db.select({ id: user.id }).from(user).where(eq(user.role, 'rra_staff'));
-
-        for (const rraUser of rraUsers) {
-          await createNotification({
-            userId: rraUser.id,
-            type: 'compliance_alert',
-            title: 'Trader Auto-Suspended',
-            message: `"${traderName}" has been auto-suspended. Compliance: ${Math.round(compliancePct)}%. Outstanding: ${outstanding.toLocaleString()} RWF.`,
-            link: '/admin/traders',
-          });
-        }
       }
     }
 
@@ -415,8 +484,8 @@ export async function checkAndAlertCompliance(traderId: string) {
       await createNotification({
         userId: traderId,
         type: 'compliance_alert',
-        title: 'Tax Compliance Warning',
-        message: `Your tax compliance is at ${Math.round(compliancePct)}% (minimum: 95%). Outstanding balance: ${outstanding.toLocaleString()} RWF. Pay now to avoid trade restrictions.`,
+        title: 'TaxFlow Payment Indicator — Review',
+        message: `Your TaxFlow payment indicator is ${Math.round(compliancePct)}%. The recorded outstanding amount is ${outstanding.toLocaleString()} RWF. Please review your records or contact support if you believe this information is incorrect.`,
         link: '/dashboard/payments',
       });
     }
@@ -429,8 +498,8 @@ export async function checkAndAlertCompliance(traderId: string) {
         await createNotification({
           userId: rraUser.id,
           type: 'compliance_alert',
-          title: 'Critical Compliance Alert',
-          message: `Trader "${traderName}" is at ${Math.round(compliancePct)}% tax compliance (critical threshold: 80%). Outstanding: ${outstanding.toLocaleString()} RWF.`,
+          title: 'Potential Compliance Risk — Requires Human Review',
+          message: `Trader "${traderName}" has a TaxFlow payment indicator of ${Math.round(compliancePct)}%. Recorded outstanding amount: ${outstanding.toLocaleString()} RWF. This is not a confirmed violation or official assessment.`,
           link: `/admin/traders`,
         });
       }
@@ -450,23 +519,23 @@ export async function checkAndAlertCompliance(traderId: string) {
  * Returns a summary of the check.
  */
 export async function runSystemComplianceCheck() {
-  await requireRRASession('compliance_officer', 'audit_officer');
+  await requireRRASession('compliance_officer', 'audit_officer', 'tax_compliance_officer', 'audit_investigation_officer');
 
   const traders = await db
     .select({ id: user.id, businessName: user.businessName, name: user.name })
     .from(user)
     .where(sql`${user.role} IN ('manufacturer', 'wholesaler', 'retailer')`);
 
-  let compliant = 0;
-  let nonCompliant = 0;
-  let suspended = 0;
+  let meetingConfiguredThreshold = 0;
+  let belowConfiguredThreshold = 0;
+  let reviewRecommended = 0;
   let alerts = 0;
 
   const complianceConfig = await getSystemConfig();
 
   for (const trader of traders) {
     try {
-      // Delegate to checkAndAlertCompliance — includes auto-suspension logic
+      // Delegate to checkAndAlertCompliance — this only creates notifications.
       await checkAndAlertCompliance(trader.id);
 
       // Re-read compliance to classify result for the summary
@@ -484,7 +553,7 @@ export async function runSystemComplianceCheck() {
       const netOwed = Math.max(0, vatOutput - vatInput);
 
       if (netOwed === 0) {
-        compliant++;
+        meetingConfiguredThreshold++;
         continue;
       }
 
@@ -498,15 +567,15 @@ export async function runSystemComplianceCheck() {
       const totalPaid = Number(paymentResult?.totalPaid) || 0;
       const compliancePct = Math.min(100, (totalPaid / netOwed) * 100);
 
-      if (compliancePct < complianceConfig.autoSuspensionThreshold * 100) {
-        suspended++;
-        nonCompliant++;
+      if (compliancePct < complianceConfig.reviewRecommendationThreshold * 100) {
+        reviewRecommended++;
+        belowConfiguredThreshold++;
         alerts++;
       } else if (compliancePct < complianceConfig.complianceThreshold * 100) {
-        nonCompliant++;
+        belowConfiguredThreshold++;
         alerts++;
       } else {
-        compliant++;
+        meetingConfiguredThreshold++;
       }
     } catch {
       // Skip individual trader errors
@@ -515,9 +584,9 @@ export async function runSystemComplianceCheck() {
 
   return {
     totalChecked: traders.length,
-    compliant,
-    nonCompliant,
-    suspended,
+    meetingConfiguredThreshold,
+    belowConfiguredThreshold,
+    reviewRecommended,
     alerts,
   };
 }

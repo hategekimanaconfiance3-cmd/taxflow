@@ -1,4 +1,4 @@
-import { requireRRASession } from '@/lib/auth-guard';
+import { requireRRAPermission } from '@/lib/auth-guard';
 import { getAllTransactions } from '@/lib/actions/admin.action';
 import { AdminTransactionActions } from '@/components/admin/admin-transaction-actions';
 import {
@@ -23,7 +23,7 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 export default async function AdminTransactionsPage() {
-  await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
+  await requireRRAPermission("transaction.read");
 
   const transactions = await getAllTransactions();
 

@@ -10,7 +10,7 @@ export default async function AiComputePage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">AI Compute</h1>
         <p className="text-muted-foreground text-sm mt-1">
-          AI-powered batch processing and intelligence tools for the RRA.
+          AI-powered batch processing and intelligence tools for TF.
         </p>
       </div>
 

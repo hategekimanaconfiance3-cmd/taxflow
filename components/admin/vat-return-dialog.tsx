@@ -129,7 +129,7 @@ export function VATReturnDialog({ traders }: { traders: Trader[] }) {
                                 REPUBLIC OF RWANDA
                             </h2>
                             <p className="text-xs text-muted-foreground">
-                                Rwanda Revenue Authority
+                                TaxFlow Authority
                             </p>
                             <p className="text-sm font-semibold mt-1">
                                 VAT RETURN STATEMENT

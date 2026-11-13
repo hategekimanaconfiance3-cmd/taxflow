@@ -8,7 +8,6 @@ import {
     Scale,
     Shield,
     Settings,
-    HelpCircle,
     Bell,
     FileBarChart,
     UserCheck,
@@ -24,15 +23,22 @@ import {
     Database,
     Target,
     Megaphone,
-    Ticket,
+    MessageSquare,
     FileText,
     LayoutGrid,
     BarChart3,
     Cpu,
     Brain,
     Layers,
+    ShieldAlert,
+    UserCog,
+    Lock,
+    Server,
+    Eye,
+    Landmark,
+    SlidersHorizontal,
 } from "lucide-react";
-import type { RRARole } from "@/lib/auth-guard";
+import { hasRRAPermission, type RRARole } from "@/lib/rra-rbac";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -70,7 +76,11 @@ export const ROLE_LABELS: Record<RRARole, string> = {
     super_admin: "Super Admin",
     director_executive: "RRA Director / Executive",
     tax_compliance_officer: "Tax Compliance Officer",
-    audit_investigation_officer: "Audit & Investigation Officer",
+    tax_audit_officer: "Tax Auditor",
+    revenue_investigator: "Revenue Investigator",
+    taxpayer_support_officer: "Taxpayer Support Officer",
+    taxpayer_registration_officer: "Taxpayer Registration Officer",
+    audit_investigation_officer: "Legacy · Audit & Investigation Officer",
     product_traceability_officer: "Product Traceability Officer",
     customs_import_officer: "Customs & Import Officer",
     payments_reconciliation_officer: "Tax Payments & Reconciliation Officer",
@@ -80,11 +90,16 @@ export const ROLE_LABELS: Record<RRARole, string> = {
     stock_officer: "Stock Monitoring Officer",
     correction_officer: "Correction Officer",
     reporting_officer: "Reporting & Analytics Officer",
+    stock_control_admin: "Stock Control Administrator",
 };
 
 export const ROLE_COLORS: Record<RRARole, string> = {
     director_executive: "bg-cyan-500/10 text-cyan-700 border-cyan-200",
     tax_compliance_officer: "bg-violet-500/10 text-violet-700 border-violet-200",
+    tax_audit_officer: "bg-amber-500/10 text-amber-700 border-amber-200",
+    revenue_investigator: "bg-rose-500/10 text-rose-700 border-rose-200",
+    taxpayer_support_officer: "bg-teal-500/10 text-teal-700 border-teal-200",
+    taxpayer_registration_officer: "bg-sky-500/10 text-sky-700 border-sky-200",
     audit_investigation_officer: "bg-amber-500/10 text-amber-700 border-amber-200",
     product_traceability_officer: "bg-blue-500/10 text-blue-700 border-blue-200",
     customs_import_officer: "bg-orange-500/10 text-orange-700 border-orange-200",
@@ -96,6 +111,7 @@ export const ROLE_COLORS: Record<RRARole, string> = {
     stock_officer: "bg-blue-500/10 text-blue-600 border-blue-200",
     correction_officer: "bg-emerald-500/10 text-emerald-600 border-emerald-200",
     reporting_officer: "bg-cyan-500/10 text-cyan-600 border-cyan-200",
+    stock_control_admin: "bg-emerald-500/10 text-emerald-700 border-emerald-200",
 };
 
 // ---------------------------------------------------------------------------
@@ -110,27 +126,35 @@ const ALL: RRARole[] = [
     "correction_officer",
     "reporting_officer",
     "tax_compliance_officer",
+    "tax_audit_officer",
+    "revenue_investigator",
+    "taxpayer_support_officer",
+    "taxpayer_registration_officer",
     "audit_investigation_officer",
     "product_traceability_officer",
     "customs_import_officer",
     "payments_reconciliation_officer",
     "data_ai_analyst",
     "director_executive",
+    "stock_control_admin",
 ];
 
+// super_admin has taxpayer.intelligence.search; stock_control_admin does not.
+const TAXPAYER_SEARCH_ROLES = ALL.filter((role) => hasRRAPermission(role, "taxpayer.intelligence.search"));
+
 // ---------------------------------------------------------------------------
-// Navigation groups — ordered by operational priority
+// Navigation groups -- ordered by operational priority
 // ---------------------------------------------------------------------------
 
 export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
-    // ── Overview ────────────────────────────────────────────
+    // -- Overview
     {
         items: [
             {
                 label: "Command Center",
                 href: "/admin/dashboard/overview",
                 icon: LayoutDashboard,
-                allowedRoles: ALL,
+                allowedRoles: ["super_admin", "director_executive"],
                 children: [
                     {
                         label: "Overview",
@@ -153,7 +177,7 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
             },
         ],
     },
-    // ── Trade Operations ────────────────────────────────────
+    // -- Trade Operations
     {
         label: "Trade Operations",
         items: [
@@ -161,15 +185,35 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 label: "Traders",
                 href: "/admin/traders",
                 icon: Users,
-                allowedRoles: ALL,
+                allowedRoles: TAXPAYER_SEARCH_ROLES,
+            },
+            {
+                label: "Taxpayer Registration",
+                href: "/admin/taxpayer-registration",
+                icon: UserCheck,
+                allowedRoles: ["super_admin", "tax_compliance_officer", "taxpayer_registration_officer", "compliance_officer"],
+            },
+            {
+                label: "Manufacturing Activity",
+                href: "/admin/manufacturing-activity",
+                icon: Package,
+                allowedRoles: ALL.filter((role) => !["taxpayer_support_officer", "taxpayer_registration_officer"].includes(role)),
+            },
+            {
+                label: "Taxpayer Corrections",
+                href: "/admin/corrections",
+                icon: UserCheck,
+                allowedRoles: ["correction_officer", "super_admin", "tax_compliance_officer"],
             },
             {
                 label: "Transactions",
                 href: "/admin/transactions",
                 icon: ArrowLeftRight,
                 allowedRoles: [
-                    "compliance_officer",
+                    "super_admin",
                     "audit_officer",
+                    "audit_investigation_officer",
+                    "tax_audit_officer",
                 ],
             },
             {
@@ -177,10 +221,23 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 href: "/admin/imports",
                 icon: Ship,
                 allowedRoles: [
+                    "super_admin",
                     "compliance_officer",
                     "audit_officer",
                     "customs_import_officer",
                 ],
+            },
+            {
+                label: "Manufacturing Material Review",
+                href: "/admin/production/material-accounting",
+                icon: Package,
+                allowedRoles: ["customs_import_officer", "stock_control_admin"],
+            },
+            {
+                label: "Stock Control",
+                href: "/admin/stock-control",
+                icon: SlidersHorizontal,
+                allowedRoles: ["super_admin", "stock_control_admin", "stock_officer"],
             },
             {
                 label: "Supply Chain",
@@ -191,6 +248,8 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                     "stock_officer",
                     "audit_investigation_officer",
                     "product_traceability_officer",
+                    "tax_audit_officer",
+                    "revenue_investigator",
                     "director_executive",
                     "data_ai_analyst",
                 ],
@@ -199,7 +258,14 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 label: "Product Journey",
                 href: "/admin/product-journey",
                 icon: GitBranch,
-                allowedRoles: ["audit_officer", "stock_officer", "audit_investigation_officer", "product_traceability_officer"],
+                allowedRoles: [
+                    "audit_officer",
+                    "stock_officer",
+                    "audit_investigation_officer",
+                    "product_traceability_officer",
+                    "tax_audit_officer",
+                    "revenue_investigator",
+                ],
             },
             {
                 label: "Stock Overview",
@@ -208,8 +274,11 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 allowedRoles: [
                     "stock_officer",
                     "audit_officer",
+                    "correction_officer",
                     "product_traceability_officer",
                     "audit_investigation_officer",
+                    "tax_audit_officer",
+                    "revenue_investigator",
                 ],
             },
             {
@@ -219,11 +288,13 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 allowedRoles: [
                     "compliance_officer",
                     "audit_officer",
+                    "tax_audit_officer",
+                    "revenue_investigator",
                 ],
             },
         ],
     },
-    // ── Tax & Revenue ───────────────────────────────────────
+    // -- Tax & Revenue
     {
         label: "Tax & Revenue",
         items: [
@@ -232,8 +303,11 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 href: "/admin/tax",
                 icon: Receipt,
                 allowedRoles: [
+                    "super_admin",
                     "compliance_officer",
                     "reporting_officer",
+                    "tax_compliance_officer",
+                    "tax_audit_officer",
                     "payments_reconciliation_officer",
                 ],
             },
@@ -242,9 +316,11 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 href: "/admin/payments",
                 icon: CreditCard,
                 allowedRoles: [
+                    "super_admin",
                     "compliance_officer",
                     "audit_officer",
                     "reporting_officer",
+                    "tax_compliance_officer",
                     "payments_reconciliation_officer",
                 ],
             },
@@ -263,6 +339,7 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                     "reporting_officer",
                     "director_executive",
                     "data_ai_analyst",
+                    "tax_audit_officer",
                 ],
             },
             {
@@ -297,7 +374,7 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
             },
         ],
     },
-    // ── Enforcement ─────────────────────────────────────────
+    // -- Enforcement
     {
         label: "Enforcement",
         items: [
@@ -306,9 +383,12 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 href: "/admin/disputes",
                 icon: Scale,
                 allowedRoles: [
+                    "super_admin",
                     "compliance_officer",
                     "audit_officer",
-                    "data_ai_analyst",
+                    "tax_compliance_officer",
+                    "audit_investigation_officer",
+                    "tax_audit_officer",
                 ],
             },
             {
@@ -316,6 +396,7 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 href: "/admin/intelligence",
                 icon: Brain,
                 allowedRoles: [
+                    "super_admin",
                     "compliance_officer",
                     "audit_officer",
                     "data_ai_analyst",
@@ -325,35 +406,79 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                         label: "Intelligence Hub",
                         href: "/admin/intelligence",
                         icon: Brain,
-                        allowedRoles: ["compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer", "data_ai_analyst"],
+                        allowedRoles: [
+                            "compliance_officer",
+                            "audit_officer",
+                            "tax_compliance_officer",
+                            "audit_investigation_officer",
+                            "tax_audit_officer",
+                            "revenue_investigator",
+                            "data_ai_analyst",
+                        ],
                     },
                     {
                         label: "All Findings",
                         href: "/admin/intelligence/findings",
                         icon: Layers,
-                        allowedRoles: ["compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer", "data_ai_analyst"],
+                        allowedRoles: [
+                            "compliance_officer",
+                            "audit_officer",
+                            "tax_compliance_officer",
+                            "audit_investigation_officer",
+                            "tax_audit_officer",
+                            "revenue_investigator",
+                            "data_ai_analyst",
+                        ],
                     },
                     {
                         label: "Unregistered Taxpayers",
                         href: "/admin/intelligence/unregistered",
                         icon: UserSearch,
-                        allowedRoles: ["compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer"],
+                        allowedRoles: [
+                            "compliance_officer",
+                            "audit_officer",
+                            "tax_compliance_officer",
+                            "audit_investigation_officer",
+                            "tax_audit_officer",
+                            "revenue_investigator",
+                        ],
                     },
                     {
                         label: "AI Assistant",
                         href: "/admin/intelligence/assistant",
                         icon: Brain,
-                        allowedRoles: ["compliance_officer", "audit_officer", "stock_officer", "reporting_officer", "tax_compliance_officer", "audit_investigation_officer", "product_traceability_officer", "customs_import_officer", "payments_reconciliation_officer", "data_ai_analyst", "director_executive"],
+                        allowedRoles: [
+                            "compliance_officer",
+                            "audit_officer",
+                            "stock_officer",
+                            "reporting_officer",
+                            "tax_compliance_officer",
+                            "audit_investigation_officer",
+                            "product_traceability_officer",
+                            "customs_import_officer",
+                            "payments_reconciliation_officer",
+                            "data_ai_analyst",
+                            "director_executive",
+                        ],
                     },
                 ],
+            },
+            {
+                label: "AI Assistant",
+                href: "/admin/intelligence/assistant",
+                icon: Brain,
+                allowedRoles: ["correction_officer"],
             },
             {
                 label: "Anomaly Detection",
                 href: "/admin/anomalies",
                 icon: Activity,
                 allowedRoles: [
-                    "compliance_officer",
+                    "super_admin",
                     "audit_officer",
+                    "audit_investigation_officer",
+                    "tax_audit_officer",
+                    "revenue_investigator",
                 ],
             },
             {
@@ -361,15 +486,20 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 href: "/admin/vat-verification",
                 icon: TrendingUp,
                 allowedRoles: [
+                    "super_admin",
                     "compliance_officer",
                     "audit_officer",
+                    "tax_compliance_officer",
+                    "audit_investigation_officer",
+                    "tax_audit_officer",
+                    "revenue_investigator",
                 ],
             },
             {
                 label: "Compliance",
                 href: "/admin/compliance",
                 icon: Gavel,
-                allowedRoles: ["compliance_officer", "tax_compliance_officer"],
+                allowedRoles: ["super_admin", "compliance_officer", "tax_compliance_officer"],
             },
             {
                 label: "Compliance Alerts",
@@ -384,17 +514,29 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 allowedRoles: ["compliance_officer", "tax_compliance_officer"],
             },
             {
-                label: "Support Tickets",
-                href: "/admin/support",
-                icon: Ticket,
-                allowedRoles: ALL,
+                label: "Collection Accounts",
+                href: "/admin/payments/collection-accounts",
+                icon: Landmark,
+                allowedRoles: ["super_admin", "payments_reconciliation_officer", "tax_compliance_officer"],
+            },
+            {
+                label: "Messages",
+                href: "/admin/messages",
+                icon: MessageSquare,
+                allowedRoles: ["super_admin", "director_executive", "tax_compliance_officer", "audit_investigation_officer", "tax_audit_officer", "revenue_investigator", "taxpayer_support_officer", "product_traceability_officer", "customs_import_officer", "payments_reconciliation_officer", "compliance_officer", "audit_officer", "stock_officer", "correction_officer", "reporting_officer"],
             },
         ],
     },
-    // ── Administration ──────────────────────────────────────
+    // -- Administration
     {
         label: "Administration",
         items: [
+            {
+                label: "KPI Targets",
+                href: "/admin/kpi",
+                icon: Target,
+                allowedRoles: ["super_admin"],
+            },
             {
                 label: "Audit Trail",
                 href: "/admin/audit",
@@ -405,7 +547,12 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 label: "Data Exports",
                 href: "/admin/exports",
                 icon: Download,
-                allowedRoles: ["reporting_officer", "director_executive", "data_ai_analyst"],
+                allowedRoles: [
+                    "super_admin",
+                    "reporting_officer",
+                    "director_executive",
+                    "data_ai_analyst",
+                ],
             },
             {
                 label: "AI Feedback Review",
@@ -433,6 +580,57 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
             },
         ],
     },
+
+    // -- Super Admin Control Plane
+    {
+        label: "Super Admin",
+        items: [
+            {
+                label: "Control Plane",
+                href: "/admin/super",
+                icon: ShieldAlert,
+                allowedRoles: ["super_admin"],
+                children: [
+                    {
+                        label: "Overview",
+                        href: "/admin/super",
+                        icon: Eye,
+                        allowedRoles: ["super_admin"],
+                    },
+                    {
+                        label: "Admin Management",
+                        href: "/admin/super/admins",
+                        icon: UserCog,
+                        allowedRoles: ["super_admin"],
+                    },
+                    {
+                        label: "Security Center",
+                        href: "/admin/super/security",
+                        icon: Lock,
+                        allowedRoles: ["super_admin"],
+                    },
+                    {
+                        label: "System Health",
+                        href: "/admin/super/system",
+                        icon: Server,
+                        allowedRoles: ["super_admin"],
+                    },
+                    {
+                        label: "Top Taxpayers",
+                        href: "/admin/super/taxpayers",
+                        icon: TrendingUp,
+                        allowedRoles: ["super_admin"],
+                    },
+                    {
+                        label: "Audit Explorer",
+                        href: "/admin/super/audit",
+                        icon: Eye,
+                        allowedRoles: ["super_admin"],
+                    },
+                ],
+            },
+        ],
+    },
 ];
 
 // ---------------------------------------------------------------------------
@@ -441,34 +639,42 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
 
 /**
  * Filter sidebar groups by role.
- * Super Admin sees everything. Other roles see only their allowed items.
+ * Each role sees only explicitly allowed items; there is no implicit admin bypass.
  */
-export function getAdminSidebarGroups(role: string): AdminSidebarGroup[] {
-    // Super admin sees all items
-    if (role === "super_admin") {
-        return ADMIN_SIDEBAR_GROUPS.map((group) => ({
-            ...group,
-            items: group.items.map((item) => ({
-                ...item,
-                children: item.children,
-            })),
-        })).filter((group) => group.items.length > 0);
-    }
+export function getAdminSidebarGroups(roles: string | string[]): AdminSidebarGroup[] {
+    const assignedRoles = Array.isArray(roles) ? roles : [roles];
     return ADMIN_SIDEBAR_GROUPS.map((group) => ({
         ...group,
-        items: group.items.filter(
-            (item) => item.allowedRoles.includes(role as RRARole),
-        ).map((item) => ({
-            ...item,
-            children: item.children?.filter((child) => !child.allowedRoles || child.allowedRoles.includes(role as RRARole)),
-        })),
+        items: group.items
+            .filter((item) =>
+                assignedRoles.some((role) => item.allowedRoles.includes(role as RRARole))
+            )
+            .map((item) => ({
+                ...item,
+                children: item.children?.filter(
+                    (child) =>
+                        !child.allowedRoles ||
+                        assignedRoles.some((role) =>
+                            child.allowedRoles!.includes(role as RRARole)
+                        )
+                ),
+            })),
     })).filter((group) => group.items.length > 0);
 }
 
 /**
  * Flat list of all visible items for a role.
  */
-export function getAdminSidebarItems(role: string): AdminSidebarItem[] {
-    return getAdminSidebarGroups(role).flatMap((g) => g.items);
+export function getAdminSidebarItems(roles: string | string[]): AdminSidebarItem[] {
+    return getAdminSidebarGroups(roles).flatMap((g) => g.items);
 }
 
+/** Navigation destinations available to the supplied active TF role set. */
+export function getAdminNavigationLinks(roles: string | string[]): Array<{ label: string; href: string }> {
+    return getAdminSidebarGroups(roles).flatMap((group) =>
+        group.items.flatMap((item) => [
+            { label: item.label, href: item.href },
+            ...(item.children ?? []).map((child) => ({ label: child.label, href: child.href })),
+        ]),
+    );
+}

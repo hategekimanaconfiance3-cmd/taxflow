@@ -1,8 +1,8 @@
 "use server";
 
-import { sql, eq, desc } from "drizzle-orm";
+import { sql, eq } from "drizzle-orm";
 import db from "@/db/drizzle";
-import { user, vatRecord, transaction } from "@/db/schema";
+import { user, vatRecord } from "@/db/schema";
 import { requireRRASession } from "@/lib/auth-guard";
 import { sendNotificationToTrader } from "@/lib/actions/admin-notification.action";
 import { logAudit } from "@/lib/audit";
@@ -20,12 +20,25 @@ export type UnpaidTrader = {
     outstanding: number;
 };
 
+/**
+ * Roles authorized to view unpaid VAT and send payment reminders.
+ * Must exactly match the page guard at admin/payment-reminders/page.tsx.
+ */
+const REMINDER_ROLES = [
+    "compliance_officer",
+    "tax_compliance_officer",
+    "audit_officer",
+    "audit_investigation_officer",
+    "payments_reconciliation_officer",
+    "super_admin",
+] as const;
+
 // ---------------------------------------------------------------------------
 // Get traders with outstanding VAT
 // ---------------------------------------------------------------------------
 
 export async function getTradersWithUnpaidVat(): Promise<UnpaidTrader[]> {
-    await requireRRASession("compliance_officer");
+    await requireRRASession(...REMINDER_ROLES);
 
     // VAT due per business from vatRecord
     const vatDue = await db
@@ -39,7 +52,7 @@ export async function getTradersWithUnpaidVat(): Promise<UnpaidTrader[]> {
         .where(eq(vatRecord.isFrozen, false))
         .groupBy(vatRecord.businessId);
 
-    // Get trader details
+    // Merge with user info
     const traders = await db
         .select({
             id: user.id,
@@ -48,45 +61,42 @@ export async function getTradersWithUnpaidVat(): Promise<UnpaidTrader[]> {
             role: user.role,
         })
         .from(user)
-        .where(
-            sql`${user.role} IN ('manufacturer', 'wholesaler', 'retailer')`,
-        );
+        .where(sql`${user.role} IN ('manufacturer', 'wholesaler', 'retailer')`);
 
     const vatMap = new Map(vatDue.map((v) => [v.businessId, v.totalDue]));
 
-    const results: UnpaidTrader[] = traders
-        .map((t) => {
-            const totalDue = vatMap.get(t.id) ?? 0;
-            return {
+    const result: UnpaidTrader[] = [];
+    for (const t of traders) {
+        const totalVatDue = vatMap.get(t.id) ?? 0;
+        const outstanding = Math.max(0, totalVatDue);
+        if (outstanding > 0) {
+            result.push({
                 traderId: t.id,
-                traderName: t.businessName ?? t.name,
+                traderName: t.businessName ?? t.name ?? "—",
                 role: t.role ?? "unknown",
-                totalVatDue: totalDue > 0 ? totalDue : 0,
+                totalVatDue,
                 totalPaid: 0,
-                outstanding: totalDue > 0 ? totalDue : 0,
-            };
-        })
-        .filter((t) => t.outstanding > 0)
-        .sort((a, b) => b.outstanding - a.outstanding);
+                outstanding,
+            });
+        }
+    }
 
-    return results;
+    result.sort((a, b) => b.outstanding - a.outstanding);
+    return result;
 }
 
 // ---------------------------------------------------------------------------
-// Send payment reminder to a specific trader
+// Send a payment reminder to a single trader
 // ---------------------------------------------------------------------------
 
-export async function sendPaymentReminder(
-    traderId: string,
-    amount: number,
-) {
-    const { staff, ...session } = await requireRRASession("compliance_officer", "audit_officer");
+export async function sendPaymentReminder(traderId: string, amount: number) {
+    const { staff, ...session } = await requireRRASession(...REMINDER_ROLES);
 
     await sendNotificationToTrader(
         traderId,
-        "VAT Payment Reminder",
-        `You have an outstanding VAT balance of RWF ${amount.toLocaleString()}. Please make your payment promptly to avoid penalties.`,
-        "/dashboard/payments",
+        "Payment Reminder",
+        `You have an outstanding VAT balance of RWF ${amount.toLocaleString()}. Please settle your tax obligations promptly to remain compliant.`,
+        "/dashboard/tax",
     );
 
     await logAudit({
@@ -96,7 +106,7 @@ export async function sendPaymentReminder(
         targetId: traderId,
         metadata: {
             amount,
-            sentBy: staff.staffId,
+            sentBy: staff.id,
         },
     });
 
@@ -104,33 +114,37 @@ export async function sendPaymentReminder(
 }
 
 // ---------------------------------------------------------------------------
-// Send bulk reminders to all traders with outstanding VAT
+// Send payment reminders to all traders with outstanding VAT
 // ---------------------------------------------------------------------------
 
 export async function sendBulkPaymentReminders() {
-    const { staff, ...session } = await requireRRASession("super_admin");
+    const { staff, ...session } = await requireRRASession(...REMINDER_ROLES);
 
-    const unpaid = await getTradersWithUnpaidVat();
-
+    const traders = await getTradersWithUnpaidVat();
     let sent = 0;
-    for (const t of unpaid) {
-        await sendNotificationToTrader(
-            t.traderId,
-            "VAT Payment Reminder",
-            `You have an outstanding VAT balance of RWF ${t.outstanding.toLocaleString()}. Please make your payment to avoid penalties.`,
-            "/dashboard/payments",
-        );
-        sent++;
+
+    for (const trader of traders) {
+        try {
+            await sendNotificationToTrader(
+                trader.traderId,
+                "Payment Reminder",
+                `You have an outstanding VAT balance of RWF ${trader.outstanding.toLocaleString()}. Please settle your tax obligations promptly.`,
+                "/dashboard/tax",
+            );
+            sent++;
+        } catch {
+            // Continue with remaining traders if one notification fails.
+        }
     }
 
     await logAudit({
         userId: session.user.id,
         action: "BULK_PAYMENT_REMINDERS_SENT",
-        targetType: "system",
-        targetId: "all",
+        targetType: "user",
+        targetId: null,
         metadata: {
-            tradersNotified: sent,
-            sentBy: staff.staffId,
+            count: sent,
+            sentBy: staff.id,
         },
     });
 

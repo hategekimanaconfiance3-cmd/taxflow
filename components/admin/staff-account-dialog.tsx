@@ -7,10 +7,11 @@ import { Eye, EyeOff, Loader2, UserPlus, WandSparkles } from "lucide-react";
 import { createStaffAccount } from "@/lib/actions/admin-staff.action";
 import {
     staffAccountSchema,
+    ASSIGNABLE_STAFF_ROLE_OPTIONS,
     type StaffAccountFields,
     type StaffAccountInput,
+    type StaffAccountOutput,
 } from "@/lib/validation/staff.schema";
-import { RRA_ROLE_OPTIONS } from "@/lib/rra-rbac";
 import { Button } from "@/components/ui/button";
 import {
     Dialog,
@@ -23,14 +24,6 @@ import {
 } from "@/components/ui/dialog";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import {
-    Select,
-    SelectContent,
-    SelectGroup,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select";
 
 type Props = {
     onNotice: (message: string, kind: "success" | "error") => void;
@@ -69,14 +62,14 @@ function generatePassword(): string {
 export function StaffAccountDialog({ onNotice, onCreated }: Props) {
     const [open, setOpen] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
-    const form = useForm<StaffAccountInput>({
+    const form = useForm<StaffAccountInput, unknown, StaffAccountOutput>({
         resolver: zodResolver(staffAccountSchema),
         defaultValues: {
             fullName: "",
             email: "",
             staffId: "",
             department: "",
-            clearanceLevel: "tax_compliance_officer",
+            roles: ["tax_compliance_officer"],
             password: "",
             confirmPassword: "",
         },
@@ -97,7 +90,7 @@ export function StaffAccountDialog({ onNotice, onCreated }: Props) {
         setShowPassword(true);
     }
 
-    async function onSubmit(values: StaffAccountInput): Promise<void> {
+    async function onSubmit(values: StaffAccountOutput): Promise<void> {
         const result = await createStaffAccount(values);
         if (!result.success) {
             for (const field of Object.keys(result.fieldErrors ?? {}) as StaffAccountFields[]) {
@@ -125,7 +118,7 @@ export function StaffAccountDialog({ onNotice, onCreated }: Props) {
                 <DialogHeader>
                     <DialogTitle>Add staff member</DialogTitle>
                     <DialogDescription>
-                        Create an RRA login. The staff member can sign in with the Staff ID and password below.
+                        Create a TF login. The staff member can sign in with the Staff ID and password below.
                     </DialogDescription>
                 </DialogHeader>
 
@@ -160,21 +153,23 @@ export function StaffAccountDialog({ onNotice, onCreated }: Props) {
                                     <FormMessage />
                                 </FormItem>
                             )} />
-                            <FormField control={form.control} name="clearanceLevel" render={({ field }) => (
+                            <FormField control={form.control} name="roles" render={({ field }) => (
                                 <FormItem className="sm:col-span-2">
-                                    <FormLabel>Staff role</FormLabel>
-                                    <Select onValueChange={field.onChange} value={field.value}>
-                                        <FormControl>
-                                            <SelectTrigger className="w-full"><SelectValue placeholder="Choose a role" /></SelectTrigger>
-                                        </FormControl>
-                                        <SelectContent>
-                                            <SelectGroup>
-                                                {RRA_ROLE_OPTIONS.map((role) => (
-                                                    <SelectItem key={role.value} value={role.value}>{role.label}</SelectItem>
-                                                ))}
-                                            </SelectGroup>
-                                        </SelectContent>
-                                    </Select>
+                                    <FormLabel>Staff role assignments</FormLabel>
+                                    <div className="space-y-2">
+                                        {ASSIGNABLE_STAFF_ROLE_OPTIONS.map((role) => (
+                                            <label key={role.value} className="flex cursor-pointer items-start gap-3 rounded-md border p-3 hover:bg-muted/50">
+                                                <input type="checkbox" className="mt-1 size-4 accent-primary" checked={field.value.includes(role.value)}
+                                                    onChange={(event) => {
+                                                        const checked = event.target.checked;
+                                                        if (role.value === "super_admin" && checked) field.onChange([role.value]);
+                                                        else if (field.value.includes("super_admin")) field.onChange(checked ? [role.value] : []);
+                                                        else field.onChange(checked ? [...field.value, role.value] : field.value.filter((value) => value !== role.value));
+                                                    }} />
+                                                <span><span className="text-sm font-medium">{role.label}</span><span className="mt-0.5 block text-xs text-muted-foreground">{role.permissions}</span></span>
+                                            </label>
+                                        ))}
+                                    </div>
                                     <FormMessage />
                                 </FormItem>
                             )} />

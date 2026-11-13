@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
-import { eq } from "drizzle-orm";
+import { get } from "@vercel/blob";
+import { and, eq, inArray } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import db from "@/db/drizzle";
-import { importDeclaration, rraStaff } from "@/db/schema";
-import { getImportUploadDirectory, isImportFilenameForDeclaration } from "@/lib/import-files";
+import { importDeclaration, rraStaff, rraStaffRole } from "@/db/schema";
+import { importBlobPathname, isImportFilenameForDeclaration } from "@/lib/import-files";
 
 export const runtime = "nodejs";
 
@@ -29,17 +28,24 @@ export async function GET(
   let hasAccess = declaration.businessId === session.user.id;
   if (!hasAccess) {
     const [staff] = await db
-      .select({ clearanceLevel: rraStaff.clearanceLevel, isActive: rraStaff.isActive })
-      .from(rraStaff)
-      .where(eq(rraStaff.userId, session.user.id))
+      .select({ id: rraStaff.id })
+      .from(rraStaffRole)
+      .innerJoin(rraStaff, eq(rraStaffRole.staffRecordId, rraStaff.id))
+      .where(and(eq(rraStaff.userId, session.user.id), eq(rraStaff.isActive, true), inArray(rraStaffRole.role, ["super_admin", "customs_import_officer", "compliance_officer", "audit_officer"])))
       .limit(1);
-    hasAccess = Boolean(staff?.isActive && ["super_admin", "compliance_officer", "audit_officer"].includes(staff.clearanceLevel));
+    hasAccess = Boolean(staff);
   }
   if (!hasAccess) return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
 
   try {
-    const file = await readFile(join(getImportUploadDirectory(), filename));
-    return new NextResponse(new Uint8Array(file), {
+    if (!isImportFilenameForDeclaration(filename, declaration.id)) {
+      return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
+    }
+    const file = await get(importBlobPathname(filename), { access: "private" });
+    if (!file || file.statusCode !== 200 || !file.stream || file.blob.contentType !== "application/pdf") {
+      return NextResponse.json({ error: "Invoice file is unavailable" }, { status: 404 });
+    }
+    return new NextResponse(file.stream, {
       headers: {
         "Content-Type": "application/pdf",
         "Content-Disposition": 'inline; filename="import-invoice.pdf"',

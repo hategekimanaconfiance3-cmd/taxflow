@@ -1,4 +1,4 @@
-"use server";
+﻿"use server";
 
 import { sql, eq, desc, not, inArray } from "drizzle-orm";
 import db from "@/db/drizzle";
@@ -65,7 +65,7 @@ export type RegistrationTimeliness = {
  * without being in the system.
  */
 export async function getUnregisteredBuyers(): Promise<UnregisteredBuyer[]> {
-    await requireRRASession("compliance_officer", "audit_officer");
+    await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer", "tax_audit_officer", "revenue_investigator");
 
     const results = await db
         .select({
@@ -148,7 +148,7 @@ export async function getUnregisteredBuyers(): Promise<UnregisteredBuyer[]> {
  * signed up on TaxFlow — these are unregistered businesses that owe tax.
  */
 export async function getGhostTaxpayers(limit = 50): Promise<GhostTaxpayer[]> {
-    await requireRRASession("compliance_officer", "audit_officer");
+    await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer", "tax_audit_officer", "revenue_investigator");
 
     // Get all TIN numbers that ARE registered in TaxFlow
     const registeredTins = await db
@@ -196,11 +196,11 @@ export async function getGhostTaxpayers(limit = 50): Promise<GhostTaxpayer[]> {
 
 /**
  * Return traders who signed up but have clearanceStatus = 'pending'.
- * These need RRA staff to review and approve (or reject) before they can trade.
+ * These need TF staff to review and approve (or reject) before they can trade.
  * Sorted by days pending descending — longest-waiting first.
  */
 export async function getPendingApprovals(): Promise<PendingApproval[]> {
-    await requireRRASession("compliance_officer", "audit_officer");
+    await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer", "tax_audit_officer", "revenue_investigator");
 
     const pending = await db
         .select({
@@ -242,7 +242,7 @@ export async function getPendingApprovals(): Promise<PendingApproval[]> {
  * Large gaps suggest delayed registration. No transaction = never traded.
  */
 export async function getRegistrationTimeliness(): Promise<RegistrationTimeliness[]> {
-    await requireRRASession("compliance_officer", "audit_officer");
+    await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer", "tax_audit_officer", "revenue_investigator");
 
     const traders = await db
         .select({

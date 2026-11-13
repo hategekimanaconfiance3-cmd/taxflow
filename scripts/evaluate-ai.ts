@@ -32,7 +32,7 @@ function buildEvaluationTools(evaluationCase: AIEvaluationCase): ToolSet {
     case "explainVat":
       return {
         explainVat: tool({
-          description: "Explain the configured TaxFlow VAT calculation. This tool cannot verify official RRA law or filing deadlines.",
+          description: "Explain the configured TaxFlow VAT calculation. This tool cannot verify official TF law or filing deadlines.",
           inputSchema: z.object({ includeBreakdown: z.boolean().default(false) }),
           execute: async () => result,
         }),

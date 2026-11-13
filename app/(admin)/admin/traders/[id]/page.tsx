@@ -1,107 +1,80 @@
-import { requireRRASession } from '@/lib/auth-guard';
-import { getTrader } from '@/lib/actions/admin.action';
-import { TraderRiskPanel } from '@/components/admin/trader-risk-panel';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Building2, User, Hash, Phone, Calendar } from 'lucide-react';
 import { notFound } from 'next/navigation';
+import Link from 'next/link';
+import { ArrowLeft, Store } from 'lucide-react';
+import { getMerchantProfileById } from '@/lib/actions/merchant-profile.action';
+import { MerchantProfileTabs } from '@/components/admin/merchant-profile-tabs';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 
 export default async function AdminTraderDetailPage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
-  await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
   const { id } = await params;
 
-  let trader;
+  // getMerchantProfileById handles its own auth (requireRRAPermission inside).
+  // NEXT_REDIRECT from the auth guard is a non-Error throw — re-throw so Next.js
+  // handles the redirect correctly.
+  let data;
   try {
-    trader = await getTrader(id);
-  } catch {
-    notFound();
+    data = await getMerchantProfileById(id);
+  } catch (err) {
+    if (err instanceof Error) throw err;
+    throw err; // NEXT_REDIRECT passthrough
   }
 
-  const clearanceColors: Record<string, string> = {
-    approved: 'bg-emerald-100 text-emerald-700',
-    under_review: 'bg-amber-100 text-amber-700',
-    suspended: 'bg-red-100 text-red-700',
-    flagged: 'bg-orange-100 text-orange-700',
-  };
+  if (!data) notFound();
+
+  const { profile } = data;
+  const displayName = profile.businessName ?? profile.name;
 
   return (
     <div className="space-y-6">
+      {/* Back navigation */}
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">
-          {trader.businessName ?? trader.name}
-        </h1>
-        <p className="text-muted-foreground text-sm mt-1">Trader profile and compliance overview</p>
+        <Button variant="ghost" size="sm" asChild className="h-8 gap-1.5 text-xs">
+          <Link href="/admin/traders">
+            <ArrowLeft className="h-3.5 w-3.5" />
+            Back to search
+          </Link>
+        </Button>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        {/* Trader info card */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base font-semibold flex items-center gap-2">
-              <Building2 className="h-4 w-4" />
-              Trader Information
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="grid grid-cols-2 gap-3 text-sm">
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <User className="h-3.5 w-3.5" />
-                <span>Name</span>
-              </div>
-              <span className="font-medium">{trader.name}</span>
-
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Building2 className="h-3.5 w-3.5" />
-                <span>Business</span>
-              </div>
-              <span className="font-medium">{trader.businessName ?? '—'}</span>
-
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Hash className="h-3.5 w-3.5" />
-                <span>TIN</span>
-              </div>
-              <span className="font-mono text-xs">{trader.tinNumber ?? '—'}</span>
-
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Phone className="h-3.5 w-3.5" />
-                <span>Phone</span>
-              </div>
-              <span>{trader.phoneNumber ?? '—'}</span>
-
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Calendar className="h-3.5 w-3.5" />
-                <span>Registered</span>
-              </div>
-              <span>
-                {trader.createdAt
-                  ? new Date(trader.createdAt).toLocaleDateString()
-                  : '—'}
-              </span>
+      {/* Page header */}
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg border bg-muted shrink-0">
+            <Store className="h-5 w-5 text-muted-foreground" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">{displayName}</h1>
+            <div className="flex items-center gap-2 mt-1 flex-wrap">
+              {profile.tinNumber && (
+                <span className="font-mono text-xs text-muted-foreground">
+                  TIN: {profile.tinNumber}
+                </span>
+              )}
+              {profile.role && (
+                <Badge variant="outline" className="capitalize text-[10px]">
+                  {profile.role}
+                </Badge>
+              )}
+              {profile.clearanceStatus && (
+                <Badge variant="secondary" className="capitalize text-[10px]">
+                  {profile.clearanceStatus.replace(/_/g, ' ')}
+                </Badge>
+              )}
             </div>
-
-            <div className="flex items-center gap-3 pt-2 border-t">
-              <Badge variant="outline" className="capitalize">
-                {trader.role ?? 'unknown'}
-              </Badge>
-              <Badge
-                variant="secondary"
-                className={`capitalize ${
-                  clearanceColors[trader.clearanceStatus ?? ''] ?? 'bg-muted text-muted-foreground'
-                }`}
-              >
-                {trader.clearanceStatus ?? 'unknown'}
-              </Badge>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Risk breakdown */}
-        <TraderRiskPanel />
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground hidden sm:block">
+          Information shown is scoped to your authorised TF role.
+        </p>
       </div>
+
+      {/* Full merchant profile — tabs are determined server-side by permissions */}
+      <MerchantProfileTabs data={data} />
     </div>
   );
 }

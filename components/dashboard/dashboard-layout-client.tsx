@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
+import { createContext, Fragment, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
 import { DashboardSidebar } from '@/components/dashboard/sidebar/sidebar';
 import { DashboardTopbar } from '@/components/dashboard/topbar/topbar';
 import { Button } from '@/components/ui/button';
@@ -26,18 +26,21 @@ const AI_PANEL_W = 420;
 const SUGGESTIONS: Record<string, string[]> = {
   manufacturer: [
     'Show my recent sales',
+    'How can I improve my profit?',
     "What's my current stock?",
     'What is my tax status?',
     'How do I sell to a wholesaler?',
   ],
   wholesaler: [
     'Show my recent purchases',
+    'How can I improve my profit?',
     "What's my current inventory?",
     'How much VAT do I owe?',
     'How do I confirm a transaction?',
   ],
   retailer: [
     'Show my recent sales',
+    'How can I improve my profit?',
     "What's my current stock?",
     'Why is my VAT higher this month?',
     'How do I file a dispute?',
@@ -111,7 +114,7 @@ export function LangSelector({ value, onChange }: { value: LangCode; onChange: (
 function AIPanel({ onClose, role }: { onClose: () => void; role: TraderRole }) {
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const { messages, sendMessage, status, setMessages } = useChat({
+  const { messages, sendMessage, status, error, setMessages } = useChat({
     transport: new DefaultChatTransport({ api: '/api/ai/query' }),
   });
   const isLoading = status === 'streaming' || status === 'submitted';
@@ -157,15 +160,16 @@ function AIPanel({ onClose, role }: { onClose: () => void; role: TraderRole }) {
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+      <div className="border-b bg-muted/20 px-4 py-2 text-[10px] text-muted-foreground">AI responses are informational and read-only. Verify important information before acting.</div>
+      <div className="min-h-0 flex-1 overflow-y-auto p-4 space-y-3">
         {messages.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-5 pb-8">
             <div className="flex h-14 w-14 items-center justify-center rounded-2xl border bg-gradient-to-br from-blue-500/10 to-violet-500/10">
               <Sparkles className="h-7 w-7 text-blue-500" />
             </div>
             <div className="text-center space-y-1">
-              <p className="text-sm font-semibold">Ask about your taxes &amp; business</p>
-              <p className="text-xs text-muted-foreground">Get instant answers about compliance &amp; stock</p>
+              <p className="text-sm font-semibold">Ask about your business</p>
+              <p className="text-xs text-muted-foreground">Get advice on sales, profit, stock, operations, and TaxFlow</p>
             </div>
             <div className="w-full space-y-1.5">
               {suggestions.map((s) => (
@@ -208,13 +212,21 @@ function AIPanel({ onClose, role }: { onClose: () => void; role: TraderRole }) {
                       <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/60 animate-bounce [animation-delay:150ms]" />
                       <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/60 animate-bounce [animation-delay:300ms]" />
                     </div>
-                  ) : (
-                    <p className="whitespace-pre-wrap leading-relaxed">{content}</p>
+                    ) : (
+                    <p className="whitespace-pre-wrap leading-relaxed">{renderAssistantMarkdown(content)}</p>
                   )}
                 </div>
               </div>
             );
           })
+        )}
+        {status === 'error' && (
+          <div
+            role="alert"
+            className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive"
+          >
+            {error?.message || 'The AI assistant could not respond. Please try again in a moment.'}
+          </div>
         )}
         <div ref={messagesEndRef} />
       </div>
@@ -225,7 +237,7 @@ function AIPanel({ onClose, role }: { onClose: () => void; role: TraderRole }) {
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Ask a question…"
+            placeholder="Ask about your business…"
             disabled={isLoading}
             className="flex-1 bg-transparent text-[13px] outline-none placeholder:text-muted-foreground/60 disabled:opacity-50"
           />
@@ -245,6 +257,31 @@ function AIPanel({ onClose, role }: { onClose: () => void; role: TraderRole }) {
       </div>
     </div>
   );
+}
+
+function renderAssistantMarkdown(text: string) {
+  return text.split('\n').map((line, lineIndex) => {
+    const normalizedLine = line.replace(/^\s*[*-]\s+(?=\*\*)/, '• ');
+    const parts = normalizedLine.split(/(\*\*[^*]+\*\*|`[^`]+`|\*[^*]+\*)/g);
+
+    return (
+      <Fragment key={`line-${lineIndex}`}>
+        {parts.map((part, partIndex) => {
+          if (part.startsWith('**') && part.endsWith('**')) {
+            return <strong key={partIndex}>{part.slice(2, -2)}</strong>;
+          }
+          if (part.startsWith('`') && part.endsWith('`')) {
+            return <code key={partIndex} className="rounded bg-background/70 px-1 font-mono text-[0.95em]">{part.slice(1, -1)}</code>;
+          }
+          if (part.startsWith('*') && part.endsWith('*')) {
+            return <em key={partIndex}>{part.slice(1, -1)}</em>;
+          }
+          return <Fragment key={partIndex}>{part}</Fragment>;
+        })}
+        {lineIndex < text.split('\n').length - 1 && <br />}
+      </Fragment>
+    );
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -306,25 +343,28 @@ export function DashboardLayoutClient({
     <DashboardLayoutContext.Provider
       value={{ isSidebarCollapsed, isAiOpen, lang, sidebarW, openAI, closeAI, expandSidebar, setLang }}
     >
-      <DashboardSidebar role={role} businessName={businessName} userName={userName} />
+      <div className="print:hidden">
+        <DashboardSidebar role={role} businessName={businessName} userName={userName} />
+      </div>
 
       <div
-        className="flex min-h-screen flex-col transition-[padding] duration-300"
+        className="flex min-h-screen min-w-0 flex-col transition-[padding] duration-300 lg:pl-[var(--sidebar-width)] xl:pr-[var(--ai-panel-width)] print:!pl-0 print:!pr-0"
         style={{
-          paddingLeft: `${sidebarW}px`,
-          paddingRight: isAiOpen ? `${AI_PANEL_W}px` : '0px',
-        }}
+          '--sidebar-width': `${sidebarW}px`,
+          '--ai-panel-width': isAiOpen ? `${AI_PANEL_W}px` : '0px',
+        } as React.CSSProperties}
       >
-        <DashboardTopbar role={role} userName={userName} businessName={businessName} userId={userId} />
-        <main className="flex-1">
-          <div className="p-6">{children}</div>
+        <div className="print:hidden">
+          <DashboardTopbar role={role} businessName={businessName} userId={userId} />
+        </div>
+        <main className="min-w-0 flex-1">
+          <div className="min-w-0 p-3 sm:p-4 lg:p-6 print:p-0">{children}</div>
         </main>
       </div>
 
       {isAiOpen && (
         <div
-          className="fixed top-0 right-0 bottom-0 z-40 flex flex-col border-l bg-background shadow-2xl animate-in slide-in-from-right-4 fade-in duration-200"
-          style={{ width: AI_PANEL_W }}
+          className="fixed inset-0 z-40 flex w-full max-w-full flex-col border-l bg-background shadow-2xl animate-in slide-in-from-right-4 fade-in duration-200 print:hidden sm:inset-y-0 sm:left-auto sm:right-0 sm:w-[420px] lg:w-[420px]"
         >
           <AIPanel onClose={closeAI} role={role} />
         </div>

@@ -13,15 +13,23 @@ import {
 import { Bell } from 'lucide-react';
 import { formatRWF } from '@/components/dashboard/stat-card/stat-card';
 
+/**
+ * Roles that can view unpaid-VAT data and send reminders.
+ * Must match REMINDER_ROLES in admin-payment-reminder.action.ts so the
+ * action's inner requireRRASession never triggers a redirect during SC render.
+ */
 export default async function AdminPaymentRemindersPage() {
-  await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "payments_reconciliation_officer");
+  await requireRRASession(
+    "compliance_officer",
+    "audit_officer",
+    "tax_compliance_officer",
+    "audit_investigation_officer",
+    "payments_reconciliation_officer",
+  );
 
-  let traders: Awaited<ReturnType<typeof getTradersWithUnpaidVat>> = [];
-  try {
-    traders = await getTradersWithUnpaidVat();
-  } catch {
-    // Insufficient permissions
-  }
+  // Role sets match — no try/catch needed. If the DB call fails it should
+  // surface as an error boundary, not silently show an empty table.
+  const traders = await getTradersWithUnpaidVat();
 
   return (
     <div className="space-y-6">
@@ -60,7 +68,7 @@ export default async function AdminPaymentRemindersPage() {
               {traders.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={6} className="text-center py-8 text-muted-foreground text-sm">
-                    No traders with outstanding VAT, or access requires compliance officer role.
+                    No traders with outstanding VAT balances.
                   </TableCell>
                 </TableRow>
               )}

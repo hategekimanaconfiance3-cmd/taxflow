@@ -48,37 +48,63 @@ export function AdminLoginForm() {
   const onSubmit = async (values: AdminLoginValues) => {
     setServerError(null);
 
-    await authClient.signIn.username(
-      { username: values.staffId, password: values.password },
-      {
-        onSuccess: async () => {
-          const result = await verifyRRAStaff();
+    // Usernames are stored lowercase in the database (e.g. "sa-001" not "SA-001")
+    const normalizedUsername = values.staffId.trim().toLowerCase();
 
-          if (!result.success) {
-            await authClient.signOut();
-            setServerError(result.error);
-            return;
-          }
+    try {
+      await authClient.signIn.username(
+        { username: normalizedUsername, password: values.password },
+        {
+          onSuccess: async () => {
+            try {
+              const result = await verifyRRAStaff();
 
-          router.push('/admin/dashboard');
+              if (!result.success) {
+                await authClient.signOut();
+                setServerError(
+                  result.error ?? 'Staff verification failed. Please contact your administrator.',
+                );
+                return;
+              }
+
+              router.push('/admin/dashboard');
+            } catch {
+              // verifyRRAStaff threw — sign out and show a safe message
+              await authClient.signOut();
+              setServerError('Staff verification failed. Please try again.');
+            }
+          },
+          onError: (ctx: { error: { message: string } }) => {
+            const msg = ctx.error?.message ?? '';
+            if (
+              msg.toLowerCase().includes('rate limit') ||
+              msg.toLowerCase().includes('too many')
+            ) {
+              setServerError('Too many login attempts. Please wait 60 seconds and try again.');
+            } else {
+              setServerError('Invalid Staff ID or password.');
+            }
+          },
         },
-        onError: (ctx: { error: { message: string } }) => {
-          setServerError(ctx.error.message);
-        },
-      },
-    );
+      );
+    } catch {
+      // Network error or misconfigured API URL — the request never reached the server
+      setServerError(
+        'Unable to reach the authentication service. Please check your connection and try again.',
+      );
+    }
   };
 
   return (
     <div className="flex w-full flex-col items-center justify-center">
       <Card className="w-full overflow-hidden rounded-xl border border-gray-200 shadow-md">
-        {/* ── Card Header: RRA badge + title ─────────────────── */}
+        {/* ── Card Header: TF badge + title ─────────────────── */}
         <div className="border-b border-gray-100 bg-white px-8 py-5 text-center space-y-3">
           <div className="flex items-center justify-center gap-2">
             <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gray-900">
               <ShieldCheck className="h-5 w-5 text-white" />
             </div>
-            <span className="text-sm font-bold tracking-widest text-gray-900 uppercase">RRA Staff Portal</span>
+            <span className="text-sm font-bold tracking-widest text-gray-900 uppercase">TF Staff Portal</span>
           </div>
           <p className="text-sm font-medium text-gray-500 tracking-wide">Authorized personnel only</p>
         </div>
@@ -159,12 +185,12 @@ export function AdminLoginForm() {
           <div className="space-y-3 pt-1">
             <div className="flex items-center gap-2 justify-center">
               <span className="h-px flex-1 bg-gray-100" />
-              <span className="text-xs text-gray-400 font-medium">RRA Internal</span>
+              <span className="text-xs text-gray-400 font-medium">TF Internal</span>
               <span className="h-px flex-1 bg-gray-100" />
             </div>
 
             <p className="text-center text-xs text-gray-400 leading-relaxed">
-              This portal is for authorized Rwanda Revenue Authority staff.
+              This portal is for authorized TaxFlow Authority staff.
               <br />
               Unauthorized access is strictly prohibited.
             </p>

@@ -2,11 +2,12 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useChat } from "@ai-sdk/react";
-import { DefaultChatTransport, lastAssistantMessageIsCompleteWithApprovalResponses } from "ai";
+import { DefaultChatTransport } from "ai";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { AIFeedbackControl } from "@/components/admin/ai-feedback-control";
+import type { RRAAIToolName } from "@/lib/ai/rra-tool-access";
 import {
     Brain,
     Send,
@@ -14,30 +15,39 @@ import {
     User,
     Sparkles,
     RotateCcw,
-    Check,
-    X,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
-// RRA Intelligence Chat — Natural language interface for tax officers
+// TF Intelligence Chat — Natural language interface for tax officers
 // ---------------------------------------------------------------------------
 
-const SUGGESTED_QUERIES = [
-    "Show me all traders in Gasabo district",
-    "What is the risk score for TIN 100000001?",
-    "Give me the revenue forecast for the last 6 months",
-    "Show system-wide statistics overview",
-    "Check stock levels for TIN 100000002",
-    "What is the tax compliance status for TIN 100000003?",
-];
+const SUGGESTIONS_BY_TOOL: Partial<Record<RRAAIToolName, string>> = {
+    getTaxpayerIntelligence: "Summarize the authorized records for TIN 100000001",
+    lookupTrader: "Find the taxpayer with TIN 100000001",
+    searchTraders: "Find registered manufacturers",
+    getTransactions: "Show today's transactions",
+    getStockLevels: "Show current stock for TIN 100000001",
+    getStockMovements: "Why did stock change for TIN 100000001?",
+    getTaxStatus: "Explain the tax status for TIN 100000001",
+    getRiskAssessment: "Show potential risk indicators for TIN 100000001",
+    getRevenueForecastTool: "Compare the revenue forecast with recent results",
+    getSystemStats: "Summarize current system statistics",
+    getBehavioralAnalysis: "Explain recent activity patterns for TIN 100000001",
+    traceSupplyChain: "Trace the supply chain for Cement",
+    traceProductJourney: "Trace the recorded journey for Cement",
+    getImportDeclarations: "Find import declarations for customs reference CUS-2026-0104",
+};
 
-export function IntelligenceChat() {
+export function IntelligenceChat({ authorizedTools }: { authorizedTools: readonly RRAAIToolName[] }) {
     const [input, setInput] = useState("");
     const messagesEndRef = useRef<HTMLDivElement>(null);
+    const suggestedQueries = [...new Set(authorizedTools.flatMap((toolName) => {
+        const suggestion = SUGGESTIONS_BY_TOOL[toolName];
+        return suggestion ? [suggestion] : [];
+    }))].slice(0, 6);
 
-    const { messages, sendMessage, status, setMessages, addToolApprovalResponse, error } = useChat({
+    const { messages, sendMessage, status, setMessages, error } = useChat({
         transport: new DefaultChatTransport({ api: "/api/ai/query" }),
-        sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
     });
 
     const isLoading = status === "streaming" || status === "submitted";
@@ -64,10 +74,11 @@ export function IntelligenceChat() {
                 <CardTitle className="text-base font-semibold flex items-center gap-2">
                     <Brain className="h-4 w-4" />
                     Taxflow AI Intelligence
-                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400 font-medium">
-                        Powered by Qwen 2.5
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400 font-medium">
+                        Role-aware · Read-only
                     </span>
                 </CardTitle>
+                <p className="mt-2 text-xs text-muted-foreground">AI findings are advisory and require human review. Only authorized TF employees make official decisions; the assistant cannot execute them.</p>
             </CardHeader>
 
             <CardContent className="flex-1 overflow-y-auto p-4 space-y-4">
@@ -79,14 +90,14 @@ export function IntelligenceChat() {
                         </div>
                         <div className="text-center space-y-2">
                             <h3 className="font-semibold text-lg">
-                                Ask anything about your tax data
+                                Ask about authorized TaxFlow data or workflows
                             </h3>
                             <p className="text-sm text-muted-foreground max-w-md">
-                                Query traders, transactions, risk scores, stock levels, tax compliance, and revenue forecasts using natural language.
+                                Your verified TF permissions control which records the assistant can search.
                             </p>
                         </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-w-lg w-full">
-                            {SUGGESTED_QUERIES.map((q) => (
+                        {suggestedQueries.length > 0 && <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-w-lg w-full">
+                            {suggestedQueries.map((q) => (
                                 <button
                                     key={q}
                                     onClick={() => handleSuggestion(q)}
@@ -95,7 +106,7 @@ export function IntelligenceChat() {
                                     {q}
                                 </button>
                             ))}
-                        </div>
+                        </div>}
                     </div>
                 )}
 
@@ -129,36 +140,7 @@ export function IntelligenceChat() {
                                         />
                                     );
                                 }
-                                if (part.type.startsWith("tool-")) {
-                                    const toolPart = part as typeof part & {
-                                        state?: string;
-                                        input?: unknown;
-                                        output?: unknown;
-                                        approval?: { id: string; approved?: boolean };
-                                    };
-                                    if (toolPart.state === "approval-requested" && toolPart.approval?.id) {
-                                        return (
-                                            <div key={`${msg.id}-${i}`} className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-amber-950 dark:bg-amber-950/30 dark:text-amber-100">
-                                                <p className="font-semibold">Officer approval required: {part.type.replace("tool-", "")}</p>
-                                                <pre className="my-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs">{JSON.stringify(toolPart.input, null, 2)}</pre>
-                                                <div className="flex gap-2">
-                                                    <Button size="sm" onClick={() => addToolApprovalResponse({ id: toolPart.approval!.id, approved: true })}>
-                                                        <Check className="mr-1 h-3.5 w-3.5" /> Approve action
-                                                    </Button>
-                                                    <Button size="sm" variant="outline" onClick={() => addToolApprovalResponse({ id: toolPart.approval!.id, approved: false })}>
-                                                        <X className="mr-1 h-3.5 w-3.5" /> Reject
-                                                    </Button>
-                                                </div>
-                                            </div>
-                                        );
-                                    }
-                                    if (toolPart.state === "output-available") {
-                                        return <pre key={`${msg.id}-${i}`} className="mt-2 whitespace-pre-wrap break-words text-xs">{JSON.stringify(toolPart.output, null, 2)}</pre>;
-                                    }
-                                    if (toolPart.state === "output-denied") {
-                                        return <p key={`${msg.id}-${i}`} className="mt-2 text-xs text-muted-foreground">Action rejected. No action was taken.</p>;
-                                    }
-                                }
+                                if (part.type.startsWith("tool-")) return null;
                                 return null;
                             })}
                             {msg.role === "assistant" && status === "ready" && msg.parts.some((part) => part.type === "text") && (

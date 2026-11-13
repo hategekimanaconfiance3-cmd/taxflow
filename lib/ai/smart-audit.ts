@@ -20,7 +20,7 @@ export interface AuditRecommendation {
     tinNumber: string | null;
     district: string | null;
     riskScore: number;
-    riskLevel: RiskScore["level"];
+    riskLevel: Exclude<RiskScore["level"], "unavailable">;
     estimatedTaxGap: number;
     priority: number;            // 1–100 composite priority
     reasons: string[];
@@ -41,6 +41,11 @@ export interface AuditPlan {
     computedAt: Date;
 }
 
+type ActionableRiskScore = RiskScore & {
+    score: number;
+    level: Exclude<RiskScore["level"], "unavailable">;
+};
+
 /**
  * Generate AI-driven audit recommendations.
  * Takes top risk-scored merchants, groups by district, and ranks by composite priority.
@@ -53,7 +58,7 @@ export async function getAuditRecommendations(
 
     // 2. Filter to actionable risk levels (medium+)
     const actionable = riskScores.filter(
-        (s) => s.level === "critical" || s.level === "high" || s.level === "medium",
+        (s): s is ActionableRiskScore => s.score !== null && (s.level === "critical" || s.level === "high" || s.level === "medium"),
     ).slice(0, topN);
 
     if (actionable.length === 0) {
@@ -111,7 +116,7 @@ export async function getAuditRecommendations(
 
         const reasons: string[] = [];
         for (const f of score.factors) {
-            if (f.value >= 25) {
+            if (f.value !== null && f.value >= 25) {
                 reasons.push(`${f.signal}: ${f.description}`);
             }
         }

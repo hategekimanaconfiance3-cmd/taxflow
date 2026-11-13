@@ -36,6 +36,7 @@ const SUGGESTIONS: Record<string, string[]> = {
     ],
     manufacturer: [
         "Show my recent sales",
+        "How can I improve my profit?",
         "What's my current stock?",
         "How is VAT calculated?",
         "What is my tax status?",
@@ -44,6 +45,7 @@ const SUGGESTIONS: Record<string, string[]> = {
     ],
     wholesaler: [
         "Show my recent purchases",
+        "How can I improve my profit?",
         "What's my current inventory?",
         "How much VAT do I owe?",
         "Show my sales this week",
@@ -52,6 +54,7 @@ const SUGGESTIONS: Record<string, string[]> = {
     ],
     retailer: [
         "Show my recent sales",
+        "How can I improve my profit?",
         "What's my current stock?",
         "Why is my VAT higher this month?",
         "How do I record a sale?",
@@ -65,7 +68,7 @@ export function AIChatWidget({ role }: AIChatWidgetProps) {
     const [input, setInput] = useState("");
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
-    const { messages, sendMessage, status, error, setMessages } = useChat({
+    const { messages, sendMessage, regenerate, status, setMessages } = useChat({
         transport: new DefaultChatTransport({ api: "/api/ai/query" }),
     });
 
@@ -135,7 +138,7 @@ export function AIChatWidget({ role }: AIChatWidgetProps) {
                                 <h3 className="text-sm font-semibold">Taxflow AI</h3>
                                 <p className="text-[10px] text-muted-foreground">
                                     {role === "rra_staff"
-                                        ? "RRA Intelligence Assistant"
+                                        ? "TF Intelligence Assistant"
                                         : "Your Business Assistant"}
                                 </p>
                             </div>
@@ -165,7 +168,7 @@ export function AIChatWidget({ role }: AIChatWidgetProps) {
                     </div>
 
                     {/* Messages */}
-                    <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                    <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto p-4 space-y-3">
                         {/* Empty state */}
                         {messages.length === 0 && (
                             <div className="flex flex-col items-center justify-center h-full space-y-5">
@@ -176,12 +179,12 @@ export function AIChatWidget({ role }: AIChatWidgetProps) {
                                     <h4 className="font-semibold text-sm">
                                         {role === "rra_staff"
                                             ? "Ask about traders, risk, and revenue"
-                                            : "Ask about your business data"}
+                                            : "Ask about your business"}
                                     </h4>
                                     <p className="text-xs text-muted-foreground max-w-[280px]">
                                         {role === "rra_staff"
                                             ? "Query any trader, trace supply chains, check risk scores, and get revenue forecasts."
-                                            : "View your sales, stock, tax status, and get help using the platform."}
+                                            : "Get advice on sales, profit, stock, operations, and how to use TaxFlow."}
                                     </p>
                                 </div>
                                 <div className="grid grid-cols-1 gap-1.5 w-full max-w-xs">
@@ -219,8 +222,8 @@ export function AIChatWidget({ role }: AIChatWidgetProps) {
                             // User messages — always render
                             if (msg.role === "user") {
                                 return (
-                                    <div key={msg.id} className="flex gap-2.5 justify-end">
-                                        <div className="rounded-xl px-3.5 py-2 max-w-[82%] text-[13px] leading-relaxed bg-primary text-primary-foreground">
+                                    <div key={msg.id} className="flex min-w-0 gap-2.5 justify-end">
+                                        <div className="min-w-0 max-w-[82%] break-words [overflow-wrap:anywhere] whitespace-pre-wrap rounded-xl px-3.5 py-2 text-[13px] leading-relaxed bg-primary text-primary-foreground">
                                             {msg.parts.map((part, i) =>
                                                 part.type === "text" ? (
                                                     <span key={`${msg.id}-${i}`}>{part.text}</span>
@@ -237,7 +240,7 @@ export function AIChatWidget({ role }: AIChatWidgetProps) {
                             // Assistant: streaming with no visible content yet (or only reasoning) → "Analyzing..."
                             if (!hasText && !hasToolInvocation && isStreamingThis) {
                                 return (
-                                    <div key={msg.id} className="flex gap-2.5">
+                                    <div key={msg.id} className="flex min-w-0 gap-2.5">
                                         <div className="shrink-0 w-6 h-6 rounded-full bg-gradient-to-br from-blue-500/20 to-emerald-500/20 flex items-center justify-center">
                                             <Brain className="h-3 w-3 text-blue-600" />
                                         </div>
@@ -261,7 +264,7 @@ export function AIChatWidget({ role }: AIChatWidgetProps) {
                                     ? formatToolName(latestTool.toolName)
                                     : "";
                                 return (
-                                    <div key={msg.id} className="flex gap-2.5">
+                                    <div key={msg.id} className="flex min-w-0 gap-2.5">
                                         <div className="shrink-0 w-6 h-6 rounded-full bg-gradient-to-br from-blue-500/20 to-emerald-500/20 flex items-center justify-center">
                                             <Brain className="h-3 w-3 text-blue-600" />
                                         </div>
@@ -280,11 +283,11 @@ export function AIChatWidget({ role }: AIChatWidgetProps) {
                             // Assistant: only tool invocations, no text, done streaming → empty response fallback
                             if (!hasText && hasToolInvocation && !isLoading) {
                                 return (
-                                    <div key={msg.id} className="flex gap-2.5">
+                                    <div key={msg.id} className="flex min-w-0 gap-2.5">
                                         <div className="shrink-0 w-6 h-6 rounded-full bg-gradient-to-br from-blue-500/20 to-emerald-500/20 flex items-center justify-center mt-0.5">
                                             <Brain className="h-3 w-3 text-blue-600" />
                                         </div>
-                                        <div className="bg-muted/50 border rounded-xl px-3.5 py-2 max-w-[82%] text-[13px] leading-relaxed">
+                                        <div className="min-w-0 max-w-[82%] break-words [overflow-wrap:anywhere] bg-muted/50 border rounded-xl px-3.5 py-2 text-[13px] leading-relaxed">
                                             <p className="text-muted-foreground italic">
                                                 The data was retrieved but the AI couldn&apos;t generate a summary. Please try rephrasing your question.
                                             </p>
@@ -297,11 +300,11 @@ export function AIChatWidget({ role }: AIChatWidgetProps) {
                             if (!hasText && !hasToolInvocation && !isLoading) {
                                 if (hasOnlyReasoning) {
                                     return (
-                                        <div key={msg.id} className="flex gap-2.5">
+                                        <div key={msg.id} className="flex min-w-0 gap-2.5">
                                             <div className="shrink-0 w-6 h-6 rounded-full bg-gradient-to-br from-blue-500/20 to-emerald-500/20 flex items-center justify-center mt-0.5">
                                                 <Brain className="h-3 w-3 text-blue-600" />
                                             </div>
-                                            <div className="bg-muted/50 border rounded-xl px-3.5 py-2 max-w-[82%] text-[13px] leading-relaxed">
+                                            <div className="min-w-0 max-w-[82%] break-words [overflow-wrap:anywhere] bg-muted/50 border rounded-xl px-3.5 py-2 text-[13px] leading-relaxed">
                                                 <p className="text-muted-foreground italic">
                                                     Analysis completed but no summary was generated. Please try again.
                                                 </p>
@@ -314,17 +317,17 @@ export function AIChatWidget({ role }: AIChatWidgetProps) {
 
                             // Assistant: has text → render normally
                             return (
-                                <div key={msg.id} className="flex gap-2.5">
+                                <div key={msg.id} className="flex min-w-0 gap-2.5">
                                     <div className="shrink-0 w-6 h-6 rounded-full bg-gradient-to-br from-blue-500/20 to-emerald-500/20 flex items-center justify-center mt-0.5">
                                         <Brain className="h-3 w-3 text-blue-600" />
                                     </div>
-                                    <div className="rounded-xl px-3.5 py-2 max-w-[82%] text-[13px] leading-relaxed bg-muted/50 border">
+                                    <div className="flow-root min-h-fit min-w-0 max-w-[82%] break-words [overflow-wrap:anywhere] rounded-xl px-3.5 py-2 text-[13px] leading-relaxed bg-muted/50 border">
                                         {msg.parts.map((part, i) => {
                                             if (part.type === "text" && part.text.trim()) {
                                                 return (
                                                     <div
                                                         key={`${msg.id}-${i}`}
-                                                        className="prose prose-sm dark:prose-invert max-w-none [&>p]:my-0.5 [&>ul]:my-1 [&>ol]:my-1 [&>table]:my-2 [&_strong]:text-foreground"
+                                                        className="prose prose-sm dark:prose-invert flow-root min-h-fit min-w-0 max-w-full break-words [overflow-wrap:anywhere] [&>p]:my-0.5 [&>ul]:my-1 [&>ol]:my-1 [&>table]:my-2 [&_table]:max-w-full [&_th]:break-words [&_td]:break-words [&_strong]:text-foreground"
                                                         dangerouslySetInnerHTML={{
                                                             __html: formatMessage(part.text),
                                                         }}
@@ -343,8 +346,21 @@ export function AIChatWidget({ role }: AIChatWidgetProps) {
                         })}
 
                         {status === "error" && (
-                            <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-                                {error?.message || "The AI assistant could not respond. Please try again in a moment."}
+                            <div role="alert" className="flex min-w-0 flex-wrap items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                                <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">
+                                    The AI assistant could not respond. Please try again in a moment.
+                                </span>
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="shrink-0"
+                                    onClick={() => void regenerate()}
+                                    disabled={isLoading}
+                                >
+                                    <RotateCcw className="mr-1.5 h-3 w-3" />
+                                    Retry
+                                </Button>
                             </div>
                         )}
 
@@ -376,7 +392,7 @@ export function AIChatWidget({ role }: AIChatWidgetProps) {
                                 placeholder={
                                     role === "rra_staff"
                                         ? "Ask about traders, tax, risk…"
-                                        : "Ask about your sales, stock, tax…"
+                                        : "Ask about your business…"
                                 }
                                 className="flex-1 h-9 text-sm"
                                 disabled={isLoading}
@@ -492,7 +508,14 @@ function formatMessage(text: string): string {
 
 /** Format inline markdown: bold, italic, code, links */
 function formatInline(text: string): string {
-    return text
+    const escaped = text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+
+    return escaped
         .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
         .replace(/\*(.*?)\*/g, "<em>$1</em>")
         .replace(/`(.*?)`/g, '<code class="px-1 py-0.5 rounded bg-muted text-[11px] font-mono">$1</code>');
@@ -515,15 +538,15 @@ function renderTable(lines: string[]): string {
     const bodyRows = dataRows.slice(1).map(parseRow);
 
     const headerHtml = headerCells
-        .map((cell) => `<th class="px-2 py-1 text-left font-semibold text-[11px] border-b border-border bg-muted/50">${formatInline(cell)}</th>`)
+        .map((cell) => `<th class="break-words [overflow-wrap:anywhere] px-2 py-1 text-left font-semibold text-[11px] border-b border-border bg-muted/50">${formatInline(cell)}</th>`)
         .join("");
 
     const bodyHtml = bodyRows
         .map(
             (row) =>
-                `<tr class="border-b border-border/50 last:border-0">${row.map((cell) => `<td class="px-2 py-1 text-[11px]">${formatInline(cell)}</td>`).join("")}</tr>`,
+                `<tr class="border-b border-border/50 last:border-0">${row.map((cell) => `<td class="break-words [overflow-wrap:anywhere] px-2 py-1 text-[11px]">${formatInline(cell)}</td>`).join("")}</tr>`,
         )
         .join("");
 
-    return `<div class="overflow-x-auto my-2 rounded-lg border border-border"><table class="w-full"><thead><tr>${headerHtml}</tr></thead><tbody>${bodyHtml}</tbody></table></div>`;
+    return `<div class="min-w-0 max-w-full overflow-x-auto my-2 rounded-lg border border-border"><table class="w-full table-fixed"><thead><tr>${headerHtml}</tr></thead><tbody>${bodyHtml}</tbody></table></div>`;
 }

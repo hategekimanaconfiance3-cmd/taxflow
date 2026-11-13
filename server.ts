@@ -3,7 +3,6 @@ import { createServer } from 'http';
 import next from 'next';
 import { parse } from 'url';
 import { initSocketServer } from './lib/socket-server';
-import { startScheduledJobs } from './lib/scheduler/jobs';
 
 const dev = process.env.NODE_ENV !== 'production';
 const hostname = process.env.HOST || 'localhost';
@@ -20,9 +19,6 @@ app.prepare().then(() => {
 
   // Initialize Socket.IO on the same HTTP server
   initSocketServer(httpServer);
-
-  // Start AI monitoring background jobs
-  startScheduledJobs();
 
   httpServer.listen(port, () => {
     console.log(`

@@ -87,7 +87,13 @@ export async function generateTaxReportPDF(): Promise<{
 
     // 5. Recent payments (last 10)
     const recentPayments = await db
-        .select()
+        .select({
+            amount: taxPayment.amount,
+            method: taxPayment.method,
+            reference: taxPayment.reference,
+            status: taxPayment.status,
+            createdAt: taxPayment.createdAt,
+        })
         .from(taxPayment)
         .where(eq(taxPayment.businessId, userId))
         .orderBy(desc(taxPayment.createdAt))
@@ -108,7 +114,7 @@ export async function generateTaxReportPDF(): Promise<{
     doc.setFont("helvetica", "normal");
     doc.setTextColor(100);
     doc.text(`Generated: ${now.toLocaleDateString()} at ${now.toLocaleTimeString()}`, 14, 29);
-    doc.text(`Rwanda Revenue Authority (RRA) Compliance Report`, pageWidth - 14, 29, { align: "right" });
+    doc.text(`TaxFlow Authority (RRA) Compliance Report`, pageWidth - 14, 29, { align: "right" });
 
     // Trader info
     doc.setDrawColor(200);

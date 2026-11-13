@@ -11,7 +11,7 @@ const PRIORITY_CONFIG: Record<string, { label: string; cls: string }> = {
 };
 
 export default async function AdminBulletinPage() {
-  await requireRRASession("compliance_officer", "audit_officer", "stock_officer", "correction_officer", "reporting_officer", "director_executive", "tax_compliance_officer", "audit_investigation_officer", "product_traceability_officer", "customs_import_officer", "payments_reconciliation_officer", "data_ai_analyst");
+  await requireRRASession("super_admin", "compliance_officer", "audit_officer", "stock_officer", "correction_officer", "reporting_officer", "director_executive", "tax_compliance_officer", "audit_investigation_officer", "product_traceability_officer", "customs_import_officer", "payments_reconciliation_officer", "data_ai_analyst");
 
   const bulletins = await getBulletins();
 
@@ -20,7 +20,7 @@ export default async function AdminBulletinPage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Staff Bulletin Board</h1>
         <p className="text-muted-foreground text-sm mt-1">
-          Internal communications and announcements for RRA staff.
+          Internal communications and announcements for TF staff.
         </p>
       </div>
 
@@ -30,7 +30,7 @@ export default async function AdminBulletinPage() {
             <Bell className="h-10 w-10 text-muted-foreground/30" />
             <p className="font-semibold text-sm">No bulletins yet</p>
             <p className="text-xs text-muted-foreground">
-              Staff bulletins posted by RRA officers will appear here.
+              Staff bulletins posted by TF officers will appear here.
             </p>
           </CardContent>
         </Card>

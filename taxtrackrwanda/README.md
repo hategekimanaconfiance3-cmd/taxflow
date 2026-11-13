@@ -115,7 +115,7 @@ Endpoint:
 ## RRA revenue prediction endpoint
 
 - Endpoint: `GET /api/rra/predictions/`
-- Access: **RRA role only**
+- Access: **TF role only**
 - Uses historical completed transactions and linear regression.
 - Returns per-merchant predictions for next 30 days:
   - sales

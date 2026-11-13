@@ -16,7 +16,7 @@ let flashId = 0;
 
 /**
  * Admin-side real-time wrapper.
- * Listens for events relevant to RRA and auto-refreshes + toasts.
+ * Listens for events relevant to TF and auto-refreshes + toasts.
  */
 export function AdminRealtimeWrapper({
     userId,
@@ -58,11 +58,11 @@ export function AdminRealtimeWrapper({
             refresh();
         },
         "import:confirmed": () => {
-            flash("success", "Import Confirmed", "Import was confirmed by RRA.");
+            flash("success", "Import Confirmed", "Import was confirmed by TF.");
             refresh();
         },
         "import:rejected": () => {
-            flash("warning", "Import Rejected", "Import was rejected by RRA.");
+            flash("warning", "Import Rejected", "Import was rejected by TF.");
             refresh();
         },
         // Dispute events
@@ -71,7 +71,7 @@ export function AdminRealtimeWrapper({
             refresh();
         },
         "dispute:acknowledged": () => {
-            flash("info", "Dispute Acknowledged", "Ready for RRA review.");
+            flash("info", "Dispute Acknowledged", "Ready for TF review.");
             refresh();
         },
         "dispute:contested": () => {
@@ -79,7 +79,7 @@ export function AdminRealtimeWrapper({
             refresh();
         },
         "dispute:resolved": () => {
-            flash("success", "Dispute Resolved", "An RRA decision was issued.");
+            flash("success", "Dispute Resolved", "A TF decision was issued.");
             refresh();
         },
     });

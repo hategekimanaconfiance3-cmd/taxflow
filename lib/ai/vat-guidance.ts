@@ -15,6 +15,6 @@ export function buildVatGuidance(configuredVatRate: number): VatGuidance {
     configuredVatRatePercent: `${(configuredVatRate * 100).toLocaleString("en-RW", { maximumFractionDigits: 4 })}%`,
     rateSource: "Current TaxFlow system configuration. This does not confirm the legally applicable rate for any specific supply.",
     calculation: "TaxFlow calculates transaction VAT using the rate and pricing mode saved with that transaction. Recorded output VAT minus recorded input VAT is an informational balance, not an official tax assessment.",
-    legalGuidance: "Tax law, exemptions, and filing deadlines are not available from this tool. Check approved official RRA guidance or ask an authorized tax professional.",
+    legalGuidance: "Tax law, exemptions, and filing deadlines are not available from this tool. Check approved official TF guidance or ask an authorized tax professional.",
   };
 }

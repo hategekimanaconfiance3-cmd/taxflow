@@ -31,7 +31,14 @@ export interface SmartAlertsData {
  * Generate smart alerts from various fraud detection signals.
  */
 export async function getSmartAlerts(): Promise<SmartAlertsData> {
-    await requireRRASession("compliance_officer", "audit_officer", "data_ai_analyst");
+    await requireRRASession(
+        "super_admin",
+        "compliance_officer",
+        "audit_officer",
+        "tax_compliance_officer",
+        "audit_investigation_officer",
+        "data_ai_analyst",
+    );
 
     const alerts: SmartAlert[] = [];
 

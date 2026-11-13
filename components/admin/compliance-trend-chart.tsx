@@ -10,7 +10,7 @@ import { Loader2, TrendingUp, TrendingDown, Minus, Target } from "lucide-react";
 // Target line at 80%, insight summary, period comparison
 // ---------------------------------------------------------------------------
 
-const COMPLIANCE_TARGET = 80; // RRA standard target %
+const COMPLIANCE_TARGET = 80; // TF standard target %
 
 interface MonthlyCompliance {
     month: string;
@@ -173,7 +173,7 @@ export function ComplianceTrendChart() {
                     </span>
                     <span className="flex items-center gap-1 ml-auto">
                         <Target className="h-2.5 w-2.5 text-amber-500" />
-                        <span>RRA target: {COMPLIANCE_TARGET}%</span>
+                        <span>TF target: {COMPLIANCE_TARGET}%</span>
                     </span>
                 </div>
 

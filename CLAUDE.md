@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-TaxFlow is an enterprise-grade tax compliance and management platform for Rwanda (RRA — Rwanda Revenue Authority). It supports multi-role workflows for Manufacturers, Wholesalers, Retailers, and RRA Staff.
+TaxFlow is an enterprise-grade tax compliance and management platform for Rwanda (RRA — TaxFlow Authority). It supports multi-role workflows for Manufacturers, Wholesalers, Retailers, and RRA Staff.
 
 ## Commands
 
@@ -71,7 +71,7 @@ All mutations go through server actions in `lib/actions/`. Named by domain:
 
 - `auth.action.ts` — sign-in, sign-up, OTP, session
 - `sales.action.ts`, `imports.action.ts`, `disputes.action.ts`, `payments.action.ts` — trader operations
-- `admin-*.action.ts` files — RRA staff operations
+- `admin-*.action.ts` files — TF staff operations
 
 ### AI Integration
 
@@ -86,7 +86,7 @@ Multiple models are used in `lib/ai/`:
 
 - `components/ui/` — shadcn/ui primitives (New York style, Tailwind v4)
 - `components/dashboard/` — trader-facing feature components
-- `components/admin/` — RRA staff feature components
+- `components/admin/` — TF staff feature components
 - `components/auth/` — auth forms
 - `components/shared/` — cross-role components (AI chat widget)
 

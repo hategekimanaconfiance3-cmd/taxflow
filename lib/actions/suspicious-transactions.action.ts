@@ -32,7 +32,7 @@ export interface SuspiciousFlag {
  * Scan recent transactions for suspicious pricing patterns.
  */
 export async function getSuspiciousTransactions(): Promise<SuspiciousTransactionsData> {
-    await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
+    await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer", "tax_audit_officer", "revenue_investigator");
 
     try {
         const today = new Date();

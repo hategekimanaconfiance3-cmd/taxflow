@@ -3,7 +3,7 @@
 // monthly breakdown, compliance rate, district breakdown, and a simple forecast.
 //
 // ⚠️  All forecast values are ESTIMATES for demonstration purposes only.
-//     They are NOT official RRA projections.
+//     They are NOT official TF projections.
 
 import { eq, and, sql, gte, lte } from "drizzle-orm";
 import db from "@/db/drizzle";
@@ -209,7 +209,7 @@ export async function getRevenueSummary(months: number = 12): Promise<RevenueSum
  *   4. Apply seasonal index (ratio of month-avg to overall-avg)
  *   5. Project forward with ±15 % uncertainty band
  *
- * ⚠️  ALWAYS labelled as estimates — never official RRA data.
+ * ⚠️  ALWAYS labelled as estimates — never official TF data.
  */
 export async function getSimpleRevenueForecast(forecastMonths: number = 3): Promise<ForecastResult> {
     // Pull last 12 months of data
@@ -230,7 +230,7 @@ export async function getSimpleRevenueForecast(forecastMonths: number = 3): Prom
             forecastData: [],
             growthRate: 0,
             uncertainty: { low: 15, high: 15 },
-            disclaimer: "Estimated — demonstration data. Not an official RRA projection.",
+            disclaimer: "Estimated — demonstration data. Not an official TF projection.",
         };
     }
 
@@ -295,7 +295,7 @@ export async function getSimpleRevenueForecast(forecastMonths: number = 3): Prom
         forecastData,
         growthRate,
         uncertainty: { low: 15, high: 15 },
-        disclaimer: "Estimated — demonstration data. Not an official RRA projection.",
+        disclaimer: "Estimated — demonstration data. Not an official TF projection.",
     };
 }
 

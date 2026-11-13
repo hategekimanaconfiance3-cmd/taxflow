@@ -54,7 +54,7 @@ export default async function IntelligencePage() {
             {data.compliance.isCompliant ? <CircleCheck className="h-4 w-4 text-emerald-600" /> : <ShieldAlert className="h-4 w-4 text-amber-600" />}
             Recorded tax position
           </CardTitle>
-          <CardDescription>Calculated from current TaxFlow records and its configured compliance threshold; this is not an official RRA assessment.</CardDescription>
+          <CardDescription>Calculated from current TaxFlow records and its configured compliance threshold; this is not an official TF assessment.</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <div><p className="text-xs text-muted-foreground">Recorded net amount owed</p><p className="mt-1 text-lg font-semibold">{money(data.compliance.netOwed)}</p></div>

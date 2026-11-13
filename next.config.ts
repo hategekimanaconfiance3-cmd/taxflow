@@ -21,7 +21,7 @@ const securityHeaders = [
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob:",
       "font-src 'self'",
-      "connect-src 'self' https://generativelanguage.googleapis.com https://api.anthropic.com",
+      "connect-src 'self' https://generativelanguage.googleapis.com https://api.anthropic.com https://blob.vercel-storage.com https://*.blob.vercel-storage.com",
       "frame-ancestors 'self'",
       "form-action 'self'",
       "base-uri 'self'",
@@ -31,10 +31,10 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   reactCompiler: true,
-  typescript: {
-    // This forces Vercel to bypass the stuck TypeScript check during deployment
-    ignoreBuildErrors: true,
-  },
+  // Keep tracing and Turbopack scoped to this checkout. The repository may be
+  // nested under a user profile with inaccessible parent symlinks in CI/Work.
+  outputFileTracingRoot: process.cwd(),
+  turbopack: { root: process.cwd() },
   async headers() {
     return [
       {

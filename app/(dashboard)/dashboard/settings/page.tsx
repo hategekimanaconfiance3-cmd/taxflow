@@ -46,7 +46,7 @@ export default async function SettingsPage() {
             <span className="text-xs">{user.phoneNumber ?? '—'}</span>
           </div>
           <p className="text-[10px] text-muted-foreground/60">
-            TIN, role, and phone number can only be updated by RRA staff. Contact support if they need to change.
+            TIN, role, and phone number can only be updated by TF staff. Contact support if they need to change.
           </p>
         </CardContent>
       </Card>

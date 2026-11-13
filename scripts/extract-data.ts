@@ -24,10 +24,10 @@ async function extractData() {
     const accounts = await db.select().from(account);
     console.log(`Found ${accounts.length} accounts`);
 
-    // Extract RRA staff data
-    console.log('Extracting RRA staff data...');
+    // Extract TF staff data
+    console.log('Extracting TF staff data...');
     const rraStaffData = await db.select().from(rraStaff);
-    console.log(`Found ${rraStaffData.length} RRA staff members\n`);
+    console.log(`Found ${rraStaffData.length} TF staff members\n`);
 
     // Create combined data structure
     const extractedData = {
@@ -62,7 +62,7 @@ async function extractData() {
       console.log(JSON.stringify(accounts[0], null, 2));
     }
 
-    console.log('\n--- Sample RRA Staff Data ---');
+    console.log('\n--- Sample TF Staff Data ---');
     if (rraStaffData.length > 0) {
       console.log(JSON.stringify(rraStaffData[0], null, 2));
     }

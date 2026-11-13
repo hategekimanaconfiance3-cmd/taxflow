@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { getAdminSidebarGroups, ROLE_LABELS, ROLE_COLORS, type RRARole } from '@/lib/admin-sidebar-config';
+import { hasRRAPermission, isRRARole } from '@/lib/rra-rbac';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -16,13 +17,14 @@ import {
   Search, Brain, Send, Sparkles, RotateCcw, X, Check, Loader2,
 } from 'lucide-react';
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { searchTraders } from '@/lib/actions/admin-search.action';
 import { CommandPalette, type CommandItem } from '@/components/ui/command-palette';
 import { authClient } from '@/lib/auth-client';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport } from 'ai';
 import { LANGS, translate, type LangCode } from '@/lib/language';
 import { useLanguagePreference } from '@/lib/use-language';
+import { useSocket } from '@/lib/socket-client';
+import { AdminPageListFilters } from '@/components/admin/admin-page-list-filters';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -80,27 +82,44 @@ function LangSelector({ value, onChange }: { value: LangCode; onChange: (l: Lang
 // ---------------------------------------------------------------------------
 // Notification Bell
 // ---------------------------------------------------------------------------
-function NotificationBell({ href }: { href: string }) {
+function NotificationBell({ href, userId }: { href: string; userId: string }) {
   const [count, setCount] = useState(0);
 
-  useEffect(() => {
+  const fetchCount = useCallback(() => {
     fetch('/api/admin/notification-count')
       .then((r) => r.ok ? r.json() : { count: 0 })
       .then((d) => setCount(d.count ?? 0))
       .catch(() => {});
   }, []);
 
+  useEffect(() => {
+    fetchCount();
+    const interval = window.setInterval(fetchCount, 30_000);
+    window.addEventListener('focus', fetchCount);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', fetchCount);
+    };
+  }, [fetchCount]);
+
+  useSocket(userId, { notification: fetchCount });
+
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <Link
           href={href}
+          aria-label={count > 0 ? `Notifications, ${count} unread` : 'Notifications'}
+          title="Notifications"
           className="relative flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
         >
           <Bell className="h-4 w-4" />
           {count > 0 && (
-            <span className="absolute top-1 right-1 h-2 w-2 rounded-full bg-blue-500 ring-2 ring-background" />
+            <span aria-hidden="true" className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[9px] font-semibold leading-none text-white ring-2 ring-background">
+              {count > 99 ? '99+' : count}
+            </span>
           )}
+          <span className="sr-only">{count > 0 ? `${count} unread notifications` : 'No unread notifications'}</span>
         </Link>
       </TooltipTrigger>
       <TooltipContent side="bottom">
@@ -116,7 +135,7 @@ function NotificationBell({ href }: { href: string }) {
 function AIPanel({ onClose }: { onClose: () => void }) {
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const { messages, sendMessage, status, setMessages } = useChat({
+  const { messages, sendMessage, status, error, setMessages } = useChat({
     transport: new DefaultChatTransport({ api: '/api/ai/query' }),
   });
   const isLoading = status === 'streaming' || status === 'submitted';
@@ -145,7 +164,7 @@ function AIPanel({ onClose }: { onClose: () => void }) {
           </div>
           <div>
             <p className="text-[13px] font-semibold leading-none">Ask AI</p>
-            <p className="text-[10px] text-muted-foreground mt-0.5">RRA Intelligence</p>
+            <p className="text-[10px] text-muted-foreground mt-0.5">TF Intelligence</p>
           </div>
         </div>
         <div className="flex items-center gap-1">
@@ -161,15 +180,16 @@ function AIPanel({ onClose }: { onClose: () => void }) {
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+      <div className="border-b bg-muted/20 px-4 py-2 text-[10px] text-muted-foreground">AI findings are advisory. An authorized TF employee must review evidence and make any official decision.</div>
+      <div className="min-h-0 flex-1 overflow-y-auto p-4 space-y-3">
         {messages.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-5 pb-8">
             <div className="flex h-14 w-14 items-center justify-center rounded-2xl border bg-gradient-to-br from-blue-500/10 to-violet-500/10">
               <Sparkles className="h-7 w-7 text-blue-500" />
             </div>
             <div className="text-center space-y-1">
-              <p className="text-sm font-semibold">Ask about traders, risk &amp; revenue</p>
-              <p className="text-xs text-muted-foreground">Natural language queries on all RRA data</p>
+              <p className="text-sm font-semibold">Ask a TF or business question</p>
+              <p className="text-xs text-muted-foreground">Enter a TIN or ask about records, evidence, risks, and workflows. Official decisions stay with authorized staff.</p>
             </div>
             <div className="w-full space-y-1.5">
               {AI_SUGGESTIONS.map((s) => (
@@ -212,13 +232,20 @@ function AIPanel({ onClose }: { onClose: () => void }) {
                       <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/60 animate-bounce [animation-delay:150ms]" />
                       <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/60 animate-bounce [animation-delay:300ms]" />
                     </div>
-                  ) : (
+                  ) : content ? (
                     <p className="whitespace-pre-wrap leading-relaxed">{content}</p>
-                  )}
+                  ) : !isUser ? (
+                    <p className="whitespace-pre-wrap leading-relaxed text-muted-foreground">I couldn&apos;t produce a written answer. Please ask what you want to know about the TIN or record, or try your question again.</p>
+                  ) : null}
                 </div>
               </div>
             );
           })
+        )}
+        {status === 'error' && (
+          <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+            {error ? "I couldn't complete that answer. Please try again or clear this chat and resend your question." : "The AI assistant could not complete this request. Please try again."}
+          </div>
         )}
         <div ref={messagesEndRef} />
       </div>
@@ -254,23 +281,45 @@ function AIPanel({ onClose }: { onClose: () => void }) {
 // AdminShell Props
 // ---------------------------------------------------------------------------
 interface AdminShellProps {
+  userId: string;
   userName: string;
   staffId: string;
   clearanceLevel: string;
+  clearanceRoles: string[];
   children: React.ReactNode;
 }
 
 // ---------------------------------------------------------------------------
 // AdminShell
 // ---------------------------------------------------------------------------
-export function AdminShell({ userName, staffId, clearanceLevel, children }: AdminShellProps) {
+export function AdminShell({ userId, userName, staffId, clearanceLevel, clearanceRoles, children }: AdminShellProps) {
   const pathname = usePathname();
-  const groups = getAdminSidebarGroups(clearanceLevel);
+  const groups = getAdminSidebarGroups(clearanceRoles.length ? clearanceRoles : [clearanceLevel]);
+  const effectiveRoles = clearanceRoles.length ? clearanceRoles : [clearanceLevel];
+  const canUseAssistant = effectiveRoles.some((role) => isRRARole(role) && hasRRAPermission(role, 'ai.assistant.use'));
+  const canUseSupport = effectiveRoles.some((role) => isRRARole(role) && hasRRAPermission(role, 'communications.staff.use'));
 
   const [isSigningOut, setIsSigningOut] = useState(false);
+  const [signOutError, setSignOutError] = useState<string | null>(null);
+  const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isMobileNavigationOpen, setIsMobileNavigationOpen] = useState(false);
   const [isAiOpen, setIsAiOpen] = useState(false);
   const [lang, setLang] = useLanguagePreference();
+  const roleSummary = (clearanceRoles.length ? clearanceRoles : [clearanceLevel])
+    .map((role) => translate(ROLE_LABELS[role as RRARole] ?? role, lang)).join(", ");
+
+  const openAI = useCallback(() => {
+    setIsAiOpen(true);
+    setIsSidebarCollapsed(true);
+  }, []);
+
+  const closeAI = useCallback(() => {
+    setIsAiOpen(false);
+    setIsSidebarCollapsed(false);
+  }, []);
+
+  const toggleAI = useCallback(() => (isAiOpen ? closeAI() : openAI()), [isAiOpen, closeAI, openAI]);
 
   // Ctrl+I toggles AI panel
   useEffect(() => {
@@ -282,19 +331,7 @@ export function AdminShell({ userName, staffId, clearanceLevel, children }: Admi
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  });
-
-  const openAI = () => {
-    setIsAiOpen(true);
-    setIsSidebarCollapsed(true);
-  };
-
-  const closeAI = () => {
-    setIsAiOpen(false);
-    setIsSidebarCollapsed(false);
-  };
-
-  const toggleAI = () => (isAiOpen ? closeAI() : openAI());
+  }, [toggleAI]);
 
   const expandSidebar = () => {
     if (isAiOpen) setIsAiOpen(false);
@@ -304,11 +341,20 @@ export function AdminShell({ userName, staffId, clearanceLevel, children }: Admi
   const handleSignOut = useCallback(async () => {
     if (isSigningOut) return;
     setIsSigningOut(true);
+    setSignOutError(null);
+    setIsAccountMenuOpen(false);
+    setIsMobileNavigationOpen(false);
     try {
-      await authClient.signOut();
-      window.location.replace('/admin-login');
+      await authClient.signOut({
+        fetchOptions: {
+          onSuccess: () => {
+            window.location.assign('/admin-login');
+          },
+        },
+      });
     } catch {
       setIsSigningOut(false);
+      setSignOutError('Sign out failed. Check your connection and try again.');
     }
   }, [isSigningOut]);
 
@@ -367,7 +413,7 @@ export function AdminShell({ userName, staffId, clearanceLevel, children }: Admi
       {/* Logo */}
       <div className="flex h-14 w-full shrink-0 items-center justify-center">
         <div className="flex h-7 w-7 items-center justify-center rounded-md bg-foreground text-background text-[10px] font-bold">
-          RRA
+          TF
         </div>
       </div>
 
@@ -497,7 +543,7 @@ export function AdminShell({ userName, staffId, clearanceLevel, children }: Admi
       {/* Logo */}
       <div className="flex h-14 items-center gap-2.5 px-5">
         <div className="flex h-7 w-7 items-center justify-center rounded-md bg-foreground text-background text-[10px] font-bold">
-          RRA
+          TF
         </div>
         <div className="flex flex-col">
           <span className="text-[15px] font-semibold tracking-tight leading-tight">TaxFlow</span>
@@ -547,6 +593,7 @@ export function AdminShell({ userName, staffId, clearanceLevel, children }: Admi
                       <TooltipTrigger asChild>
                         <Link
                           href={item.href}
+                          onClick={() => setIsMobileNavigationOpen(false)}
                           className={cn(
                             'group relative flex items-center gap-2.5 rounded-md px-3 py-[7px] text-[13px] font-medium transition-all duration-150',
                             parentActive
@@ -576,6 +623,7 @@ export function AdminShell({ userName, staffId, clearanceLevel, children }: Admi
                             <Link
                               key={child.href}
                               href={child.href}
+                              onClick={() => setIsMobileNavigationOpen(false)}
                               className={cn(
                                 'group relative flex items-center gap-2 rounded-md px-3 py-[6px] text-[12px] font-medium transition-all duration-150',
                                 childActive
@@ -622,7 +670,8 @@ export function AdminShell({ userName, staffId, clearanceLevel, children }: Admi
 
       {/* User section */}
       <div className="p-3">
-        <Popover>
+        <div className="hidden lg:block">
+        <Popover open={isAccountMenuOpen} onOpenChange={setIsAccountMenuOpen}>
           <PopoverTrigger asChild>
             <button className="flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
               <Avatar className="h-7 w-7 border border-border/60">
@@ -638,7 +687,7 @@ export function AdminShell({ userName, staffId, clearanceLevel, children }: Admi
                     className={cn('text-[9px] px-1 py-0 font-semibold', ROLE_COLORS[clearanceLevel as RRARole] || '')}
                   >
                     <Shield className="h-2.5 w-2.5 mr-0.5" />
-                    {translate(ROLE_LABELS[clearanceLevel as RRARole] ?? clearanceLevel, lang)}
+                    {roleSummary}
                   </Badge>
                 </div>
               </div>
@@ -651,18 +700,18 @@ export function AdminShell({ userName, staffId, clearanceLevel, children }: Admi
               <p className="text-[11px] text-muted-foreground font-mono mt-0.5">{staffId}</p>
               <div className="flex items-center gap-2 mt-1.5">
                 <Badge variant="outline" className={cn('text-[10px] px-1.5 py-0', ROLE_COLORS[clearanceLevel as RRARole] || '')}>
-                    {translate(ROLE_LABELS[clearanceLevel as RRARole] ?? clearanceLevel, lang)}
+                    {roleSummary}
                 </Badge>
               </div>
             </div>
             <Separator className="opacity-60" />
             <div className="py-1">
-              <button className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
+              <Link href="/admin/profile" onClick={() => setIsAccountMenuOpen(false)} className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
                 <User className="h-3.5 w-3.5" /> Profile
-              </button>
-              <button className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
+              </Link>
+              {canUseSupport && <Link href="/admin/support" onClick={() => setIsAccountMenuOpen(false)} className="flex w-full items-center gap-2.5 px-3 py-2 text-[13px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
                 <HelpCircle className="h-3.5 w-3.5" /> Help & Support
-              </button>
+              </Link>}
             </div>
             <Separator className="opacity-60" />
             <div className="py-1">
@@ -678,6 +727,32 @@ export function AdminShell({ userName, staffId, clearanceLevel, children }: Admi
             </div>
           </PopoverContent>
         </Popover>
+        </div>
+        <div className="space-y-1 lg:hidden">
+          <div className="px-2 pb-2">
+            <p className="truncate text-sm font-medium">{userName}</p>
+            <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">{staffId}</p>
+            <Badge variant="outline" className={cn('mt-1.5 text-[10px] px-1.5 py-0', ROLE_COLORS[clearanceLevel as RRARole] || '')}>
+              {roleSummary}
+            </Badge>
+          </div>
+          <Link href="/admin/profile" className="flex min-h-10 items-center gap-2.5 rounded-md px-3 text-sm text-muted-foreground hover:bg-accent hover:text-foreground">
+            <User className="h-4 w-4" /> Profile
+          </Link>
+          {canUseSupport && <Link href="/admin/support" className="flex min-h-10 items-center gap-2.5 rounded-md px-3 text-sm text-muted-foreground hover:bg-accent hover:text-foreground">
+            <HelpCircle className="h-4 w-4" /> Help & Support
+          </Link>}
+          <button
+            type="button"
+            onClick={handleSignOut}
+            disabled={isSigningOut}
+            className="flex min-h-10 w-full items-center gap-2.5 rounded-md px-3 text-left text-sm text-destructive hover:bg-destructive/10 disabled:opacity-50"
+          >
+            <LogOut className="h-4 w-4" />
+            {translate(isSigningOut ? 'Signing out…' : 'Log Out', lang)}
+          </button>
+          {signOutError && <p role="alert" className="px-2 pt-1 text-xs text-destructive">{signOutError}</p>}
+        </div>
       </div>
     </>
   );
@@ -688,7 +763,7 @@ export function AdminShell({ userName, staffId, clearanceLevel, children }: Admi
   return (
     <TooltipProvider delayDuration={200}>
       <div className="min-h-screen bg-background">
-        <CommandPalette items={commandItems} portalLabel="RRA Admin" />
+        <CommandPalette items={commandItems} portalLabel="TF Admin" />
 
         {/* ── Desktop Sidebar ──────────────────────────────── */}
         <aside
@@ -717,23 +792,23 @@ export function AdminShell({ userName, staffId, clearanceLevel, children }: Admi
 
         {/* ── Content wrapper (shifts with sidebar / AI panel) ── */}
         <div
-          className="flex min-h-screen flex-col transition-[padding] duration-300"
+          className="flex min-h-screen min-w-0 flex-col transition-[padding] duration-300 lg:pl-[var(--sidebar-width)] xl:pr-[var(--ai-panel-width)]"
           style={{
-            paddingLeft: `${sidebarW}px`,
-            paddingRight: isAiOpen ? `${AI_PANEL_W}px` : '0px',
-          }}
+            '--sidebar-width': `${sidebarW}px`,
+            '--ai-panel-width': isAiOpen ? `${AI_PANEL_W}px` : '0px',
+          } as React.CSSProperties}
         >
           {/* ── Topbar ──────────────────────────────────────── */}
-          <header className="sticky top-0 z-20 flex h-14 items-center gap-2 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 px-4">
+          <header className="sticky top-0 z-20 flex h-14 items-center gap-1 border-b bg-background/95 px-2 backdrop-blur supports-[backdrop-filter]:bg-background/60 sm:gap-2 sm:px-4">
             {/* Mobile menu */}
-            <Sheet>
+            <Sheet open={isMobileNavigationOpen} onOpenChange={setIsMobileNavigationOpen}>
               <SheetTrigger asChild>
                 <Button variant="ghost" size="icon" className="lg:hidden -ml-1">
                   <Menu className="h-5 w-5" />
                   <span className="sr-only">Toggle menu</span>
                 </Button>
               </SheetTrigger>
-              <SheetContent side="left" className="w-[260px] p-0">
+              <SheetContent side="left" className="w-[min(86vw,18rem)] max-w-[18rem] p-0">
                 <SheetTitle className="sr-only">Admin Navigation</SheetTitle>
                 {mobileSidebar}
               </SheetContent>
@@ -744,7 +819,7 @@ export function AdminShell({ userName, staffId, clearanceLevel, children }: Admi
             {/* Right side controls */}
             <div className="flex items-center gap-1">
               {/* Notification Bell */}
-              <NotificationBell href="/admin/notifications" />
+              <NotificationBell href="/admin/notifications" userId={userId} />
 
               <Separator orientation="vertical" className="h-5 mx-1" />
 
@@ -752,29 +827,31 @@ export function AdminShell({ userName, staffId, clearanceLevel, children }: Admi
               <LangSelector value={lang} onChange={setLang} />
 
               {/* Ask AI button — hidden while panel is open */}
-              {!isAiOpen && <Button
+              {canUseAssistant && !isAiOpen && <Button
                 variant="outline"
                 size="sm"
                 onClick={openAI}
-                className="h-8 gap-1.5 text-xs font-medium"
+                className="h-9 gap-1 px-2 text-xs font-medium sm:h-8 sm:gap-1.5 sm:px-3"
               >
                 <Brain className="h-3.5 w-3.5" />
-                Ask AI
+                <span className="sm:hidden">AI</span><span className="hidden sm:inline">Ask AI</span>
               </Button>}
             </div>
           </header>
 
           {/* ── Main content ────────────────────────────────── */}
-          <main className="flex-1">
-            <div className="p-6">{children}</div>
+          <main className="min-w-0 flex-1">
+            <div className="min-w-0 p-3 sm:p-4 lg:p-6">
+              <AdminPageListFilters />
+              {children}
+            </div>
           </main>
         </div>
 
         {/* ── AI Side Panel ────────────────────────────────── */}
         {isAiOpen && (
           <div
-            className="fixed top-0 right-0 bottom-0 z-40 flex flex-col border-l bg-background shadow-2xl animate-in slide-in-from-right-4 fade-in duration-200"
-            style={{ width: AI_PANEL_W }}
+            className="fixed inset-0 z-40 flex w-full max-w-full flex-col border-l bg-background shadow-2xl animate-in slide-in-from-right-4 fade-in duration-200 sm:inset-y-0 sm:left-auto sm:right-0 sm:w-[420px] lg:w-[420px]"
           >
             <AIPanel onClose={closeAI} />
           </div>

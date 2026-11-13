@@ -1,167 +1,67 @@
-"use server";
+'use server';
 
-import { eq, desc, sql } from "drizzle-orm";
-import db from "@/db/drizzle";
-import { supportTicket, user } from "@/db/schema";
-import { requireRRASession } from "@/lib/auth-guard";
-import { logAudit } from "@/lib/audit";
-import { createNotification } from "@/lib/notifications";
+import {
+  assignMessageConversation,
+  listRRAConversations,
+  replyToConversation,
+  resolveMessageConversation,
+} from '@/lib/actions/messaging.action';
+import { requireRRAPermission } from '@/lib/auth-guard';
 
-// ---------------------------------------------------------------------------
-// Get all tickets (admin-facing, filterable by status)
-// ---------------------------------------------------------------------------
-
+/** Compatibility wrapper for old clients. The returned cases are already permission-scoped. */
 export async function getAllTickets(status?: string) {
-    await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
-
-    const whereClause = status
-        ? eq(supportTicket.status, status)
-        : sql`1 = 1`;
-
-    return db
-        .select({
-            id: supportTicket.id,
-            traderName: user.businessName,
-            traderId: supportTicket.traderId,
-            category: supportTicket.category,
-            subject: supportTicket.subject,
-            status: supportTicket.status,
-            priority: supportTicket.priority,
-            createdAt: supportTicket.createdAt,
-            resolvedAt: supportTicket.resolvedAt,
-        })
-        .from(supportTicket)
-        .innerJoin(user, eq(supportTicket.traderId, user.id))
-        .where(whereClause)
-        .orderBy(desc(supportTicket.createdAt))
-        .limit(100);
+  const rows = await listRRAConversations({ status: status ?? 'all' });
+  return rows.filter((row) => row.threadType === 'taxpayer' && row.traderId !== null).map((row) => ({
+    id: row.id,
+    traderName: row.traderName,
+    traderId: row.traderId as string,
+    category: row.category,
+    subject: row.subject,
+    status: row.status,
+    priority: row.priority,
+    createdAt: row.createdAt,
+    resolvedAt: null,
+  }));
 }
 
-// ---------------------------------------------------------------------------
-// Assign a ticket to an RRA staff member
-// ---------------------------------------------------------------------------
-
-export async function assignTicket(
-    ticketId: string,
-    staffUserId: string,
-): Promise<{ success: true }> {
-    const { staff, ...session } = await requireRRASession("compliance_officer", "tax_compliance_officer");
-
-    const [ticket] = await db
-        .select()
-        .from(supportTicket)
-        .where(eq(supportTicket.id, ticketId))
-        .limit(1);
-
-    if (!ticket) throw new Error("Ticket not found.");
-
-    await db
-        .update(supportTicket)
-        .set({
-            assignedToId: staffUserId,
-            status: "in_progress",
-            updatedAt: new Date(),
-        })
-        .where(eq(supportTicket.id, ticketId));
-
-    await logAudit({
-        userId: session.user.id,
-        action: "TICKET_ASSIGNED",
-        targetType: "support_ticket",
-        targetId: ticketId,
-        metadata: {
-            assignedTo: staffUserId,
-            assignedBy: staff.staffId,
-        },
-    });
-
-    // Notify the trader
-    await createNotification({
-        userId: ticket.traderId,
-        type: "ticket_update",
-        title: "Support Ticket Update",
-        message: `Your ticket "${ticket.subject}" has been assigned to a staff member and is being reviewed.`,
-        link: "/dashboard/support",
-    });
-
-    return { success: true };
+export async function assignTicket(ticketId: string, staffUserId: string): Promise<{ success: true }> {
+  return assignMessageConversation({
+    ticketId,
+    staffUserId,
+    reason: 'Assignment submitted through the legacy support interface.',
+  });
 }
 
-// ---------------------------------------------------------------------------
-// Resolve a ticket
-// ---------------------------------------------------------------------------
-
-export async function resolveTicket(
-    ticketId: string,
-    resolution: string,
-): Promise<{ success: true }> {
-    const { staff, ...session } = await requireRRASession("compliance_officer", "tax_compliance_officer");
-
-    if (!resolution?.trim()) throw new Error("Resolution is required.");
-
-    const [ticket] = await db
-        .select()
-        .from(supportTicket)
-        .where(eq(supportTicket.id, ticketId))
-        .limit(1);
-
-    if (!ticket) throw new Error("Ticket not found.");
-
-    await db
-        .update(supportTicket)
-        .set({
-            status: "resolved",
-            resolution: resolution.trim(),
-            resolvedAt: new Date(),
-            updatedAt: new Date(),
-        })
-        .where(eq(supportTicket.id, ticketId));
-
-    await logAudit({
-        userId: session.user.id,
-        action: "TICKET_RESOLVED",
-        targetType: "support_ticket",
-        targetId: ticketId,
-        metadata: {
-            resolution: resolution.trim(),
-            resolvedBy: staff.staffId,
-        },
-    });
-
-    // Notify the trader
-    await createNotification({
-        userId: ticket.traderId,
-        type: "ticket_update",
-        title: "Support Ticket Resolved",
-        message: `Your ticket "${ticket.subject}" has been resolved: ${resolution.trim()}`,
-        link: "/dashboard/support",
-    });
-
-    return { success: true };
+export async function resolveTicket(ticketId: string, resolution: string): Promise<{ success: true }> {
+  return resolveMessageConversation({ ticketId, resolution });
 }
-
-// ---------------------------------------------------------------------------
-// Get ticket statistics for admin dashboard
-// ---------------------------------------------------------------------------
 
 export async function getTicketStats() {
-    await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
+  const rows = await listRRAConversations({});
+  return {
+    total: rows.length,
+    open: rows.filter((row) => row.status === 'open' || row.status === 'awaiting_staff').length,
+    inProgress: rows.filter((row) => row.status === 'in_progress').length,
+    resolved: rows.filter((row) => row.status === 'resolved').length,
+    closed: rows.filter((row) => row.status === 'closed').length,
+  };
+}
 
-    const [stats] = await db
-        .select({
-            total: sql<number>`COUNT(*)::int`.as("total"),
-            open: sql<number>`COUNT(*) FILTER (WHERE ${supportTicket.status} = 'open')::int`.as("open"),
-            inProgress: sql<number>`COUNT(*) FILTER (WHERE ${supportTicket.status} = 'in_progress')::int`.as("in_progress"),
-            resolved: sql<number>`COUNT(*) FILTER (WHERE ${supportTicket.status} = 'resolved')::int`.as("resolved"),
-            closed: sql<number>`COUNT(*) FILTER (WHERE ${supportTicket.status} = 'closed')::int`.as("closed"),
-        })
-        .from(supportTicket);
+export async function getTicketDetail(_ticketId: string): Promise<never> {
+  await requireRRAPermission('communications.staff.use');
+  throw new Error('This support view has moved. Open the authorized Messages inbox.');
+}
 
-    return {
-        total: stats?.total || 0,
-        open: stats?.open || 0,
-        inProgress: stats?.inProgress || 0,
-        resolved: stats?.resolved || 0,
-        closed: stats?.closed || 0,
-    };
+export async function reopenTicket(_ticketId: string): Promise<{ success: true }> {
+  await requireRRAPermission('support.manage');
+  throw new Error('Reopen this conversation from the authorized Messages inbox.');
+}
+
+export async function replyToTicket(ticketId: string, message: string): Promise<{ success: true }> {
+  return replyToConversation({ ticketId, body: message, clientMessageId: crypto.randomUUID() });
+}
+
+export async function getStaffList(): Promise<never[]> {
+  await requireRRAPermission('support.manage');
+  return [];
 }

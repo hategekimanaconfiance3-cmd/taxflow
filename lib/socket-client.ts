@@ -15,9 +15,14 @@ function getSocket(userId: string): Socket {
     if (!globalSocket) {
         globalSocket = io({
             path: "/api/socketio",
-            transports: ["websocket", "polling"],
+            // Match the server's addTrailingSlash:false setting. Socket.IO's
+            // default trailing slash receives a 308 on canonicalizing hosts,
+            // which prevents the WebSocket upgrade from completing.
+            addTrailingSlash: false,
+            auth: { userId },
+            transports: ["polling", "websocket"],
             reconnection: true,
-            reconnectionAttempts: Infinity,
+            reconnectionAttempts: 10,
             reconnectionDelay: 1000,
             reconnectionDelayMax: 5000,
         });

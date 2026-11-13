@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useTransition, useEffect, useCallback } from "react";
+import { useState, useTransition, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { createRetailSale } from "@/lib/actions/transaction.action";
-import { formatRWF } from "@/components/dashboard/stat-card/stat-card";
+import { clearClientSubmissionKey, getClientSubmissionKey } from "@/lib/client-submission-key";
 import { PriceRangeBar } from "@/components/dashboard/price-range-bar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -30,6 +30,7 @@ interface InventoryItem {
 
 interface RecordSaleFormProps {
     inventory: InventoryItem[];
+    customers: Array<{ id: string; name: string; tinNumber: string | null }>;
     vatRate: number;
 }
 
@@ -42,10 +43,12 @@ interface SaleItem {
 }
 
 
-export function RecordSaleForm({ inventory, vatRate }: RecordSaleFormProps) {
+export function RecordSaleForm({ inventory, customers, vatRate }: RecordSaleFormProps) {
     const router = useRouter();
     const [isPending, startTransition] = useTransition();
+    const submissionInFlight = useRef(false);
     const [customerName, setCustomerName] = useState("");
+    const [customerId, setCustomerId] = useState("");
     const [saleItems, setSaleItems] = useState<SaleItem[]>(
         inventory.map((inv) => ({
             productId: inv.productId,
@@ -58,6 +61,7 @@ export function RecordSaleForm({ inventory, vatRate }: RecordSaleFormProps) {
     const [message, setMessage] = useState<{
         text: string;
         type: "success" | "error";
+        invoiceIds?: string[];
     } | null>(null);
 
     // Track which products have prices below AI floor
@@ -134,27 +138,42 @@ export function RecordSaleForm({ inventory, vatRate }: RecordSaleFormProps) {
         !hasBlockedPrice;
 
     async function handleConfirmSale() {
-        if (!canSubmit) return;
+        if (submissionInFlight.current || !canSubmit) return;
+        submissionInFlight.current = true;
 
         startTransition(async () => {
             try {
                 setMessage(null);
+                const invoiceIds: string[] = [];
+                const submission = {
+                    customerName: customerName.trim(),
+                    customerId: customerId || null,
+                    items: activeItems.map(({ productId, quantityToSell, unitPrice }) => ({ productId, quantity: quantityToSell, unitPrice })),
+                };
+                const storageKey = "taxflow:retail-sale";
+                const submissionKey = getClientSubmissionKey(storageKey, JSON.stringify(submission));
                 for (const item of activeItems) {
-                    await createRetailSale({
+                    const completedSale = await createRetailSale({
                         productId: item.productId,
                         quantity: item.quantityToSell,
                         unitPrice: item.unitPrice,
                         customerName: customerName.trim(),
+                        submissionKey,
+                        ...(customerId ? { customerId } : {}),
                     });
+                    invoiceIds.push(completedSale.invoiceId);
                 }
 
                 setMessage({
                     text: `Sale of ${activeItems.length} product(s) to ${customerName} completed`,
                     type: "success",
+                    invoiceIds,
                 });
+                clearClientSubmissionKey(storageKey, submissionKey);
 
                 // Optimistic update: deduct sold quantities from available stock
                 setCustomerName("");
+                setCustomerId("");
                 setSaleItems((prev) =>
                     prev.map((item) => ({
                         ...item,
@@ -171,6 +190,8 @@ export function RecordSaleForm({ inventory, vatRate }: RecordSaleFormProps) {
                             : "Failed to record sale",
                     type: "error",
                 });
+            } finally {
+                submissionInFlight.current = false;
             }
         });
     }
@@ -192,7 +213,12 @@ export function RecordSaleForm({ inventory, vatRate }: RecordSaleFormProps) {
                             : "bg-red-50 text-red-700 border border-red-200"
                             }`}
                     >
-                        {message.text}
+                        <div>{message.text}</div>
+                        {message.invoiceIds?.map((invoiceId) => (
+                            <a key={invoiceId} className="ml-1 inline-block font-medium underline underline-offset-2" href={`/dashboard/invoices/${invoiceId}`}>
+                                View invoice
+                            </a>
+                        ))}
                     </div>
                 )}
 
@@ -201,11 +227,34 @@ export function RecordSaleForm({ inventory, vatRate }: RecordSaleFormProps) {
                     <Label htmlFor="customerName">
                         Buyer Name / ID
                     </Label>
+                    {customers.length > 0 && (
+                        <select
+                            aria-label="Choose saved customer"
+                            className="h-10 w-full max-w-md rounded-md border border-input bg-background px-3 text-sm"
+                            value={customerId}
+                            onChange={(event) => {
+                                const selected = customers.find((customer) => customer.id === event.target.value);
+                                setCustomerId(selected?.id ?? "");
+                                if (selected) setCustomerName(selected.name);
+                                else setCustomerName("");
+                            }}
+                        >
+                            <option value="">One-time customer</option>
+                            {customers.map((customer) => (
+                                <option key={customer.id} value={customer.id}>
+                                    {customer.name}{customer.tinNumber ? ` · TIN ${customer.tinNumber}` : ""}
+                                </option>
+                            ))}
+                        </select>
+                    )}
                     <Input
                         id="customerName"
                         placeholder="Enter customer name or ID"
                         value={customerName}
-                        onChange={(e) => setCustomerName(e.target.value)}
+                        onChange={(e) => {
+                            setCustomerName(e.target.value);
+                            if (customerId) setCustomerId("");
+                        }}
                         className="max-w-md"
                     />
                 </div>

@@ -25,7 +25,7 @@ export interface CommandItem {
 
 interface CommandPaletteProps {
     items: CommandItem[];
-    /** Label shown in the header, e.g. "TaxFlow" or "RRA Admin" */
+    /** Label shown in the header, e.g. "TaxFlow" or "TF Admin" */
     portalLabel?: string;
 }
 

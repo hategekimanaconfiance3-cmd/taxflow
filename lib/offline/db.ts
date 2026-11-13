@@ -13,7 +13,7 @@ export interface QueuedAction {
     | "rejectTransaction"
     | "declareImport"
     | "confirmImportArrival"
-    | "submitImportArrival";
+    | "submitImportDocuments";
     payload: Record<string, unknown>;
     createdAt: number;
     retries: number;

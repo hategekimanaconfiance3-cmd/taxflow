@@ -5,7 +5,7 @@ import { alias } from "drizzle-orm/pg-core";
 import { createHash } from "node:crypto";
 import db from "@/db/drizzle";
 import { auditLog, dispute, importDeclaration, productionBatch, product, stockAdjustment, transaction, user } from "@/db/schema";
-import { requireRRASession } from "@/lib/auth-guard";
+import { requireRRAPermission } from "@/lib/auth-guard";
 import { productJourneyQuerySchema } from "@/lib/validation/product-journey.schema";
 
 const PAGE_SIZE = 100;
@@ -50,9 +50,9 @@ export type ProductJourneyPage = {
     offset: number;
 };
 
-/** RRA-only search over real transaction and origin records. Each read is audit logged. */
+/** TF-only search over real transaction and origin records. Each read is audit logged. */
 export async function searchProductJourney(input: unknown): Promise<ProductJourneyPage> {
-    const { user: officer } = await requireRRASession("audit_officer", "stock_officer", "audit_investigation_officer", "product_traceability_officer");
+    const { user: officer } = await requireRRAPermission("traceability.read");
     const parsed = productJourneyQuerySchema.safeParse(input);
     if (!parsed.success) throw new Error("Invalid product journey search.");
     const query = parsed.data;
@@ -179,8 +179,8 @@ export async function searchProductJourney(input: unknown): Promise<ProductJourn
                     businessTin: user.tinNumber,
                     productName: product.name,
                     productId: product.id,
-                    quantity: productionBatch.declaredQuantity,
-                    status: sql<string>`COALESCE(${productionBatch.status}, 'declared')`,
+                    quantity: sql<number>`CASE WHEN ${productionBatch.materialReviewStatus} = 'released' AND ${productionBatch.goodOutputQuantity} IS NOT NULL THEN ${productionBatch.goodOutputQuantity} ELSE ${productionBatch.declaredQuantity} END`,
+                    status: sql<string>`CASE WHEN ${productionBatch.materialReviewStatus} = 'released' AND ${productionBatch.goodOutputQuantity} IS NOT NULL THEN 'officer_verified' ELSE 'manufacturer_reported_unverified' END`,
                     createdAt: productionBatch.createdAt,
                 }).from(productionBatch)
                     .innerJoin(user, eq(productionBatch.manufacturerId, user.id))
@@ -194,13 +194,13 @@ export async function searchProductJourney(input: unknown): Promise<ProductJourn
                     businessTin: user.tinNumber,
                     productName: product.name,
                     productId: product.id,
-                    quantity: sql<number>`COALESCE(${importDeclaration.actualQuantity}, ${importDeclaration.expectedQuantity})`,
+                    quantity: sql<number>`COALESCE(${importDeclaration.inspectedQuantity}, ${importDeclaration.expectedQuantity})`,
                     status: importDeclaration.status,
                     createdAt: importDeclaration.createdAt,
                 }).from(importDeclaration)
                     .innerJoin(user, eq(importDeclaration.businessId, user.id))
                     .innerJoin(product, eq(importDeclaration.productId, product.id))
-                    .where(inArray(importDeclaration.productId, productIds))
+                    .where(and(inArray(importDeclaration.productId, productIds), eq(importDeclaration.status, "activated")))
                     .orderBy(desc(importDeclaration.createdAt)).limit(100),
                 tx.select({
                     id: stockAdjustment.id,

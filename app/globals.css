@@ -127,6 +127,41 @@
     body {
         @apply bg-background text-foreground;
         @apply bg-background text-foreground;
+        min-width: 320px;
+        max-width: 100%;
+        overflow-x: clip;
+    }
+
+    html {
+        overflow-x: clip;
+    }
+
+    main,
+    main > div,
+    [data-slot='card'] {
+        min-width: 0;
+    }
+
+    input,
+    select,
+    textarea {
+        max-width: 100%;
+    }
+
+    @media (max-width: 639px) {
+        button[data-slot='button']:not([data-size='xs']):not([data-size='icon-xs']) {
+            min-height: 2.5rem;
+        }
+
+        button[data-slot='button'][data-size^='icon'] {
+            min-width: 2.5rem;
+        }
+
+        input,
+        select,
+        textarea {
+            min-height: 2.5rem;
+        }
     }
 
     /* Scrollbar - never expand on hover */

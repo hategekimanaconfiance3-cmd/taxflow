@@ -10,14 +10,15 @@ import {
     Settings,
     FileText,
     CreditCard,
-    RefreshCw,
     Search,
     History,
-    HelpCircle,
+    MessageSquare,
     Bell,
     Ship,
     Shield,
     Brain,
+    UsersRound,
+    ClipboardList,
 } from "lucide-react";
 
 export type TraderRole = "manufacturer" | "wholesaler" | "retailer";
@@ -55,6 +56,12 @@ export const SIDEBAR_GROUPS: SidebarGroup[] = [
                 roles: "all",
             },
             {
+                label: "Customers",
+                href: "/dashboard/customers",
+                icon: UsersRound,
+                roles: "all",
+            },
+            {
                 label: "Transactions",
                 href: "/dashboard/transactions",
                 icon: ArrowLeftRight,
@@ -76,6 +83,12 @@ export const SIDEBAR_GROUPS: SidebarGroup[] = [
                 label: "Notifications",
                 href: "/dashboard/notifications",
                 icon: Bell,
+                roles: "all",
+            },
+            {
+                label: "Correction Requests",
+                href: "/dashboard/corrections",
+                icon: ClipboardList,
                 roles: "all",
             },
             {
@@ -113,6 +126,12 @@ export const SIDEBAR_GROUPS: SidebarGroup[] = [
                 href: "/dashboard/record-sale",
                 icon: ShoppingBag,
                 roles: ["retailer"],
+            },
+            {
+                label: "Restock Requests",
+                href: "/dashboard/restock",
+                icon: ClipboardList,
+                roles: ["manufacturer", "wholesaler", "retailer"],
             },
             {
                 label: "Imports",
@@ -163,9 +182,9 @@ export const SIDEBAR_GROUPS: SidebarGroup[] = [
                 roles: "all",
             },
             {
-                label: "Support",
-                href: "/dashboard/support",
-                icon: HelpCircle,
+                label: "Messages",
+                href: "/dashboard/messages",
+                icon: MessageSquare,
                 roles: "all",
             },
         ],

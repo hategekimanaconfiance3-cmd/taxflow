@@ -183,7 +183,7 @@ export function PriceRangeBar({ productId, currentPrice, compact, onStatusChange
                 <div className="flex items-start gap-1.5 text-xs text-amber-600 bg-amber-50 dark:bg-amber-950/30 rounded px-2 py-1.5 border border-amber-200 dark:border-amber-900">
                     <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
                     <span>
-                        Price above market ceiling — this will be flagged to RRA for review.
+                        Price above market ceiling — this will be flagged to TF for review.
                     </span>
                 </div>
             )}

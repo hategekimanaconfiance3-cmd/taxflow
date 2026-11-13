@@ -63,7 +63,7 @@ export function AdminTransactionFilters() {
         <div className="space-y-3">
             <div className="flex items-center gap-2 flex-wrap">
                 {/* Search */}
-                <div className="relative flex-1 min-w-[200px]">
+                <div className="relative w-full min-w-0 flex-1 sm:min-w-[200px]">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input
                         placeholder="Search product, seller, or buyer..."
@@ -76,7 +76,7 @@ export function AdminTransactionFilters() {
 
                 {/* Status */}
                 <Select value={status} onValueChange={setStatus}>
-                    <SelectTrigger className="w-[150px] h-9 text-sm">
+                    <SelectTrigger className="h-10 w-full text-sm sm:h-9 sm:w-[150px]">
                         <SelectValue placeholder="Status" />
                     </SelectTrigger>
                     <SelectContent>
@@ -93,7 +93,7 @@ export function AdminTransactionFilters() {
                     type="date"
                     value={dateFrom}
                     onChange={(e) => setDateFrom(e.target.value)}
-                    className="w-[150px] h-9 text-sm"
+                    className="h-10 w-full text-sm sm:h-9 sm:w-[150px]"
                     placeholder="From"
                 />
 
@@ -102,7 +102,7 @@ export function AdminTransactionFilters() {
                     type="date"
                     value={dateTo}
                     onChange={(e) => setDateTo(e.target.value)}
-                    className="w-[150px] h-9 text-sm"
+                    className="h-10 w-full text-sm sm:h-9 sm:w-[150px]"
                     placeholder="To"
                 />
 
@@ -110,7 +110,7 @@ export function AdminTransactionFilters() {
                 <Button
                     onClick={applyFilters}
                     size="sm"
-                    className="h-9 gap-1.5"
+                    className="h-10 w-full gap-1.5 sm:h-9 sm:w-auto"
                 >
                     <Filter className="h-3.5 w-3.5" />
                     Filter
@@ -122,7 +122,7 @@ export function AdminTransactionFilters() {
                         onClick={clearFilters}
                         variant="ghost"
                         size="sm"
-                        className="h-9 gap-1.5 text-muted-foreground"
+                        className="h-10 w-full gap-1.5 text-muted-foreground sm:h-9 sm:w-auto"
                     >
                         <X className="h-3.5 w-3.5" />
                         Clear

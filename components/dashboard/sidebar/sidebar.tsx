@@ -192,6 +192,12 @@ export function DashboardSidebar({ role, businessName, userName = 'User' }: Dash
         <span className="text-[15px] font-semibold tracking-tight">TaxFlow</span>
       </div>
 
+      <div className="px-5 pb-3 lg:hidden">
+        <Badge variant="outline" className={cn('text-[10px] px-1.5 py-0', ROLE_COLORS[role])}>
+          {translate(ROLE_LABELS[role], lang)}
+        </Badge>
+      </div>
+
       {/* Search trigger */}
       <div className="px-3 pb-2">
         <button

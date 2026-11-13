@@ -60,7 +60,7 @@ function JourneyBranch({
         if (record.buyerId) nextPath.add(record.buyerId);
         const nextRendered = new Set(rendered);
         nextRendered.add(record.id);
-        return <div key={record.id} className="ml-4 border-l border-muted-foreground/25 pl-4">
+        return <div key={record.id} className="ml-2 border-l border-muted-foreground/25 pl-2 sm:ml-4 sm:pl-4">
             <div className="flex items-start gap-2"><Button type="button" size="icon" variant="ghost" aria-label={`${isExpanded ? "Collapse" : "Expand"} branch from ${record.buyerName}`} aria-expanded={isExpanded} onClick={() => setIsExpanded((value) => !value)}>{isExpanded ? <ChevronDown /> : <ChevronRight />}</Button><button type="button" onClick={() => onSelect(record)} aria-pressed={selectedId === record.id}
                 className={cn("w-full rounded-lg border bg-card p-3 text-left transition-colors hover:bg-accent/40", selectedId === record.id && "border-primary ring-1 ring-primary")}>
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -78,7 +78,49 @@ function JourneyBranch({
     })}</div>;
 }
 
-export function ProductJourneyExplorer() {
+interface AuthorizedFormula {
+    batchReference: string;
+    manufacturerName: string | null;
+    productName: string;
+    outputQuantity: number;
+    plannedOutputQuantity: number | null;
+    productionValidationStatus: string;
+    recipe: { code: string | null; version: number | null; outputQuantity: number | null; yieldToleranceBasisPoints: number | null };
+    materials: Array<{ materialCode: string; materialName: string; unit: string; recipeQuantity: number; plannedQuantity: number | null; actualQuantity: number | null }>;
+}
+
+interface ProductionHistoryAnalysisResult {
+    found: boolean;
+    manufacturer: string;
+    period: { type: string; batchReference?: string; lookbackDays?: number };
+    ruleVersion: string;
+    baselineMinimumBatches: number;
+    interpretation: string;
+    batches: Array<{
+        batchReference: string;
+        product: string;
+        status: string | null;
+        signalCount: number;
+        repeatedAcrossSelectedBatches: boolean | null;
+        baselineSource: string;
+        dataLimitations: string[];
+        metrics: Array<{
+            code: string;
+            label: string;
+            unit: string;
+            expectedRatio: number | null;
+            observedRatio: number | null;
+            deviationPercent: number | null;
+            thresholdPercent: number;
+            baselineBatchCount: number;
+            confidence: "high" | "medium" | "low";
+            signal: "unusual" | "within_baseline" | "insufficient_history" | "missing_evidence";
+            evidenceBatchReferences: string[];
+        }>;
+    }>;
+}
+
+export function ProductJourneyExplorer({ canReadProductionFormula }: { canReadProductionFormula: boolean }) {
     const [query, setQuery] = useState("");
     const [status, setStatus] = useState("all");
     const [from, setFrom] = useState("");
@@ -90,6 +132,75 @@ export function ProductJourneyExplorer() {
     const [zoom, setZoom] = useState(100);
     const [view, setView] = useState<"tree" | "table">("tree");
     const [expanded, setExpanded] = useState<Set<string>>(new Set());
+    const [formula, setFormula] = useState<AuthorizedFormula | null>(null);
+    const [historyAnalysis, setHistoryAnalysis] = useState<ProductionHistoryAnalysisResult | null>(null);
+    const [formulaReason, setFormulaReason] = useState<"production_discrepancy" | "regulatory_review" | "investigation_case">("production_discrepancy");
+    const [caseReference, setCaseReference] = useState("");
+    const [formulaLoading, setFormulaLoading] = useState(false);
+    const [historyLoading, setHistoryLoading] = useState(false);
+    const [historyError, setHistoryError] = useState<string | null>(null);
+    const [formulaError, setFormulaError] = useState<string | null>(null);
+
+    function selectRecord(record: JourneyRecord | SourceRecord) {
+        setSelected(record);
+        setFormula(null);
+        setFormulaError(null);
+        setHistoryAnalysis(null);
+        setHistoryError(null);
+        setCaseReference("");
+    }
+
+    async function requestFormulaAccess(): Promise<void> {
+        if (!selected || !("kind" in selected) || selected.kind !== "production_batch") return;
+        setFormulaLoading(true);
+        setFormulaError(null);
+        setFormula(null);
+        try {
+            const response = await fetch("/api/admin/production/formula", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({
+                    batchId: selected.id,
+                    reason: formulaReason,
+                    ...(formulaReason === "investigation_case" ? { caseReference } : {}),
+                }),
+            });
+            const result = await response.json() as { formula?: AuthorizedFormula; error?: string };
+            if (!response.ok || !result.formula) {
+                setFormulaError(result.error ?? "Authorized formula evidence could not be loaded.");
+                return;
+            }
+            setFormula(result.formula);
+        } catch {
+            setFormulaError("Unable to retrieve formula evidence. Retry or contact support.");
+        } finally {
+            setFormulaLoading(false);
+        }
+    }
+
+    async function compareProductionHistory(): Promise<void> {
+        if (!selected || !("kind" in selected) || selected.kind !== "production_batch") return;
+        setHistoryLoading(true);
+        setHistoryError(null);
+        setHistoryAnalysis(null);
+        try {
+            const response = await fetch("/api/admin/production/history", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ batchId: selected.id }),
+            });
+            const result = await response.json() as { analysis?: ProductionHistoryAnalysisResult; error?: string };
+            if (!response.ok || !result.analysis) {
+                setHistoryError(result.error ?? "Historical production evidence could not be loaded.");
+                return;
+            }
+            setHistoryAnalysis(result.analysis);
+        } catch {
+            setHistoryError("Unable to compare historical production records. Retry or contact support.");
+        } finally {
+            setHistoryLoading(false);
+        }
+    }
 
     async function search(offset = 0, append = false): Promise<void> {
         setLoading(true);
@@ -149,15 +260,15 @@ export function ProductJourneyExplorer() {
                     </CardHeader>
                     <CardContent>
                         <div className="mb-4 flex flex-wrap gap-2 text-xs"><Badge variant="outline">Recorded / completed</Badge><Badge variant="secondary">Pending receipt</Badge><Badge variant="destructive">Disputed / rejected</Badge><span className="self-center text-muted-foreground">No edge means no linked transaction was found.</span></div>
-                        {data.sourceRecords.length > 0 && <section className="mb-5 rounded-lg border p-3"><h3 className="mb-2 text-sm font-semibold">Origin and adjustment records (not transaction-linked)</h3><p className="mb-2 text-xs text-muted-foreground">Production batches, imports, and stock adjustments are shown separately because the current schema has no batch allocation links to transactions.</p><div className="flex flex-wrap gap-2">{data.sourceRecords.map((source) => <button key={`${source.kind}:${source.id}`} onClick={() => setSelected(source)} className="rounded-md border bg-muted/30 px-3 py-2 text-left text-xs hover:bg-accent"><span className="block font-medium">{source.kind === "production_batch" ? "Production batch" : source.kind === "import_declaration" ? "Import" : "Stock adjustment"}: {source.reference}</span><span className="text-muted-foreground">{source.businessName} · {formatQuantity(source.quantity, data.records.find((record) => record.productId === source.productId)?.unit ?? "units")}</span></button>)}</div></section>}
-                        {view === "tree" ? <div className="max-h-[70vh] overflow-auto rounded-md border p-3"><div className={cn("min-w-[32rem] origin-top-left transition-transform", zoom === 90 && "scale-[0.9]", zoom === 80 && "scale-[0.8]", zoom === 70 && "scale-[0.7]", zoom === 110 && "scale-[1.1]", zoom === 120 && "scale-[1.2]")}>
+                        {data.sourceRecords.length > 0 && <section className="mb-5 rounded-lg border p-3"><h3 className="mb-2 text-sm font-semibold">Origin and adjustment records (not transaction-linked)</h3><p className="mb-2 text-xs text-muted-foreground">Production batches, imports, and stock adjustments are shown separately because the current schema has no batch allocation links to transactions. Manufacturer production entries remain unverified until an authorized officer releases them.</p><div className="flex flex-wrap gap-2">{data.sourceRecords.map((source) => <button key={`${source.kind}:${source.id}`} onClick={() => selectRecord(source)} className="rounded-md border bg-muted/30 px-3 py-2 text-left text-xs hover:bg-accent"><span className="block font-medium">{source.kind === "production_batch" ? "Production batch" : source.kind === "import_declaration" ? "Import" : "Stock adjustment"}: {source.reference}</span><span className="text-muted-foreground">{source.businessName} · {source.kind === "production_batch" ? source.status === "officer_verified" ? "Officer verified good output" : "Manufacturer-reported total · unverified" : "Recorded quantity"} · {formatQuantity(source.quantity, data.records.find((record) => record.productId === source.productId)?.unit ?? "units")}</span></button>)}</div></section>}
+                        {view === "tree" ? <div className="max-h-[70vh] overflow-auto rounded-md border p-2 sm:p-3"><div className={cn("min-w-0 origin-top-left transition-transform", zoom === 90 && "scale-[0.9]", zoom === 80 && "scale-[0.8]", zoom === 70 && "scale-[0.7]", zoom === 110 && "scale-[1.1]", zoom === 120 && "scale-[1.2]")}>
                             {roots.length ? roots.map((rootId) => {
                                 const root = data.records.find((record) => record.sellerId === rootId)!;
                                 const isExpanded = expanded.has(rootId);
                                 return <div key={rootId} className="mb-4"><Button variant="ghost" size="sm" aria-expanded={isExpanded} onClick={() => setExpanded((prior) => { const next = new Set(prior); if (next.has(rootId)) next.delete(rootId); else next.add(rootId); return next; })}>{isExpanded ? <ChevronDown data-icon="inline-start" /> : <ChevronRight data-icon="inline-start" />}{root.sellerName} · {root.sellerRole}</Button>
-                                    {isExpanded && <JourneyBranch businessId={rootId} records={data.records} depth={0} path={new Set([rootId])} onSelect={setSelected} selectedId={selected && "sellerId" in selected ? selected.id : null} rendered={new Set()} />}</div>;
+                                    {isExpanded && <JourneyBranch businessId={rootId} records={data.records} depth={0} path={new Set([rootId])} onSelect={selectRecord} selectedId={selected && "sellerId" in selected ? selected.id : null} rendered={new Set()} />}</div>;
                             }) : <p className="py-8 text-center text-sm text-muted-foreground">No transaction records matched. Origin records may still be listed above.</p>}
-                        </div></div> : <div className="overflow-x-auto"><Table><TableHeader><TableRow><TableHead>Transaction</TableHead><TableHead>Seller → buyer</TableHead><TableHead>Product</TableHead><TableHead>Quantity</TableHead><TableHead>Status</TableHead><TableHead>Date</TableHead></TableRow></TableHeader><TableBody>{data.records.map((record) => <TableRow key={record.id} onClick={() => setSelected(record)} className="cursor-pointer"><TableCell><Link href={record.recordUrl} className="font-mono text-xs underline" onClick={(event) => event.stopPropagation()}>{record.id.slice(0, 12)}</Link></TableCell><TableCell>{record.sellerName} → {record.buyerName}</TableCell><TableCell>{record.productName}</TableCell><TableCell>{formatQuantity(record.quantity, record.unit)}</TableCell><TableCell><Badge variant={statusVariant(record)}>{statusLabel(record)}</Badge></TableCell><TableCell>{new Date(record.createdAt).toLocaleDateString()}</TableCell></TableRow>)}</TableBody></Table></div>}
+                        </div></div> : <div className="overflow-x-auto"><Table><TableHeader><TableRow><TableHead>Transaction</TableHead><TableHead>Seller → buyer</TableHead><TableHead>Product</TableHead><TableHead>Quantity</TableHead><TableHead>Status</TableHead><TableHead>Date</TableHead></TableRow></TableHeader><TableBody>{data.records.map((record) => <TableRow key={record.id} onClick={() => selectRecord(record)} className="cursor-pointer"><TableCell><Link href={record.recordUrl} className="font-mono text-xs underline" onClick={(event) => event.stopPropagation()}>{record.id.slice(0, 12)}</Link></TableCell><TableCell>{record.sellerName} → {record.buyerName}</TableCell><TableCell>{record.productName}</TableCell><TableCell>{formatQuantity(record.quantity, record.unit)}</TableCell><TableCell><Badge variant={statusVariant(record)}>{statusLabel(record)}</Badge></TableCell><TableCell>{new Date(record.createdAt).toLocaleDateString()}</TableCell></TableRow>)}</TableBody></Table></div>}
                         {data.hasMore && <div className="mt-4 flex justify-center"><Button variant="outline" disabled={loading} onClick={() => void search(data.offset + data.records.length, true)}>{loading && <Loader2 className="animate-spin" data-icon="inline-start" />}Load next 100 records</Button></div>}
                     </CardContent>
                 </Card>
@@ -176,8 +287,38 @@ export function ProductJourneyExplorer() {
                     </> : <>
                         <div><p className="text-xs text-muted-foreground">{selected.kind === "production_batch" ? "Production batch" : selected.kind === "import_declaration" ? "Import declaration" : "Stock adjustment"}</p><p className="break-all font-medium">{selected.reference}</p></div>
                         <div><p className="text-xs text-muted-foreground">Business</p><p>{selected.businessName}</p><p className="text-xs text-muted-foreground">TIN {selected.businessTin ?? "not recorded"}</p></div>
-                        <div><p className="text-xs text-muted-foreground">Product / {selected.kind === "stock_adjustment" ? "quantity change" : "recorded quantity"}</p><p>{selected.productName} · {formatQuantity(selected.quantity, data.records.find((record) => record.productId === selected.productId)?.unit ?? "units")}</p><Badge variant={selected.status === "approved" ? "outline" : "secondary"}>{selected.status}</Badge></div>
+                        <div><p className="text-xs text-muted-foreground">Product / {selected.kind === "stock_adjustment" ? "quantity change" : selected.kind === "production_batch" ? selected.status === "officer_verified" ? "verified good output" : "manufacturer-reported total (unverified)" : "recorded quantity"}</p><p>{selected.productName} · {formatQuantity(selected.quantity, data.records.find((record) => record.productId === selected.productId)?.unit ?? "units")}</p><Badge variant={selected.kind === "production_batch" ? selected.status === "officer_verified" ? "outline" : "secondary" : selected.status === "approved" ? "outline" : "secondary"}>{selected.kind === "production_batch" ? selected.status === "officer_verified" ? "Officer verified and released" : "Manufacturer reported · unverified" : selected.status}</Badge></div>
                         <p className="text-xs text-muted-foreground">This record is not linked to downstream transaction quantities by batch in the current database.</p>
+                        {selected.kind === "production_batch" && canReadProductionFormula && <section className="space-y-2 rounded-md border border-amber-300 bg-amber-50/40 p-3">
+                            <h3 className="font-medium">Restricted formula evidence</h3>
+                            <p className="text-xs text-muted-foreground">Access is recorded in the audit trail. Ingredient details are returned only after server-side authorization.</p>
+                            <label className="block text-xs">Purpose<select className="mt-1 h-9 w-full rounded-md border bg-background px-2 text-sm" value={formulaReason} onChange={(event) => setFormulaReason(event.target.value as typeof formulaReason)}><option value="production_discrepancy">Review a production discrepancy</option><option value="regulatory_review">Regulatory review</option><option value="investigation_case">Assigned investigation case</option></select></label>
+                            {formulaReason === "investigation_case" && <label className="block text-xs">Assigned case reference<Input value={caseReference} onChange={(event) => setCaseReference(event.target.value)} maxLength={128} /></label>}
+                            <Button type="button" size="sm" variant="outline" disabled={formulaLoading || (formulaReason === "investigation_case" && !caseReference.trim())} onClick={() => void requestFormulaAccess()}>{formulaLoading && <Loader2 className="animate-spin" data-icon="inline-start" />}Request audited access</Button>
+                            {formulaError && <p role="alert" className="text-xs text-destructive">{formulaError}</p>}
+                            {formula && <div className="space-y-2 border-t border-amber-300 pt-2">
+                                <p className="text-xs">{formula.manufacturerName ?? "Manufacturer"} · {formula.productName} · {formula.batchReference} · Recipe {formula.recipe.version ?? "unknown"}</p>
+                                <p className="text-xs">Production check: {formula.productionValidationStatus.replaceAll("_", " ")}</p>
+                                <p className="text-xs">Planned output: {formula.plannedOutputQuantity?.toLocaleString() ?? "not recorded"} · Actual output: {formula.outputQuantity.toLocaleString()}</p>
+                                {formula.materials.length ? formula.materials.map((material) => <div key={material.materialCode} className="rounded border bg-background p-2 text-xs"><p className="font-medium">{material.materialName} <span className="font-mono text-muted-foreground">({material.materialCode})</span></p><p>Recipe: {material.recipeQuantity.toLocaleString()} {material.unit} per {formula.recipe.outputQuantity?.toLocaleString() ?? "unknown"} output · Planned for batch: {material.plannedQuantity?.toLocaleString() ?? "not recorded"} {material.unit} · Actual: {material.actualQuantity?.toLocaleString() ?? "not recorded"} {material.unit}</p></div>) : <p className="text-xs text-muted-foreground">This recipe version has no material lines.</p>}
+                            </div>}
+                            <div className="space-y-2 border-t border-amber-300 pt-2">
+                                <div><h4 className="font-medium">Historical production comparison</h4><p className="text-xs text-muted-foreground">Baseline uses only earlier batches of this exact recipe version marked independently supported and within tolerance.</p></div>
+                                <Button type="button" size="sm" variant="outline" disabled={historyLoading} onClick={() => void compareProductionHistory()}>{historyLoading && <Loader2 className="animate-spin" data-icon="inline-start" />}Compare historical batches</Button>
+                                {historyError && <p role="alert" className="text-xs text-destructive">{historyError}</p>}
+                                {historyAnalysis && historyAnalysis.batches.map((batch) => <div key={batch.batchReference} className="space-y-2 rounded-md border bg-background p-2">
+                                    <p className="text-xs font-medium">{batch.product} · {batch.batchReference} · {batch.signalCount ? `${batch.signalCount} review signal(s)` : "No unusual deviation against available baseline"}</p>
+                                    <p className="text-[11px] text-muted-foreground">Rules {historyAnalysis.ruleVersion} · Baseline: {batch.baselineSource}. Signals are not proof of wrongdoing.</p>
+                                    {batch.metrics.map((metric) => <div key={metric.code} className="rounded border p-2 text-xs">
+                                        <p className="font-medium">{metric.label}: {metric.signal.replaceAll("_", " ")} · {metric.confidence} confidence</p>
+                                        <p>Baseline ratio: {metric.expectedRatio === null ? "insufficient history" : `${(metric.expectedRatio * 100).toFixed(2)}%`} · Observed ratio: {metric.observedRatio === null ? "not recorded" : `${(metric.observedRatio * 100).toFixed(2)}%`} · Deviation: {metric.deviationPercent === null ? "unavailable" : `${metric.deviationPercent.toFixed(2)}%`} · Review threshold: {metric.thresholdPercent.toFixed(2)}% · Verified samples: {metric.baselineBatchCount}</p>
+                                        {metric.evidenceBatchReferences.length > 0 && <p className="text-muted-foreground">Compared batches: {metric.evidenceBatchReferences.join(", ")}</p>}
+                                    </div>)}
+                                    {batch.dataLimitations.map((limitation) => <p key={limitation} className="text-xs text-amber-800">Data limitation: {limitation}</p>)}
+                                </div>)}
+                                {historyAnalysis && <p className="text-xs text-muted-foreground">{historyAnalysis.interpretation}</p>}
+                            </div>
+                        </section>}
                         <Button asChild variant="outline" size="sm"><Link href={selected.recordUrl}>Open source record <ExternalLink data-icon="inline-end" /></Link></Button>
                     </>}
                 </CardContent></Card>

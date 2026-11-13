@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Pencil, Check, X, Loader2 } from "lucide-react";
 
 interface ConfigItem {
-    key: "compliance_threshold" | "vat_rate" | "dispute_window_hours";
+    key: "compliance_threshold" | "vat_rate" | "dispute_window_hours" | "buyer_confirmation_window_hours";
     label: string;
     description: string;
     currentValue: string;
@@ -22,12 +22,14 @@ interface SystemConfigEditorProps {
     complianceThreshold: number;
     vatRate: number;
     disputeWindowHours: number;
+    buyerConfirmationWindowHours: number;
 }
 
 export function SystemConfigEditor({
     complianceThreshold,
     vatRate,
     disputeWindowHours,
+    buyerConfirmationWindowHours,
 }: SystemConfigEditorProps) {
     const items: ConfigItem[] = [
         {
@@ -54,6 +56,15 @@ export function SystemConfigEditor({
             description: "Hours allowed for counterparty response",
             currentValue: disputeWindowHours.toString(),
             displayValue: `${disputeWindowHours}h`,
+            unit: "hours",
+            inputType: "hours",
+        },
+        {
+            key: "buyer_confirmation_window_hours",
+            label: "Buyer Confirmation Window",
+            description: "Hours buyers have to confirm a purchase before reserved stock is released",
+            currentValue: buyerConfirmationWindowHours.toString(),
+            displayValue: `${buyerConfirmationWindowHours}h`,
             unit: "hours",
             inputType: "hours",
         },

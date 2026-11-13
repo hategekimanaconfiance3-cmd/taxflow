@@ -1,4 +1,4 @@
-'use server';
+﻿'use server';
 
 import { eq, sql, and } from 'drizzle-orm';
 import db from '@/db/drizzle';
@@ -36,11 +36,11 @@ export async function getBusinessVAT(businessId?: string) {
 }
 
 // ---------------------------------------------------------------------------
-// System-wide VAT (RRA only)
+// System-wide VAT (TF only)
 // ---------------------------------------------------------------------------
 
 export async function getSystemVAT() {
-  await requireRRASession('compliance_officer', 'reporting_officer');
+  await requireRRASession('compliance_officer', 'reporting_officer', 'tax_compliance_officer', 'payments_reconciliation_officer');
 
   const result = await db
     .select({

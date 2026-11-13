@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import {
     Select,
     SelectContent,
@@ -23,7 +23,7 @@ export function ProductSelector({ products, selectedId }: ProductSelectorProps) 
 
     return (
         <Select value={selectedId ?? ""} onValueChange={handleChange}>
-            <SelectTrigger className="w-[280px] h-9 text-sm">
+            <SelectTrigger className="h-10 w-full text-sm sm:h-9 sm:w-[280px]">
                 <SelectValue placeholder="Select a product to trace…" />
             </SelectTrigger>
             <SelectContent>

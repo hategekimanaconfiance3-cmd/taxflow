@@ -44,3 +44,10 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+
+taxflow/
+!db/migrations/taxflow/
+!db/migrations/taxflow/*.sql
+.env*.local
+.env*
+!.env.example

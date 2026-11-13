@@ -1,11 +1,11 @@
-﻿// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 // POST /api/ai/query — TaxFlow AI Assistant endpoint
 //
 // Security model:
 // • Session is validated server-side on every request. No user-supplied role or
 //   businessId is trusted — they are always read from the server-side session.
 // • Trader users: can only query their own data (userId is injected from session).
-// • RRA staff: can query any trader by TIN via RRA tools.
+// • TF staff: can query any trader by TIN via TF tools.
 // • All AI queries are audit-logged.
 // • The LLM is never given raw PII beyond what the tool results return, and
 //   tools are scoped strictly to what the role can see.
@@ -16,18 +16,19 @@ import { convertToModelMessages, stepCountIs, streamText, validateUIMessages, ty
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import db from "@/db/drizzle";
-import { rraStaff, auditLog } from "@/db/schema";
+import { rraStaff, rraStaffRole, auditLog } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { headers } from "next/headers";
 import { createHash } from "node:crypto";
 import { consumeRateLimit, getRequestIdentity } from "@/lib/rate-limit";
 import { createTraderTools } from "@/lib/ai/tools/trader-tools";
-import { createRraActionTools } from "@/lib/ai/tools/rra-action-tools";
 import {
+    getTaxpayerIntelligence,
     lookupTrader,
     searchTraders,
     getTransactions,
     getStockLevels,
+    getStockMovements,
     getTaxStatus,
     getRiskAssessment,
     getRevenueForecastTool,
@@ -36,9 +37,10 @@ import {
     traceSupplyChain,
     traceProductJourney,
     getImportDeclarations,
+    getProductionHistoryAnalysisTool,
 } from "@/lib/ai/tools/rra-tools";
 import { hasRRAPermission, isRRARole } from "@/lib/rra-rbac";
-import { getRRAAIToolNames, type RRAAIToolName } from "@/lib/ai/rra-tool-access";
+import { getRRAAIToolNames, isRRAAIInjectionAttempt, type RRAAIToolName } from "@/lib/ai/rra-tool-access";
 import { getRRASystemPrompt, getTraderSystemPrompt } from "@/lib/ai/system-prompts";
 
 // ---------------------------------------------------------------------------
@@ -53,53 +55,137 @@ const google = createGoogleGenerativeAI({
 const MODEL = google(process.env.GOOGLE_GENERATIVE_AI_MODEL?.trim() || "gemini-3.6-flash");
 
 const requestSchema = z.object({
-    messages: z.array(z.unknown()).min(1).max(20),
-}).strict();
+    // A long-running chat can exceed the context window we send to the model;
+    // parse the newest messages below instead of rejecting the whole request.
+    messages: z.array(z.unknown()).min(1).max(100),
+    // DefaultChatTransport and future SDK versions can add request metadata.
+    // It is ignored; identity, role, and tool access always come from the session.
+    id: z.string().max(128).optional(),
+    trigger: z.enum(["submit-message", "regenerate-message"]).optional(),
+    messageId: z.string().max(128).optional(),
+}).passthrough();
 
 const messageSchema = z.object({
     role: z.enum(["user", "assistant"]),
-    parts: z.array(z.unknown()).max(40),
+    id: z.string().max(128).optional(),
+    parts: z.array(z.unknown()).max(100),
 }).passthrough();
 
-const textPartSchema = z.object({ type: z.literal("text"), text: z.string().max(4_000) }).passthrough();
+const textPartSchema = z.object({ type: z.literal("text"), text: z.string().max(12_000) }).passthrough();
+const MAX_CONTEXT_MESSAGES = 20;
+const MAX_CONTEXT_CHARACTERS = 12_000;
+
+type ProviderErrorRecord = {
+    name?: unknown;
+    code?: unknown;
+    statusCode?: unknown;
+    status?: unknown;
+    isRetryable?: unknown;
+};
+
+function getProviderErrorDetails(error: unknown): {
+    name: string;
+    code?: string;
+    statusCode?: number;
+    retryable?: boolean;
+} {
+    if (typeof error !== "object" || error === null) {
+        return { name: typeof error };
+    }
+
+    const details = error as ProviderErrorRecord;
+    const status = typeof details.statusCode === "number"
+        ? details.statusCode
+        : typeof details.status === "number" ? details.status : undefined;
+    const code = typeof details.code === "string" && /^[A-Z0-9_-]{1,40}$/i.test(details.code)
+        ? details.code
+        : undefined;
+
+    return {
+        name: typeof details.name === "string" ? details.name.slice(0, 80) : "UnknownError",
+        ...(code ? { code } : {}),
+        ...(status !== undefined ? { statusCode: status } : {}),
+        ...(typeof details.isRetryable === "boolean" ? { retryable: details.isRetryable } : {}),
+    };
+}
+
+function getSafeProviderErrorMessage(error: unknown): string {
+    const { name, code, statusCode } = getProviderErrorDetails(error);
+    if (statusCode === 401 || statusCode === 403) {
+        return "The AI provider rejected its server configuration. Please contact your administrator.";
+    }
+    if (statusCode === 404) {
+        return "The configured AI model is unavailable. Please contact your administrator.";
+    }
+    if (statusCode === 429) {
+        return "The AI service is busy or has reached its usage limit. Please try again later.";
+    }
+    if (statusCode !== undefined && statusCode >= 500) {
+        return "The AI provider is temporarily unavailable. Please try again shortly.";
+    }
+    if (/timeout|abort/i.test(name) || code === "ETIMEDOUT" || code === "ECONNRESET") {
+        return "The AI request timed out. Please try again.";
+    }
+    return "The AI assistant could not complete this request. Please try again.";
+}
+
+function logProviderFailure(error: unknown): void {
+    // Provider messages and response bodies can contain prompts, personal data,
+    // or credential fragments. Log only normalized diagnostic fields.
+    console.error("AI query provider stream failed", getProviderErrorDetails(error));
+}
 
 function parseMessages(input: unknown): { rawMessages: Record<string, unknown>[]; textMessages: { role: "user" | "assistant"; content: string }[] } | null {
     const parsed = requestSchema.safeParse(input);
     if (!parsed.success) return null;
 
     const messages: { role: "user" | "assistant"; content: string }[] = [];
-    const rawMessages: Record<string, unknown>[] = [];
-    let totalCharacters = 0;
     for (const candidate of parsed.data.messages) {
         const message = messageSchema.safeParse(candidate);
         if (!message.success) return null;
 
-        const parsedParts = message.data.parts.map((part) => {
+        const textParts = message.data.parts.flatMap((part) => {
             const textPart = textPartSchema.safeParse(part);
-            if (textPart.success) return textPart.data;
-            if (typeof part === "object" && part !== null && "type" in part && typeof part.type === "string" && part.type.startsWith("tool-")) return part;
-            return null;
+            // Only send visible text back to the model. Tool invocations and
+            // tool results are client-controlled historical payloads; omitting
+            // them avoids trusting forged results and accepts SDK step markers.
+            return textPart.success ? [textPart.data.text] : [];
         });
-        if (parsedParts.some((part) => part === null)) return null;
-        const safeParts = parsedParts.filter((part) => part !== null);
-        const content = safeParts
-            .filter((part) => "text" in part && typeof part.text === "string")
-            .map((part) => part.text as string)
-            .join("\n")
-            .trim();
-        totalCharacters += content.length;
-        if (totalCharacters > 12_000) return null;
-        rawMessages.push({ ...message.data, parts: safeParts });
-        if (content) messages.push({ role: message.data.role, content });
+        const content = textParts.join("\n").trim();
+        if (content) {
+            const previousMessage = messages.at(-1);
+            if (previousMessage?.role === message.data.role) {
+                previousMessage.content = `${previousMessage.content}\n${content}`;
+            } else {
+                messages.push({ role: message.data.role, content });
+            }
+        }
     }
 
-    const lastMessage = rawMessages.at(-1);
-    const isApprovalResponse = lastMessage?.role === "assistant" && Array.isArray(lastMessage.parts) && lastMessage.parts.some((part) =>
-        typeof part === "object" && part !== null && "type" in part && typeof part.type === "string" && part.type.startsWith("tool-") &&
-        "approval" in part && typeof part.approval === "object" && part.approval !== null && "approved" in part.approval,
-    );
-    if (messages.length === 0 || (lastMessage?.role !== "user" && !isApprovalResponse)) return null;
-    return { rawMessages, textMessages: messages };
+    const lastMessage = messageSchema.safeParse(parsed.data.messages.at(-1));
+    // Each request must end with a new user instruction. In particular, never
+    // accept a client-submitted tool approval as authorization to execute a
+    // consequential action. The assistant has read-only tools only.
+    if (!lastMessage.success || lastMessage.data.role !== "user" || messages.at(-1)?.role !== "user") return null;
+
+    // Keep a bounded, recent text-only history. This lets old chats continue
+    // without rejecting a short new question once they exceed the model window.
+    const context: typeof messages = [];
+    let contextCharacters = 0;
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+        const message = messages[index];
+        if (context.length >= MAX_CONTEXT_MESSAGES || contextCharacters + message.content.length > MAX_CONTEXT_CHARACTERS) break;
+        context.unshift(message);
+        contextCharacters += message.content.length;
+    }
+    if (context.at(-1)?.role !== "user") return null;
+
+    const rawMessages = context.map((message, index) => ({
+        id: `ai-context-${index}`,
+        role: message.role,
+        parts: [{ type: "text", text: message.content }],
+    }));
+    return { rawMessages, textMessages: context };
 }
 
 // ---------------------------------------------------------------------------
@@ -160,13 +246,15 @@ export async function POST(request: Request) {
     const TRADER_ROLES = ["manufacturer", "wholesaler", "retailer"];
     const isTrader = TRADER_ROLES.includes(userRole);
 
-    // Check RRA staff status (verify against DB, not client-supplied data)
+    // Check TF staff status (verify against DB, not client-supplied data)
     let isRRAStaff = false;
     let staffClearance = "";
+    let staffRoles: string[] = [];
+    let staffDepartment: string | null = null;
 
     if (!isTrader) {
         const staffRecords = await db
-            .select({ clearanceLevel: rraStaff.clearanceLevel, isActive: rraStaff.isActive })
+            .select({ id: rraStaff.id, clearanceLevel: rraStaff.clearanceLevel, isActive: rraStaff.isActive, department: rraStaff.department })
             .from(rraStaff)
             .where(eq(rraStaff.userId, userId))
             .limit(1);
@@ -174,14 +262,17 @@ export async function POST(request: Request) {
         if (staffRecords.length > 0 && staffRecords[0].isActive) {
             isRRAStaff = true;
             staffClearance = staffRecords[0].clearanceLevel;
+            staffDepartment = staffRecords[0].department;
+            const assignments = await db.select({ role: rraStaffRole.role }).from(rraStaffRole).where(eq(rraStaffRole.staffRecordId, staffRecords[0].id));
+            staffRoles = assignments.length ? assignments.map(({ role }) => role) : [staffClearance];
         }
     }
 
-    // Must be either a trader or active RRA staff
+    // Must be either a trader or active TF staff
     if (!isTrader && !isRRAStaff) {
         return new Response("Forbidden", { status: 403 });
     }
-    if (!isTrader && (!isRRARole(staffClearance) || !hasRRAPermission(staffClearance, "ai.assistant.use"))) {
+    if (!isTrader && !staffRoles.some((role) => isRRARole(role) && hasRRAPermission(role, "ai.assistant.use"))) {
         return new Response("Forbidden", { status: 403 });
     }
 
@@ -195,7 +286,7 @@ export async function POST(request: Request) {
 
     const parsedMessages = parseMessages(body);
     if (!parsedMessages) {
-        return Response.json({ error: "Invalid chat request. Please shorten your message and try again." }, { status: 400 });
+        return Response.json({ error: "I couldn't read this chat message. Please resend your question, or clear the chat if the problem continues." }, { status: 400 });
     }
 
     // Extract the latest user message for audit logging
@@ -206,18 +297,8 @@ export async function POST(request: Request) {
 
     // ── 4. Prompt injection guard ────────────────────────────────────────────
     // Reject messages that attempt to override system prompt or exfiltrate data
-    const INJECTION_PATTERNS = [
-        /ignore.{0,30}(previous|above|all).{0,30}instruction/i,
-        /you are now/i,
-        /system prompt/i,
-        /jailbreak/i,
-        /act as.{0,20}(DAN|unrestricted|unfiltered)/i,
-        /reveal.{0,30}(api key|secret|password|env)/i,
-        /repeat.{0,30}everything.{0,30}said/i,
-    ];
-
     for (const message of parsedMessages.textMessages) {
-        if (message.role === "user" && INJECTION_PATTERNS.some((pattern) => pattern.test(message.content))) {
+        if (message.role === "user" && isRRAAIInjectionAttempt(message.content)) {
             return new Response(
                 JSON.stringify({
                     error: "Message blocked: potential prompt injection detected.",
@@ -227,19 +308,42 @@ export async function POST(request: Request) {
         }
     }
 
-    // ── 5. Audit log the query ───────────────────────────────────────────────
+    // ── 5. Resolve the data tools using the current RBAC permission catalogue ─
+    const rraToolRegistry = {
+        getTaxpayerIntelligence, lookupTrader, searchTraders, getTransactions, getStockLevels, getStockMovements, getTaxStatus,
+        getRiskAssessment, getRevenueForecastTool, getSystemStats, getBehavioralAnalysis,
+        traceSupplyChain, traceProductJourney, getImportDeclarations, getProductionHistoryAnalysisTool,
+    } satisfies Record<RRAAIToolName, ToolSet[RRAAIToolName]>;
+    const allowedRraTools = getRRAAIToolNames(staffRoles);
+    const rraReadTools: ToolSet = isRRAStaff
+        ? Object.fromEntries(allowedRraTools.map((name) => [name, rraToolRegistry[name]])) as ToolSet
+        : {};
+    // The assistant is intentionally read-only. Consequential operations must
+    // be started in their dedicated authenticated human workflows, never by an
+    // AI tool call or a client-supplied approval part.
+    const tools: ToolSet = isTrader ? createTraderTools(userId) : rraReadTools;
+
+    // ── 6. Audit the request without storing the question or its TIN ─────────
+    let aiAuditId: string | null = null;
     try {
-        await db.insert(auditLog).values({
+        const [audit] = await db.insert(auditLog).values({
             userId,
             action: "AI_QUERY",
             targetType: "ai_assistant",
             targetId: null,
             metadata: JSON.stringify({
-                role: isTrader ? userRole : `rra_staff:${staffClearance}`,
+                role: isTrader ? userRole : `rra_staff:${staffRoles.join(",")}`,
+                department: isRRAStaff ? staffDepartment : undefined,
                 questionHash: createHash("sha256").update(questionText).digest("hex"),
                 questionLength: questionText.length,
+                authorizedTools: isRRAStaff ? allowedRraTools : undefined,
+                modulesAccessed: [],
+                requestCategory: "pending_tool_selection",
+                aiRecommendationGenerated: false,
             }),
-        });
+        }).returning({ id: auditLog.id });
+        aiAuditId = audit?.id ?? null;
+        if (!aiAuditId) throw new Error("AI usage audit record was not created.");
     } catch (error) {
         console.error("AI query audit logging failed", error);
         return new Response(
@@ -248,51 +352,91 @@ export async function POST(request: Request) {
         );
     }
 
-    // ── 6. Build tools for this role ──────────────────────────────────────────
-    const rraToolRegistry = {
-        lookupTrader, searchTraders, getTransactions, getStockLevels, getTaxStatus,
-        getRiskAssessment, getRevenueForecastTool, getSystemStats, getBehavioralAnalysis,
-        traceSupplyChain, traceProductJourney, getImportDeclarations,
-    } satisfies Record<RRAAIToolName, ToolSet[RRAAIToolName]>;
-    const rraReadTools: ToolSet = isRRARole(staffClearance)
-        ? Object.fromEntries(getRRAAIToolNames(staffClearance).map((name) => [name, rraToolRegistry[name]])) as ToolSet
-        : {};
-    const tools: ToolSet = isTrader
-        ? createTraderTools(userId)
-        : { ...rraReadTools, ...createRraActionTools(staffClearance) };
-
     // ── 7. Stream the response ───────────────────────────────────────────────
     try {
         const validatedMessages = await validateUIMessages({
             messages: parsedMessages.rawMessages,
-            tools,
+            tools: tools as Parameters<typeof validateUIMessages>[0]["tools"],
         });
-        const modelMessages = await convertToModelMessages(validatedMessages, { tools });
+        const modelMessages = await convertToModelMessages(validatedMessages, {
+            tools: tools as NonNullable<Parameters<typeof convertToModelMessages>[1]>["tools"],
+        });
         const result = streamText({
             model: MODEL,
-            system: isTrader ? getTraderSystemPrompt() : getRRASystemPrompt(),
+            system: isTrader ? getTraderSystemPrompt() : [
+                getRRASystemPrompt(),
+                "\nVERIFIED OFFICER CONTEXT (server supplied):",
+                `Roles: ${staffRoles.join(", ") || staffClearance}.`,
+                `Department: ${staffDepartment ?? "not recorded"}.`,
+                `Authorized data tools: ${allowedRraTools.join(", ") || "none"}.`,
+                "Adapt the focus of your answer to these roles and tools. Tool results are already filtered by server-side permissions. Never infer or describe data from a module whose tool is unavailable.",
+                "When making a recommendation, include the exact label: AI Recommendation — Human Review Required.",
+            ].join("\n"),
             messages: modelMessages,
             tools,
             stopWhen: stepCountIs(5),
             temperature: 0.1,      // low temperature for factual accuracy
             maxOutputTokens: 2048,
+            maxRetries: 2,
             abortSignal: AbortSignal.timeout(30_000),
-            onError: ({ error }) => console.error("AI query provider stream failed", {
-                userId,
-                errorName: error instanceof Error ? error.name : typeof error,
-            }),
+            onFinish: async ({ text, steps }) => {
+                if (!isRRAStaff || !aiAuditId) return;
+                const usedTools = [...new Set(steps.flatMap((step) => step.toolResults.map((toolResult) => toolResult.toolName)))];
+                const moduleByTool: Record<RRAAIToolName, string> = {
+                    getTaxpayerIntelligence: "taxpayer_intelligence",
+                    lookupTrader: "taxpayer_directory",
+                    searchTraders: "taxpayer_directory",
+                    getTransactions: "transactions",
+                    getStockLevels: "inventory",
+                    getStockMovements: "stock_movements",
+                    getTaxStatus: "tax_compliance",
+                    getRiskAssessment: "risk_assessment",
+                    getRevenueForecastTool: "revenue_analytics",
+                    getSystemStats: "aggregate_statistics",
+                    getBehavioralAnalysis: "behavioral_analysis",
+                    traceSupplyChain: "supply_chain",
+                    traceProductJourney: "product_journey",
+                    getImportDeclarations: "imports",
+                    getProductionHistoryAnalysisTool: "production_history_confidential",
+                };
+                const modulesAccessed = [...new Set(usedTools
+                    .filter((toolName): toolName is RRAAIToolName => toolName in moduleByTool)
+                    .map((toolName) => moduleByTool[toolName]))];
+                const requestCategory = modulesAccessed.length > 1
+                    ? "cross_module"
+                    : modulesAccessed[0] ?? "general_guidance";
+                try {
+                    await db.update(auditLog).set({ metadata: JSON.stringify({
+                        role: `rra_staff:${staffRoles.join(",")}`,
+                        department: staffDepartment,
+                        questionHash: createHash("sha256").update(questionText).digest("hex"),
+                        questionLength: questionText.length,
+                        authorizedTools: allowedRraTools,
+                        modulesAccessed,
+                        requestCategory,
+                        aiRecommendationGenerated: /AI Recommendation\s*[—-]\s*Human Review Required/i.test(text),
+                    }) }).where(eq(auditLog.id, aiAuditId));
+                } catch (error) {
+                    console.error("AI usage audit completion failed", {
+                        userId,
+                        auditId: aiAuditId,
+                        errorName: error instanceof Error ? error.name : typeof error,
+                    });
+                }
+            },
+            onError: ({ error }) => logProviderFailure(error),
         });
 
         return result.toUIMessageStreamResponse({
-            onError: () => "The AI assistant could not complete this request. Please try again.",
+            onError: getSafeProviderErrorMessage,
         });
     } catch (err) {
-        console.error("[AI Query] streamText error:", err);
+        logProviderFailure(err);
 
         // Surface model outage gracefully — never expose internal error details
         return new Response(
             JSON.stringify({
-                error: "The AI service is temporarily unavailable. Please try again in a moment.",
+                error: getSafeProviderErrorMessage(err),
             }),
             { status: 503, headers: { "Content-Type": "application/json" } },
         );

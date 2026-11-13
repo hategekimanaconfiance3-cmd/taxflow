@@ -57,7 +57,7 @@ Analysis date: 2026-03-16 | Codebase: `taxflow-platform`
 | Clearance control | `user.clearanceStatus` — approved/under_review/suspended restricts trading |
 
 > [!TIP]
-> **Remaining gap**: No automatic trader suspension triggered by chronic non-compliance. The `clearanceStatus` exists but must be manually changed by RRA staff.
+> **Remaining gap**: No automatic trader suspension triggered by chronic non-compliance. The `clearanceStatus` exists but must be manually changed by TF staff.
 
 ---
 
@@ -123,7 +123,7 @@ Analysis date: 2026-03-16 | Codebase: `taxflow-platform`
 **What exists:**
 - AI Chat Widget for instant taxpayer queries
 - Real-time notifications via Socket.IO
-- Dispute resolution system (6-step flow: file → acknowledge/contest → RRA review → resolve)
+- Dispute resolution system (6-step flow: file → acknowledge/contest → TF review → resolve)
 - Self-service dashboard for compliance status, payments, transactions
 
 **What's missing:**
@@ -159,11 +159,11 @@ Analysis date: 2026-03-16 | Codebase: `taxflow-platform`
 **What exists:**
 - Admin → Trader notifications via [admin-notification.action.ts](file:///home/elllyers/confiance/projects/taxflow/taxflow-platform/lib/actions/admin-notification.action.ts)
 - Real-time Socket.IO events for disputes, transactions
-- Compliance alerts automatically sent to all RRA staff
+- Compliance alerts automatically sent to all TF staff
 
 **What's missing:**
 - ❌ **No staff-to-staff messaging** within the platform
-- ❌ **No internal bulletin board / announcements for RRA staff**
+- ❌ **No internal bulletin board / announcements for TF staff**
 - ❌ **No structured handoff** between staff during audit workflows (audit notes exist but no assignment/reassignment)
 - ❌ **No team channels** for department-level communication
 

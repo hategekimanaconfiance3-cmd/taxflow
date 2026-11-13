@@ -2,11 +2,12 @@
 
 import { eq, sql, desc, and, or, gte, lte, ilike } from "drizzle-orm";
 import db from "@/db/drizzle";
-import { dispute, user, transaction, vatRecord, auditLog, stock, stockMovement, product, taxPayment } from "@/db/schema";
+import { dispute, user, transaction, vatRecord, auditLog, stock, stockMovement, stockReservation, product, notification, b2bOrderAcceptance } from "@/db/schema";
 import {
-    requireRRASession,
-    type RRARole,
+    requireAnyRRAPermission,
+    requireRRAPermission,
 } from "@/lib/auth-guard";
+import { hasRRAPermission } from "@/lib/rra-rbac";
 import { logAudit } from "@/lib/audit";
 import { getSystemConfig } from "@/lib/actions/system-config.action";
 
@@ -18,7 +19,7 @@ import { getSystemConfig } from "@/lib/actions/system-config.action";
  * Get all traders in the system (paginated).
  */
 export async function getAllTraders() {
-    await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
+    await requireRRAPermission("taxpayer.intelligence.search");
 
     return db
         .select({
@@ -42,7 +43,7 @@ export async function getAllTraders() {
  * Get a single trader's profile.
  */
 export async function getTrader(traderId: string) {
-    await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
+    await requireRRAPermission("taxpayer.intelligence.search");
 
     const [trader] = await db
         .select()
@@ -65,53 +66,66 @@ type ClearanceStatus = "approved" | "under_review" | "suspended";
 
 /**
  * Update a trader's clearance status.
- * Requires 'admin' level clearance for the RRA staff member.
+ * Requires compliance.followup.manage permission.
+ * A mandatory reason (min 10 chars) is required and recorded in the audit log.
  */
 export async function updateClearanceStatus(
     targetUserId: string,
     newStatus: ClearanceStatus,
+    reason?: string,
 ) {
-    const { staff, ...session } = await requireRRASession("compliance_officer");
+    let actor: Awaited<ReturnType<typeof requireRRAPermission>>['user'];
+    let staff: Awaited<ReturnType<typeof requireRRAPermission>>['staff'];
+    try {
+        const session = await requireRRAPermission('compliance.followup.manage');
+        actor = session.user;
+        staff = session.staff;
+    } catch (authErr) {
+        if (authErr instanceof Error) throw authErr;
+        throw new Error('You are not authorised to change account status.');
+    }
 
-    const validStatuses: ClearanceStatus[] = [
-        "approved",
-        "under_review",
-        "suspended",
-    ];
-
+    const validStatuses: ClearanceStatus[] = ['approved', 'under_review', 'suspended'];
     if (!validStatuses.includes(newStatus)) {
         throw new Error(`Invalid clearance status: ${newStatus}`);
     }
 
-    // Get current status for audit
+    const trimmedReason = (reason ?? '').trim();
+    if (trimmedReason.length < 10) {
+        throw new Error('A reason of at least 10 characters is required for account status changes.');
+    }
+
     const [target] = await db
-        .select({ clearanceStatus: user.clearanceStatus, role: user.role })
+        .select({ clearanceStatus: user.clearanceStatus, role: user.role, businessName: user.businessName, tinNumber: user.tinNumber })
         .from(user)
         .where(eq(user.id, targetUserId))
         .limit(1);
 
-    if (!target) {
-        throw new Error("User not found");
-    }
+    if (!target) throw new Error('User not found');
+    if (target.role === 'rra_staff') throw new Error('Cannot change clearance of TF staff');
+    if (target.clearanceStatus === newStatus) throw new Error(`Account is already ${newStatus}.`);
 
-    if (target.role === "rra_staff") {
-        throw new Error("Cannot change clearance of RRA staff");
-    }
+    await db.update(user).set({ clearanceStatus: newStatus }).where(eq(user.id, targetUserId));
 
-    await db
-        .update(user)
-        .set({ clearanceStatus: newStatus })
-        .where(eq(user.id, targetUserId));
+    let auditAction = 'CLEARANCE_UPDATED';
+    if (newStatus === 'suspended') auditAction = 'ACCOUNT_SUSPENDED';
+    else if (newStatus === 'approved' && target.clearanceStatus === 'suspended') auditAction = 'ACCOUNT_REINSTATED';
+    else if (newStatus === 'under_review') auditAction = 'ACCOUNT_PLACED_UNDER_REVIEW';
+    else if (newStatus === 'approved') auditAction = 'ACCOUNT_APPROVED';
 
     await logAudit({
-        userId: session.user.id,
-        action: "CLEARANCE_UPDATED",
-        targetType: "user",
+        userId: actor.id,
+        action: auditAction,
+        targetType: 'user',
         targetId: targetUserId,
         metadata: {
             previousStatus: target.clearanceStatus,
             newStatus,
+            reason: trimmedReason,
+            businessName: target.businessName,
+            tinNumber: target.tinNumber,
             updatedBy: staff.staffId,
+            staffRoles: staff.clearanceRoles,
         },
     });
 
@@ -128,7 +142,7 @@ export async function getAllTransactions(filters?: {
     dateTo?: string;
     search?: string;
 }) {
-    await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
+    await requireRRAPermission("transaction.read");
 
     const seller = db
         .select({ id: user.id, businessName: user.businessName })
@@ -200,11 +214,14 @@ export async function getAllTransactions(filters?: {
 // ---------------------------------------------------------------------------
 
 export async function getComplianceReport() {
-    await requireRRASession("compliance_officer", "tax_compliance_officer");
+    const { staff } = await requireAnyRRAPermission("taxpayer.compliance.read", "tax.records.read", "transaction.read", "reports.aggregate.read", "analytics.read");
+    const canReadCompliance = staff.clearanceRoles.some((role) => hasRRAPermission(role, "taxpayer.compliance.read"));
+    const canReadTransactions = staff.clearanceRoles.some((role) => hasRRAPermission(role, "transaction.read") || hasRRAPermission(role, "reports.aggregate.read") || hasRRAPermission(role, "analytics.read"));
+    const canReadTaxRecords = staff.clearanceRoles.some((role) => hasRRAPermission(role, "tax.records.read") || hasRRAPermission(role, "reports.aggregate.read") || hasRRAPermission(role, "analytics.read"));
 
-    // Total traders by role
-    const tradersByRole = await db
-        .select({
+    const [tradersByRole, tradersByClearance, transactionStats, vatStats] = await Promise.all([
+        canReadCompliance ? db
+            .select({
             role: user.role,
             count: sql<number>`COUNT(*)`.as("count"),
         })
@@ -212,11 +229,10 @@ export async function getComplianceReport() {
         .where(
             sql`${user.role} IN ('manufacturer', 'wholesaler', 'retailer')`,
         )
-        .groupBy(user.role);
+            .groupBy(user.role) : Promise.resolve([]),
 
-    // Traders by clearance status
-    const tradersByClearance = await db
-        .select({
+        canReadCompliance ? db
+            .select({
             clearanceStatus: user.clearanceStatus,
             count: sql<number>`COUNT(*)`.as("count"),
         })
@@ -224,11 +240,10 @@ export async function getComplianceReport() {
         .where(
             sql`${user.role} IN ('manufacturer', 'wholesaler', 'retailer')`,
         )
-        .groupBy(user.clearanceStatus);
+            .groupBy(user.clearanceStatus) : Promise.resolve([]),
 
-    // Transaction stats
-    const transactionStats = await db
-        .select({
+        canReadTransactions ? db
+            .select({
             status: transaction.status,
             count: sql<number>`COUNT(*)`.as("count"),
             totalValue: sql<number>`COALESCE(SUM(${transaction.totalAmount}), 0)::float8`.as(
@@ -236,16 +251,16 @@ export async function getComplianceReport() {
             ),
         })
         .from(transaction)
-        .groupBy(transaction.status);
+            .groupBy(transaction.status) : Promise.resolve([]),
 
-    // Total VAT
-    const vatStats = await db
-        .select({
+        canReadTaxRecords ? db
+            .select({
             vatType: vatRecord.vatType,
             total: sql<number>`COALESCE(SUM(${vatRecord.amount}), 0)::float8`.as("total"),
         })
         .from(vatRecord)
-        .groupBy(vatRecord.vatType);
+            .groupBy(vatRecord.vatType) : Promise.resolve([]),
+    ]);
 
     return {
         tradersByRole,
@@ -264,7 +279,7 @@ export async function getAuditLogs(filters?: {
     action?: string;
     limit?: number;
 }) {
-    await requireRRASession("audit_officer", "audit_investigation_officer", "super_admin");
+    await requireRRAPermission("audit.trail.read");
 
     const limit = filters?.limit ?? 100;
 
@@ -314,7 +329,7 @@ export async function modifyTransaction(
         reason: string; // mandatory
     },
 ) {
-    const { staff, ...session } = await requireRRASession("compliance_officer", "tax_compliance_officer");
+    const { staff, ...session } = await requireRRAPermission("compliance.followup.manage");
 
     if (!changes.reason?.trim()) {
         throw new Error("A reason is required for all record modifications");
@@ -366,6 +381,16 @@ export async function modifyTransaction(
     };
 
     await db.transaction(async (tx) => {
+        const [lockedTxn] = await tx.select().from(transaction).where(eq(transaction.id, transactionId)).for("update").limit(1);
+        if (!lockedTxn || lockedTxn.status !== "confirmed" && lockedTxn.status !== "completed") {
+            throw new Error("Transaction changed before the correction could be applied.");
+        }
+        const [fulfillmentAcceptance] = await tx.select({ id: b2bOrderAcceptance.id })
+            .from(b2bOrderAcceptance).where(eq(b2bOrderAcceptance.transactionId, transactionId)).limit(1);
+        if (fulfillmentAcceptance) {
+            throw new Error("This transaction has separate B2B fulfillment evidence. Quantity or price corrections are disabled until fulfillment-aware correction handling is completed.");
+        }
+
         // 1. Update the transaction
         await tx
             .update(transaction)
@@ -462,7 +487,7 @@ export async function modifyTransaction(
 // ---------------------------------------------------------------------------
 
 export async function getTraderTransactions(traderId: string) {
-    await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
+    await requireRRAPermission("transaction.read");
 
     return db
         .select({
@@ -498,7 +523,7 @@ export async function flagTransaction(
     transactionId: string,
     reason: string,
 ) {
-    const { staff, ...session } = await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
+    const { staff, ...session } = await requireAnyRRAPermission("compliance.followup.manage", "investigation.case.manage");
 
     if (!reason?.trim()) {
         throw new Error("A reason is required to flag a transaction.");
@@ -542,7 +567,7 @@ export async function cancelTransaction(
     transactionId: string,
     reason: string,
 ) {
-    const { staff, ...session } = await requireRRASession("compliance_officer", "audit_officer", "tax_compliance_officer", "audit_investigation_officer");
+    const { staff, ...session } = await requireAnyRRAPermission("compliance.followup.manage", "investigation.case.manage");
 
     if (!reason?.trim()) {
         throw new Error("A reason is required to cancel a transaction.");
@@ -557,6 +582,11 @@ export async function cancelTransaction(
             .limit(1);
 
         if (!txn) throw new Error("Transaction not found.");
+        const [fulfillmentAcceptance] = await tx.select({ id: b2bOrderAcceptance.id })
+            .from(b2bOrderAcceptance).where(eq(b2bOrderAcceptance.transactionId, txn.id)).limit(1);
+        if (fulfillmentAcceptance) {
+            throw new Error("This transaction has separate B2B acceptance evidence. RRA cancellation is disabled until the fulfillment-aware reversal workflow is completed.");
+        }
         if (txn.status === "rejected") throw new Error("Transaction is already rejected.");
         if (!["pending", "confirmed", "completed"].includes(txn.status)) {
             throw new Error("Transaction cannot be cancelled from its current status.");
@@ -571,6 +601,36 @@ export async function cancelTransaction(
             ))
             .limit(1);
         if (activeDispute) throw new Error("Resolve the active dispute before cancelling this transaction.");
+
+        let reservationId: string | null = null;
+        if (txn.status === "pending") {
+            const [reservation] = await tx.select().from(stockReservation)
+                .where(eq(stockReservation.transactionId, txn.id)).for("update").limit(1);
+            if (reservation && reservation.status !== "active") {
+                throw new Error(`Pending transaction has a ${reservation.status} reservation; cancellation needs reconciliation.`);
+            }
+            if (reservation?.status === "active") {
+                const [released] = await tx.update(stockReservation)
+                    .set({ status: "cancelled", releasedAt: new Date() })
+                    .where(and(eq(stockReservation.id, reservation.id), eq(stockReservation.status, "active")))
+                    .returning({ id: stockReservation.id });
+                if (released) {
+                    reservationId = reservation.id;
+                    const [sellerStock] = await tx.select().from(stock)
+                        .where(and(eq(stock.businessId, reservation.sellerId), eq(stock.productId, reservation.productId)))
+                        .for("update").limit(1);
+                    if (!sellerStock) throw new Error("Reserved inventory row is missing; cancellation was not applied.");
+                    const restored = sellerStock.quantity + reservation.quantity;
+                    await tx.update(stock).set({ quantity: restored }).where(eq(stock.id, sellerStock.id));
+                    await tx.insert(stockMovement).values({
+                        businessId: reservation.sellerId, productId: reservation.productId,
+                        quantityDelta: reservation.quantity, quantityBefore: sellerStock.quantity, quantityAfter: restored,
+                        movementType: "sale_reservation_released", sourceType: "stock_reservation", sourceId: reservation.id,
+                        actorUserId: session.user.id, reason: `RRA cancelled pending transaction: ${reason.trim()}`,
+                    });
+                }
+            }
+        }
 
         if (txn.status === "confirmed" || txn.status === "completed") {
             const [sellerStock] = await tx
@@ -649,9 +709,24 @@ export async function cancelTransaction(
                 previousStatus: txn.status,
                 cancelledBy: staff.staffId,
                 quantity: txn.quantity,
+                reservationId,
                 vatAmountReversed: txn.status === "confirmed" || txn.status === "completed" ? txn.vatAmount : 0,
             }),
         });
+        if (txn.status === "pending" && txn.buyerId) {
+            await tx.insert(notification).values([
+                {
+                    userId: txn.sellerId, type: "txn_cancelled", title: "Pending sale cancelled by RRA",
+                    message: `RRA cancelled transaction ${txn.id}: ${reason.trim()}. Reserved stock was released when applicable.`,
+                    link: "/dashboard/pending",
+                },
+                {
+                    userId: txn.buyerId, type: "txn_cancelled", title: "Purchase request cancelled by RRA",
+                    message: `RRA cancelled transaction ${txn.id}: ${reason.trim()}.`,
+                    link: "/dashboard/pending",
+                },
+            ]);
+        }
     });
 
     return { success: true };

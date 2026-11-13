@@ -1,7 +1,6 @@
 "use client";
 
-import { useState, useTransition, useCallback, useRef, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useTransition, useRef, useEffect } from "react";
 import { adminGlobalSearch } from "@/lib/actions/admin-dashboard.action";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -120,7 +119,7 @@ export function AdminDashboardSearch() {
 
             {/* Dropdown results */}
             {isOpen && results && (
-                <Card className="absolute top-full mt-1 right-0 z-50 w-[580px] max-h-[480px] overflow-y-auto shadow-xl border p-0">
+                <Card className="absolute top-full right-0 z-50 mt-1 max-h-[min(480px,70dvh)] w-[min(580px,calc(100vw-2rem))] overflow-y-auto border p-0 shadow-xl">
                     <div className="p-2 text-xs text-muted-foreground border-b">
                         {totalResults} result{totalResults !== 1 ? "s" : ""}{" "}
                         for &quot;{query}&quot;
