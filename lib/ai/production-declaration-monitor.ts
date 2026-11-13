@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { createHash } from 'node:crypto';
-import { and, desc, eq, inArray, lt, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, lt, notExists, sql } from 'drizzle-orm';
 import db from '@/db/drizzle';
 import {
   aiFinding,
@@ -22,6 +22,151 @@ import { emitToUser } from '@/lib/realtime';
 import { getProductionHistoryAnalysis } from '@/lib/ai/production-history-service';
 import { PRODUCTION_HISTORY_RULE_VERSION } from '@/lib/ai/production-history-baseline';
 import { decimalToMicros, microsToDecimal, quantityToMicros } from '@/lib/material-accounting';
+
+const RECOVERY_BATCH_LIMIT = 25;
+const PRODUCTION_ALERT_LOCK_ID = 7056509920059721;
+
+type RecoveryNotification = {
+  id: string;
+  userId: string;
+  type: string;
+  title: string;
+  message: string;
+  link: string | null;
+};
+
+/** Retry missing declaration comparisons and deliver any missing staff alerts. */
+export async function recoverProductionMonitoring(): Promise<{
+  attempted: number;
+  compared: number;
+  comparisonFailures: number;
+  notificationsCreated: number;
+}> {
+  const unmonitored = await db.select({ id: productionBatch.id })
+    .from(productionBatch)
+    .where(and(
+      eq(productionBatch.materialReviewStatus, 'pending'),
+      notExists(db.select({ id: productionHistoryComparison.id })
+        .from(productionHistoryComparison)
+        .where(eq(productionHistoryComparison.productionBatchId, productionBatch.id))),
+    ))
+    .orderBy(productionBatch.createdAt)
+    .limit(RECOVERY_BATCH_LIMIT);
+
+  let compared = 0;
+  let comparisonFailures = 0;
+  for (const batch of unmonitored) {
+    try {
+      const result = await monitorProductionDeclaration(batch.id);
+      if (result.compared) compared += 1;
+    } catch (error) {
+      comparisonFailures += 1;
+      console.error('[production:monitor-recovery]', {
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+      });
+    }
+  }
+
+  const notifications = await deliverMissingProductionFindingNotifications();
+  return {
+    attempted: unmonitored.length,
+    compared,
+    comparisonFailures,
+    notificationsCreated: notifications.length,
+  };
+}
+
+async function deliverMissingProductionFindingNotifications(): Promise<RecoveryNotification[]> {
+  const created = await db.transaction(async (tx) => {
+    // Serialize cron recovery with itself and with the immediate notification path.
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(${PRODUCTION_ALERT_LOCK_ID})`);
+    const officerIds = await listResponsibleOfficerIds();
+    if (officerIds.length === 0) return [];
+
+    const findings = await tx.select({
+      id: aiFinding.id,
+      evidenceRefs: aiFinding.evidenceRefs,
+      severity: aiFinding.severity,
+    }).from(aiFinding)
+      .where(and(
+        eq(aiFinding.findingType, 'production_discrepancy'),
+        eq(aiFinding.reviewStatus, 'open'),
+      ))
+      .orderBy(desc(aiFinding.createdAt))
+      .limit(RECOVERY_BATCH_LIMIT * 4);
+
+    const routable = findings.flatMap((finding) => {
+      if (!finding.evidenceRefs) return [];
+      try {
+        const evidence: unknown = JSON.parse(finding.evidenceRefs);
+        if (typeof evidence !== 'object' || evidence === null || !('batchId' in evidence) || typeof evidence.batchId !== 'string') return [];
+        return [{
+          findingId: finding.id,
+          batchId: evidence.batchId,
+          severity: finding.severity,
+          link: `/admin/production/material-accounting?batchId=${encodeURIComponent(evidence.batchId)}&findingId=${encodeURIComponent(finding.id)}`,
+        }];
+      } catch {
+        return [];
+      }
+    });
+    if (routable.length === 0) return [];
+
+    const activeBatchIds = [...new Set(routable.map((item) => item.batchId))];
+    const activeBatches = await tx.select({ id: productionBatch.id })
+      .from(productionBatch)
+      .where(and(
+        inArray(productionBatch.id, activeBatchIds),
+        eq(productionBatch.materialReviewStatus, 'pending'),
+      ));
+    const pendingBatchIds = new Set(activeBatches.map((batch) => batch.id));
+    const pendingFindings = routable.filter((item) => pendingBatchIds.has(item.batchId));
+    if (pendingFindings.length === 0) return [];
+
+    const links = [...new Set(pendingFindings.map((item) => item.link))];
+    const existing = await tx.select({ userId: notification.userId, link: notification.link })
+      .from(notification)
+      .where(and(inArray(notification.userId, officerIds), inArray(notification.link, links)));
+    const existingKeys = new Set(existing.map((item) => `${item.userId}\u0000${item.link}`));
+    const values = pendingFindings.flatMap((finding) => officerIds.flatMap((userId) => {
+      if (existingKeys.has(`${userId}\u0000${finding.link}`)) return [];
+      existingKeys.add(`${userId}\u0000${finding.link}`);
+      return [{
+        userId,
+        type: 'system',
+        title: finding.severity === 'critical' ? 'Production material signal requires review' : 'Production declaration signal requires review',
+        message: 'A production declaration has an evidence-backed signal awaiting authorized staff review. This alert is advisory and does not represent a finding of wrongdoing.',
+        link: finding.link,
+      }];
+    }));
+    if (values.length === 0) return [];
+    return tx.insert(notification).values(values).returning({
+      id: notification.id,
+      userId: notification.userId,
+      type: notification.type,
+      title: notification.title,
+      message: notification.message,
+      link: notification.link,
+    });
+  });
+
+  for (const item of created) {
+    try {
+      emitToUser(item.userId, 'notification', {
+        id: item.id,
+        type: item.type,
+        title: item.title,
+        message: item.message,
+        link: item.link,
+      });
+    } catch (error) {
+      console.error('[production:monitor-recovery-realtime]', {
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+      });
+    }
+  }
+  return created;
+}
 
 const HISTORY_BATCH_LIMIT = 10;
 
@@ -310,6 +455,7 @@ export async function monitorProductionDeclaration(batchId: string): Promise<{ c
   const notificationMessage = `${batch.businessName ?? 'Manufacturer'} · ${batch.batchReference}. Reasons: ${alertReasons.join(', ')}. Review the protected material codes and comparison before releasing or resolving the declaration.`;
 
   const persisted = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(${PRODUCTION_ALERT_LOCK_ID})`);
     const [comparison] = await tx.insert(productionHistoryComparison).values({
       id: comparisonId,
       productionBatchId: batch.id,
