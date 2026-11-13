@@ -67,7 +67,7 @@ async function expireStalePendingTransactions(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Create B2B Transaction (Manufacturer/Wholesaler → Buyer)
+// Create B2B Transaction (Manufacturer/Wholesaler ΓåÆ Buyer)
 // ---------------------------------------------------------------------------
 
 export async function createTransaction(data: {
@@ -103,7 +103,7 @@ export async function createTransaction(data: {
     throw new Error('Buyer has no assigned role');
   }
 
-  // Validate seller → buyer role compatibility
+  // Validate seller ΓåÆ buyer role compatibility
   validateRoleCompatibility(sellerRole, buyer.role);
 
   // Check buyer's clearance
@@ -111,7 +111,7 @@ export async function createTransaction(data: {
     throw new Error("Buyer's account is not approved by RRA");
   }
 
-  // Tax compliance gate — seller must have paid >= 95% of tax
+  // Tax compliance gate ΓÇö seller must have paid >= 95% of tax
   const sellerCompliance = await getBusinessComplianceStatus(session.user.id);
   if (!sellerCompliance.isCompliant) {
     throw new Error(
@@ -120,7 +120,7 @@ export async function createTransaction(data: {
     );
   }
 
-  // Tax compliance gate — buyer must have paid >= 95% of tax to restock
+  // Tax compliance gate ΓÇö buyer must have paid >= 95% of tax to restock
   const buyerCompliance = await getBusinessComplianceStatus(buyer.id);
   if (!buyerCompliance.isCompliant) {
     throw new Error(
@@ -129,7 +129,7 @@ export async function createTransaction(data: {
     );
   }
 
-  // Check seller has enough stock (we don't deduct yet — only on confirmation)
+  // Check seller has enough stock (we don't deduct yet ΓÇö only on confirmation)
   const [sellerStock] = await db
     .select()
     .from(stock)
@@ -151,7 +151,7 @@ export async function createTransaction(data: {
   });
   const vatAmount = vatCalculation.vatAmountRwf;
 
-  // AI Price Floor enforcement — blocks underreporting
+  // AI Price Floor enforcement ΓÇö blocks underreporting
   const priceCheck = await validatePriceFloor(data.productId, session.user.id, data.unitPrice);
   if (!priceCheck.valid) {
     throw new Error(priceCheck.error ?? 'Price is below the AI-computed minimum.');
@@ -229,15 +229,6 @@ export async function createTransaction(data: {
     message: `${session.user.name} sent you ${data.quantity} units (${totalAmount.toLocaleString()} RWF). Please confirm.`,
     link: '/dashboard/pending',
   });
-
-  // AI hook � check for rapid depletion and other signals
-  triggerManufacturerAICheck({
-    businessId: session.user.id,
-    event: 'SALE_CREATED',
-    referenceId: txn.id,
-    productId: data.productId,
-    quantity: data.quantity,
-  }).catch((error) => console.error('[ManufacturerHook] fire error:', error));
 
   return txn;
 }
@@ -419,7 +410,7 @@ export async function confirmTransaction(transactionId: string) {
     link: '/dashboard/pending',
   });
 
-  // Compliance alert auto-detection — check both seller and buyer
+  // Compliance alert auto-detection ΓÇö check both seller and buyer
   await checkAndAlertCompliance(session.user.id);
 
   return { success: true };
@@ -483,7 +474,7 @@ export async function rejectTransaction(transactionId: string) {
 }
 
 // ---------------------------------------------------------------------------
-// Create Retail Sale (Retailer → Final Consumer)
+// Create Retail Sale (Retailer ΓåÆ Final Consumer)
 // ---------------------------------------------------------------------------
 
 export async function createRetailSale(data: {
@@ -520,7 +511,7 @@ export async function createRetailSale(data: {
   });
   const vatAmount = vatCalculation.vatAmountRwf;
 
-  // AI Price Floor enforcement — blocks underreporting
+  // AI Price Floor enforcement ΓÇö blocks underreporting
   const priceCheck = await validatePriceFloor(data.productId, session.user.id, data.unitPrice);
   if (!priceCheck.valid) {
     throw new Error(priceCheck.error ?? 'Price is below the AI-computed minimum.');
@@ -596,7 +587,7 @@ export async function createRetailSale(data: {
       actorUserId: session.user.id,
     });
 
-    // Create VAT output record (retailer only — no buyer VAT for consumers)
+    // Create VAT output record (retailer only ΓÇö no buyer VAT for consumers)
     await tx.insert(vatRecord).values({
       transactionId: txn.id,
       businessId: session.user.id,
@@ -778,7 +769,7 @@ export async function lookupBuyer(buyerTin: string) {
         buyerTaxReason = `Tax compliance: ${compliance.compliancePct}% (need ${compliance.threshold}%). Outstanding: ${compliance.outstanding.toLocaleString()} RWF`;
       }
     } catch {
-      // If compliance check fails, don't block — just report clearance
+      // If compliance check fails, don't block ΓÇö just report clearance
     }
 
     return {

@@ -145,7 +145,7 @@ export async function routeFindingToRRAStaff(payload: FindingRouterPayload): Pro
           await resend.emails.send({
             from: 'TaxFlow AI Monitor <onboarding@resend.dev>',
             to: officer.email,
-            subject: `[CRITICAL AI FINDING] ${payload.findingType.replace(/_/g, ' ').toUpperCase()} — ${businessLabel}`,
+            subject: `[CRITICAL AI FINDING] ${payload.findingType.replace(/_/g, ' ').toUpperCase()} â€” ${businessLabel}`,
             html,
           });
         }

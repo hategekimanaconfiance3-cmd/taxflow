@@ -133,15 +133,6 @@ export async function recordProduction(data: { productId: string; quantity: numb
     return { stockId: updatedStock.id, beforeQuantity, afterQuantity };
   });
 
-  // Fire AI hook asynchronously — never blocks or breaks the production record
-  triggerManufacturerAICheck({
-    businessId: session.user.id,
-    event: 'PRODUCTION_RECORDED',
-    referenceId: movementId,
-    productId: data.productId,
-    quantity: data.quantity,
-  }).catch((error) => console.error('[ManufacturerHook] fire error:', error));
-
   return { success: true, movementId, ...result };
 }
 
