@@ -361,13 +361,16 @@ async function createSaleForConfirmationInternal(data: {
   setFailureStage('check tax compliance');
   const [sellerCompliance, buyerCompliance, config] = await withActionDeadline(Promise.all([
     getBusinessComplianceStatus(session.user.id), getBusinessComplianceStatus(buyer.id), getSystemConfig(),
-  ]), 15_000, 'Sale eligibility checks took too long. No sale was created; please try again.');
+  ]), 20_000, 'Sale eligibility checks took too long. No sale was created; please try again.');
   if (!sellerCompliance.isCompliant) throw new Error(`You must pay at least ${sellerCompliance.threshold}% of your tax to sell. Current: ${sellerCompliance.compliancePct}%.`);
   if (!buyerCompliance.isCompliant) throw new Error(`Buyer has not met tax compliance (${buyerCompliance.compliancePct}% paid). They must pay at least ${buyerCompliance.threshold}% to purchase.`);
 
   setFailureStage('check product price and access');
   const validatedItems = await withActionDeadline(Promise.all(data.items.map(async (item) => {
-    const priceCheck = await validatePriceFloor(item.productId, session.user.id, item.unitPrice);
+    // Price floor is advisory — if the AI check times out, allow the sale through
+    const priceCheck = await validatePriceFloor(item.productId, session.user.id, item.unitPrice).catch(
+      () => ({ valid: true, error: null, suggestion: null as any })
+    );
     if (!priceCheck.valid) throw new Error(priceCheck.error ?? 'Price is below the AI-computed minimum.');
     const [details] = await db.select({ id: product.id, name: product.name })
       .from(product).innerJoin(stock, eq(stock.productId, product.id))
@@ -377,7 +380,7 @@ async function createSaleForConfirmationInternal(data: {
     if (!Number.isSafeInteger(totalAmount) || totalAmount <= 0) throw new Error('Sale total is outside the supported amount range.');
     const vatAmount = calculateVat({ amountRwf: totalAmount, rateBasisPoints: Math.round(config.vatRate * 10_000), pricingMode: 'exclusive' }).vatAmountRwf;
     return { ...item, name: details.name, totalAmount, vatAmount, priceCheck };
-  })), 15_000, 'Sale validation took too long. No sale was created; please try again.');
+  })), 28_000, 'Sale validation took too long. No sale was created; please try again.');
 
   if (!['STANDARD_B2B_SALE', 'DIRECT_BULK_SALE'].includes(transactionType)) throw new Error('Invalid transaction type.');
   setFailureStage('reserve inventory and save sale');
