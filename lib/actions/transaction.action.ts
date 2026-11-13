@@ -471,7 +471,7 @@ async function createSaleForConfirmationInternal(data: {
           quantity: item.quantity, totalAmount: item.totalAmount, vatAmount: item.vatAmount, status: 'pending',
           reservationId: reservation.id, expiresAt }),
       });
-      if (item.priceCheck.suggestion.status !== 'no_data' && item.priceCheck.suggestion.ceiling > 0
+      if (item.priceCheck.suggestion && item.priceCheck.suggestion.status !== 'no_data' && item.priceCheck.suggestion.ceiling > 0
         && item.unitPrice > item.priceCheck.suggestion.ceiling) {
         setFailureStage('write price review audit');
         await tx.insert(auditLog).values({
@@ -1057,6 +1057,7 @@ export async function createRetailSale(data: {
 
   // Log if price is above ceiling (flagged for TF review)
   if (
+    priceCheck.suggestion &&
     priceCheck.suggestion.status !== 'no_data' &&
     priceCheck.suggestion.ceiling > 0 &&
     data.unitPrice > priceCheck.suggestion.ceiling
