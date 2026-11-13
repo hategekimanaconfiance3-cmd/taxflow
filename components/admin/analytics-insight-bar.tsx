@@ -110,7 +110,7 @@ export function AnalyticsInsightBar() {
           )}
         </div>
         <span className="text-[10px] text-muted-foreground/50 font-mono">
-          {data.period ?? ""} · auto-refreshes
+          auto-refreshes
         </span>
       </div>
 
