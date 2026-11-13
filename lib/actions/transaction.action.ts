@@ -317,12 +317,24 @@ async function createSaleForConfirmationInternal(data: {
     throw new Error('Delivery information fields must be text with at most 500 characters.');
   }
 
-  setFailureStage('look up buyer');
-  const [buyer] = await withActionDeadline(
-    Promise.resolve(db.select().from(user).where(eq(user.tinNumber, data.buyerTin)).limit(1)),
-    12_000,
-    'Buyer verification took too long. No sale was created; please try again.',
+  // ── Phase 1: parallel — buyer + prior txns + expire stale + seller compliance + config ──
+  setFailureStage('validate sale');
+  const transactionType = data.transactionType ?? 'STANDARD_B2B_SALE';
+  const requestTransactionIds = data.items.map((item) => createSaleTransactionId(session.user.id, data.submissionKey, item.productId));
+
+  const [buyerRows, priorTransactions, , sellerCompliance, config] = await withActionDeadline(
+    Promise.all([
+      db.select().from(user).where(eq(user.tinNumber, data.buyerTin)).limit(1),
+      db.select().from(transaction).where(inArray(transaction.id, requestTransactionIds)),
+      expireStalePendingTransactions(session.user.id).catch(() => {}),
+      getBusinessComplianceStatus(session.user.id),
+      getSystemConfig(),
+    ]),
+    8_000,
+    'Sale validation took too long. No sale was created; please try again.',
   );
+
+  const buyer = buyerRows[0];
   if (!buyer) throw new Error('Buyer not found with that TIN.');
   if (buyer.id === session.user.id) throw new Error('Cannot sell to yourself.');
   if (!buyer.isActive) throw new Error('Buyer account is inactive.');
@@ -330,13 +342,6 @@ async function createSaleForConfirmationInternal(data: {
   validateRoleCompatibility(sellerRole, buyer.role as TraderRole);
   if (buyer.clearanceStatus !== 'approved') throw new Error(`Buyer account is ${buyer.clearanceStatus}; TF approval is required.`);
 
-  const transactionType = data.transactionType ?? 'STANDARD_B2B_SALE';
-  const requestTransactionIds = data.items.map((item) => createSaleTransactionId(session.user.id, data.submissionKey, item.productId));
-  const priorTransactions = await withActionDeadline(
-    Promise.resolve(db.select().from(transaction).where(inArray(transaction.id, requestTransactionIds))),
-    12_000,
-    'Checking a previous sale submission took too long. Please retry; no duplicate sale was created.',
-  );
   if (priorTransactions.length > 0) {
     if (!matchesB2BSaleSubmission(priorTransactions, {
       items: data.items,
@@ -351,34 +356,37 @@ async function createSaleForConfirmationInternal(data: {
     return data.items.map((item) => priorTransactions.find((row) => row.productId === item.productId)!);
   }
 
-  setFailureStage('expire stale sales');
-  await withActionDeadline(
-    expireStalePendingTransactions(session.user.id),
-    12_000,
-    'Inventory checks took too long. No sale was created; please try again.',
-  );
-
-  setFailureStage('check tax compliance');
-  const [sellerCompliance, buyerCompliance, config] = await withActionDeadline(Promise.all([
-    getBusinessComplianceStatus(session.user.id), getBusinessComplianceStatus(buyer.id), getSystemConfig(),
-  ]), 20_000, 'Sale eligibility checks took too long. No sale was created; please try again.');
   if (!sellerCompliance.isCompliant) throw new Error(`You must pay at least ${sellerCompliance.threshold}% of your tax to sell. Current: ${sellerCompliance.compliancePct}%.`);
+
+  // ── Phase 2: parallel — buyer compliance + product lookups ──
+  setFailureStage('check eligibility and products');
+  const [buyerCompliance, ...productRows] = await withActionDeadline(
+    Promise.all([
+      getBusinessComplianceStatus(buyer.id),
+      ...data.items.map((item) =>
+        db.select({ id: product.id, name: product.name })
+          .from(product).innerJoin(stock, eq(stock.productId, product.id))
+          .where(and(eq(product.id, item.productId), eq(stock.businessId, session.user.id))).limit(1)
+      ),
+    ]),
+    7_000,
+    'Sale eligibility checks took too long. No sale was created; please try again.',
+  ) as [Awaited<ReturnType<typeof getBusinessComplianceStatus>>, ...Array<Array<{ id: string; name: string }>>];
+
   if (!buyerCompliance.isCompliant) throw new Error(`Buyer has not met tax compliance (${buyerCompliance.compliancePct}% paid). They must pay at least ${buyerCompliance.threshold}% to purchase.`);
 
-  setFailureStage('check product price and access');
-  const validatedItems = await withActionDeadline(Promise.all(data.items.map(async (item) => {
-    // Price floor check is fire-and-forget — never blocks a sale (runs async after)
-    const priceCheck = { valid: true, error: null, suggestion: null as any };
-    validatePriceFloor(item.productId, session.user.id, item.unitPrice).catch(() => {});
-    const [details] = await db.select({ id: product.id, name: product.name })
-      .from(product).innerJoin(stock, eq(stock.productId, product.id))
-      .where(and(eq(product.id, item.productId), eq(stock.businessId, session.user.id))).limit(1);
+  // Fire-and-forget price floor checks (never block the sale)
+  data.items.forEach((item) => { validatePriceFloor(item.productId, session.user.id, item.unitPrice).catch(() => {}); });
+
+  const priceCheck = { valid: true, error: null, suggestion: null as any };
+  const validatedItems = data.items.map((item, i) => {
+    const details = productRows[i]?.[0];
     if (!details) throw new Error('A selected product is not in your authorized inventory.');
     const totalAmount = Math.round(item.quantity * item.unitPrice);
     if (!Number.isSafeInteger(totalAmount) || totalAmount <= 0) throw new Error('Sale total is outside the supported amount range.');
     const vatAmount = calculateVat({ amountRwf: totalAmount, rateBasisPoints: Math.round(config.vatRate * 10_000), pricingMode: 'exclusive' }).vatAmountRwf;
     return { ...item, name: details.name, totalAmount, vatAmount, priceCheck };
-  })), 20_000, 'Sale validation took too long. No sale was created; please try again.');
+  });
 
   if (!['STANDARD_B2B_SALE', 'DIRECT_BULK_SALE'].includes(transactionType)) throw new Error('Invalid transaction type.');
   setFailureStage('reserve inventory and save sale');
