@@ -35,10 +35,6 @@ const nextConfig: NextConfig = {
   // nested under a user profile with inaccessible parent symlinks in CI/Work.
   outputFileTracingRoot: process.cwd(),
   turbopack: { root: process.cwd() },
-  typescript: {
-    // This forces Vercel to bypass the stuck TypeScript check during deployment
-    ignoreBuildErrors: true,
-  },
   async headers() {
     return [
       {

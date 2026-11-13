@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, inArray, lte } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, lte, ne } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { ClipboardList, Package, ShieldAlert, SlidersHorizontal } from "lucide-react";
 import { requireRRAPermission } from "@/lib/auth-guard";
@@ -72,6 +72,7 @@ export default async function AdminStockControlPage({
       createdAt: stockSellThroughThreshold.createdAt,
     }).from(stockSellThroughThreshold).where(and(
       eq(stockSellThroughThreshold.scopeType, "default"), eq(stockSellThroughThreshold.scopeKey, "*"),
+      ne(stockSellThroughThreshold.id, "taxflow-global-sell-through-default-75"),
       lte(stockSellThroughThreshold.effectiveAt, now),
     ))
       .orderBy(asc(stockSellThroughThreshold.scopeType), asc(stockSellThroughThreshold.scopeKey), desc(stockSellThroughThreshold.effectiveAt), desc(stockSellThroughThreshold.createdAt), desc(stockSellThroughThreshold.id)),

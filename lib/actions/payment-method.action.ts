@@ -7,6 +7,8 @@ import { paymentMethod } from "@/db/schema";
 import { requireTraderSession } from "@/lib/auth-guard";
 import { logAudit } from "@/lib/audit";
 import { maskIdentifier, PAYMENT_PROVIDERS, PROVIDER_LABELS } from "@/lib/utils/payment-masking";
+import { decryptPaymentData, encryptPaymentData } from "@/lib/payment-data-encryption";
+import type { PaymentMethodProvider } from "@/lib/utils/payment-masking";
 export type { PaymentMethodProvider } from "@/lib/utils/payment-masking";
 
 // ---------------------------------------------------------------------------
@@ -97,6 +99,15 @@ export async function savePaymentMethod(
     return { success: false, error: parsed.error.issues[0]?.message ?? "Invalid input." };
   }
   const { provider, label, identifier, makeDefault } = parsed.data;
+  let encryptedIdentifier: string;
+  try {
+    encryptedIdentifier = encryptPaymentData(identifier);
+  } catch (error) {
+    console.error("Payment method encryption is unavailable", {
+      errorName: error instanceof Error ? error.name : "UnknownError",
+    });
+    return { success: false, error: "Saved payment methods are unavailable until payment data encryption is configured." };
+  }
 
   // Limit to 10 saved methods per business
   const existingCount = await db
@@ -134,7 +145,7 @@ export async function savePaymentMethod(
         provider,
         label: label?.trim() || null,
         maskedIdentifier: masked,
-        fullIdentifier: identifier,
+        fullIdentifier: encryptedIdentifier,
         isDefault: Boolean(makeDefault),
         isActive: true,
       })
@@ -260,5 +271,5 @@ export async function getPaymentMethodFullIdentifier(
       ),
     )
     .limit(1);
-  return row?.fullIdentifier ?? null;
+  return row?.fullIdentifier ? decryptPaymentData(row.fullIdentifier) : null;
 }

@@ -31,7 +31,8 @@
     "db:seed:full": "tsx db/seeds/neon/taxflow-full.seed.ts",
     "db:seed:full:tin": "tsx db/seeds/neon/tin-full.seed.ts",
     "db:seed:full:all": "tsx db/seeds/neon/seed-all-full.ts",
-    "db:seed:test": "tsx db/seeds/test-accounts.seed.ts"
+    "db:seed:test": "tsx db/seeds/test-accounts.seed.ts",
+    "db:encrypt-payment-data": "tsx scripts/encrypt-payment-data.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.63",

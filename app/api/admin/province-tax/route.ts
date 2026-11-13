@@ -23,6 +23,7 @@ const PROVINCE_MAP: Record<string, string[]> = {
     Southern: ["SP", "Southern", "Huye", "Muhanga"],
     Eastern: ["EP", "Eastern", "Rwamagana", "Nyagatare"],
     Western: ["WP", "Western", "Rusizi", "Karongi"],
+    Unrecorded: [],
 };
 
 export async function GET() {
@@ -30,7 +31,7 @@ export async function GET() {
 
     try {
         const traders = await db
-            .select({ id: user.id, province: user.province })
+            .select({ id: user.id, province: sql<string | null>`NULL`.as("province") })
             .from(user)
             .where(sql`${user.role} IN ('manufacturer','wholesaler','retailer')`);
 
@@ -59,7 +60,7 @@ export async function GET() {
             const match =
                 Object.entries(PROVINCE_MAP).find(([, keywords]) =>
                     keywords.some((k) => prov.toLowerCase().includes(k.toLowerCase()))
-                )?.[0] ?? "Kigali";
+                )?.[0] ?? "Unrecorded";
             const b = buckets.get(match)!;
             b.count++;
             b.vat += vatMap.get(t.id) ?? 0;

@@ -610,7 +610,7 @@ export const paymentMethod = pgTable(
     label: text('label'),
     /** Masked for display: "+250 78* *** 456" */
     maskedIdentifier: text('masked_identifier').notNull(),
-    /** Full phone/account stored server-side — never returned raw to client */
+    /** AES-GCM encrypted phone/account — never returned raw to client */
     fullIdentifier: text('full_identifier').notNull(),
     isDefault: boolean('is_default').notNull().default(false),
     isActive: boolean('is_active').notNull().default(true),
@@ -700,7 +700,7 @@ export const rraCollectionAccount = pgTable(
     providerIntegration: text('provider_integration'),
     // Bank-specific
     bankAccountHolder: text('bank_account_holder'),
-    bankAccountNumber: text('bank_account_number'), // stored masked or encrypted
+    bankAccountNumber: text('bank_account_number'), // AES-GCM encrypted; masked value is displayed
     maskedAccountNumber: text('masked_account_number'),
     bankBranch: text('bank_branch'),
     // Mobile Money specific

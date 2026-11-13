@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, inArray, lte } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lte, ne } from "drizzle-orm";
 import db from "@/db/drizzle";
 import { auditLog, b2bOrderAcceptance, product, stock, stockMovement, stockReservation, stockRestockRequest, stockSellThroughCycle, stockSellThroughThreshold, transaction } from "@/db/schema";
 import { calculateSellThrough, resolveSellThroughThreshold, type SellThroughMovement, type SellThroughThresholdRecord } from "@/lib/stock-sell-through";
@@ -47,6 +47,7 @@ export async function assertPurchasedStockReceiptEligible(
 
   const policyRows = await tx.select().from(stockSellThroughThreshold).where(and(
     eq(stockSellThroughThreshold.scopeType, "default"), eq(stockSellThroughThreshold.scopeKey, "*"),
+    ne(stockSellThroughThreshold.id, "taxflow-global-sell-through-default-75"),
     lte(stockSellThroughThreshold.effectiveAt, at),
   )).orderBy(desc(stockSellThroughThreshold.effectiveAt), desc(stockSellThroughThreshold.createdAt), desc(stockSellThroughThreshold.id)).limit(1);
   const policy = resolveSellThroughThreshold(policyRows as SellThroughThresholdRecord[], productId, item.categoryCode, at);
@@ -95,9 +96,9 @@ export async function assertPurchasedStockReceiptEligible(
 
   if (result.status !== "eligible" && !approvedException) {
     const pct = result.sellThroughPercent === null ? "unknown" : `${result.sellThroughPercent.toFixed(1)}%`;
-    const required = policy?.thresholdPercent ?? 75;
     const remaining = result.status === "blocked" ? ` Sell ${result.remainingSalesQuantity.toLocaleString()} more ${item.name} units to qualify.` : "";
-    throw new Error(`Restocking is unavailable for ${item.name}. Recorded sell-through is ${pct}; required threshold is ${required}%. ${result.reason}${remaining} Request an authorized stock review if your opening balance or evidence is incomplete.`);
+    const thresholdMessage = policy ? `required threshold is ${policy.thresholdPercent}%.` : "no authorized sell-through threshold is configured.";
+    throw new Error(`Restocking is unavailable for ${item.name}. Recorded sell-through is ${pct}; ${thresholdMessage} ${result.reason}${remaining} Request an authorized stock review if your opening balance or evidence is incomplete.`);
   }
 
   if (approvedException) {

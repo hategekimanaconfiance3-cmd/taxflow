@@ -1,7 +1,7 @@
 "use server";
 
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, gte, inArray, lte } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lte, ne } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import db from "@/db/drizzle";
@@ -67,6 +67,7 @@ async function evaluateRequest(
   const thresholdRows = await tx.select().from(stockSellThroughThreshold).where(and(
       eq(stockSellThroughThreshold.scopeType, "default"),
       eq(stockSellThroughThreshold.scopeKey, "*"),
+      ne(stockSellThroughThreshold.id, "taxflow-global-sell-through-default-75"),
       lte(stockSellThroughThreshold.effectiveAt, at),
     )).orderBy(desc(stockSellThroughThreshold.effectiveAt), desc(stockSellThroughThreshold.createdAt), desc(stockSellThroughThreshold.id)).limit(1);
   const threshold = resolveSellThroughThreshold(thresholdRows as SellThroughThresholdRecord[], productId, null, at);
@@ -392,6 +393,7 @@ export async function createSellThroughThresholdAction(formData: FormData): Prom
       }).from(stockSellThroughThreshold).where(and(
         eq(stockSellThroughThreshold.scopeType, parsed.data.scopeType),
         eq(stockSellThroughThreshold.scopeKey, key),
+        ne(stockSellThroughThreshold.id, "taxflow-global-sell-through-default-75"),
         lte(stockSellThroughThreshold.effectiveAt, effectiveAt),
       )).orderBy(desc(stockSellThroughThreshold.effectiveAt), desc(stockSellThroughThreshold.createdAt), desc(stockSellThroughThreshold.id)).limit(1);
       const [saved] = await tx.insert(stockSellThroughThreshold).values({

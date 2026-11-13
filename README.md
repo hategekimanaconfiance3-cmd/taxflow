@@ -7,7 +7,7 @@ TaxFlow is a role-based tax and supply-chain support platform for manufacturers,
 - **Role-based business workflows:** manufacturer production, B2B sales, buyer confirmation, retailer consumer sales, inventory, tax reports, disputes, and notifications.
 - **Configurable VAT calculation:** transaction creation uses the deterministic VAT engine and the configured VAT rate. Monetary totals are stored as whole RWF.
 - **Tax Intelligence dashboard:** visit `/dashboard/intelligence` to review explainable alerts for stale pending transactions, transaction arithmetic, VAT calculation differences, invalid stock balances, unsettled payment submissions, price deviations, and the recorded compliance position.
-- **AI business assistant:** the existing assistant uses authenticated, allow-listed read-only tools. It can explain the same risk alerts without making changes to records.
+- **AI business assistant:** the assistant uses role-scoped tools, including approval-gated RRA actions. AI output does not replace an authorized officer's decision.
 - **Payment review workflow:** authorized compliance/audit staff can open `/admin/payments` to review pending submissions. Verification requires a reference checked against independent evidence and creates an audit entry.
 - **Audit evidence:** production changes, transaction confirmations, and retail sales record stock deltas and before/after quantities in audit events.
 - **Existing risk and supply-chain tools:** the codebase includes price suggestions, risk scoring, revenue forecasts, behavioral analysis, and supply-chain tracing tools.
@@ -41,25 +41,46 @@ Requirements: Node.js 24 or compatible, pnpm 10+, PostgreSQL/Neon databases for 
 
    Set `DATABASE_URL`, `TIN_DATABASE_URL`, `BETTER_AUTH_URL`, a strong `BETTER_AUTH_SECRET`, and the provider keys/services you intend to use. Do not commit secrets. See [.env.example](.env.example) for the full list.
 
-3. Apply the existing Drizzle schemas to your development databases:
+   Set `PAYMENT_DATA_ENCRYPTION_KEY` before using saved payment methods or registering RRA bank accounts. Generate 32 random bytes (for example, `node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"`) and store its base64 value in the deployment secret manager. Keep the key stable and backed up; encrypted values cannot be recovered without it.
+
+3. Apply migrations for an existing database:
+
+   ```bash
+   pnpm db:migrate
+   ```
+
+   The new idempotent migration reconciles the payment tables omitted from earlier migration history.
+
+4. Encrypt existing payment identifiers and RRA bank account numbers after configuring the key:
+
+   ```bash
+   pnpm db:encrypt-payment-data
+   pnpm db:encrypt-payment-data -- --apply
+   ```
+
+   The first command reports how many records need encryption without changing them. The second encrypts values in place and skips already encrypted records.
+
+5. Apply Drizzle schemas instead when creating a fresh disposable development database:
 
    ```bash
    pnpm db:push:all
    ```
 
-4. If you need demo records, use the seed scripts only against a disposable development database:
+6. If you need demo records, use the seed scripts only against a disposable development database:
 
    ```bash
    pnpm db:seed:all
    ```
 
-5. Start the application:
+7. Start the application:
 
    ```bash
    pnpm dev
    ```
 
    The default local URL is http://localhost:3000.
+
+   MTN, Airtel, and bank-gateway payment adapters remain disabled until provider credentials, integration contracts, callback-signature details, and sandbox access are configured. They fail closed and do not mark payments as received.
 
 ## Quality checks
 

@@ -6,6 +6,7 @@ import db from "@/db/drizzle";
 import { rraCollectionAccount, taxPayment, user, auditLog } from "@/db/schema";
 import { requireRRAPermission } from "@/lib/auth-guard";
 import { logAudit } from "@/lib/audit";
+import { encryptPaymentData } from "@/lib/payment-data-encryption";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -306,7 +307,7 @@ export async function registerCollectionAccount(
         ...(data.accountType === "bank_account"
           ? {
               bankAccountHolder: data.bankAccountHolder,
-              bankAccountNumber: data.bankAccountNumber,
+              bankAccountNumber: encryptPaymentData(data.bankAccountNumber),
               maskedAccountNumber: masked,
               bankBranch: data.bankBranch ?? null,
             }
@@ -336,7 +337,12 @@ export async function registerCollectionAccount(
 
     return { success: true, data: { id: created.id } };
   } catch (err) {
-    console.error("[rra-collection-account] registerCollectionAccount error", err);
+    console.error("[rra-collection-account] registerCollectionAccount error", {
+      errorName: err instanceof Error ? err.name : "UnknownError",
+    });
+    if (err instanceof Error && err.message.includes("PAYMENT_DATA_ENCRYPTION_KEY")) {
+      return { success: false, error: "Bank account registration is unavailable until payment data encryption is configured." };
+    }
     return { success: false, error: "Could not register collection account." };
   }
 }
