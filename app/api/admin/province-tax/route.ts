@@ -30,7 +30,7 @@ export async function GET() {
 
     try {
         const traders = await db
-            .select({ id: user.id, province: user.province })
+            .select({ id: user.id, province: sql<string | null>`null`.as('province') })
             .from(user)
             .where(sql`${user.role} IN ('manufacturer','wholesaler','retailer')`);
 
