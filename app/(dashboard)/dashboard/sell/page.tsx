@@ -4,6 +4,8 @@ import { getInventory } from '@/lib/actions/stock.action';
 import { getSystemConfig } from '@/lib/actions/system-config.action';
 import { getOutgoingTransactions } from '@/lib/actions/transaction.action';
 
+export const maxDuration = 60;
+
 export default async function SellPage() {
   const session = await requireTraderSession();
 
