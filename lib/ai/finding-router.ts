@@ -11,7 +11,13 @@ import { Resend } from 'resend';
 import { render } from '@react-email/components';
 import CriticalFindingAlert from '@/emails/critical-finding-alert';
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+// Lazy Resend client — instantiated only at call time, never at module load.
+// This prevents build-time crashes when RESEND_API_KEY is not set.
+let _resend: Resend | null = null;
+function getResend(): Resend {
+  if (!_resend) _resend = new Resend(process.env.RESEND_API_KEY);
+  return _resend;
+}
 
 // Maps finding type to the permission required to receive it.
 // All values must be valid RRAPermission strings.
@@ -145,7 +151,7 @@ export async function routeFindingToRRAStaff(payload: FindingRouterPayload): Pro
             }),
           );
 
-          await resend.emails.send({
+          await getResend().emails.send({
             from: 'TaxFlow AI Monitor <onboarding@resend.dev>',
             to: officer.email,
             subject: `[CRITICAL AI FINDING] ${payload.findingType.replace(/_/g, ' ').toUpperCase()} — ${businessLabel}`,
