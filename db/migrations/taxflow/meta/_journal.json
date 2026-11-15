@@ -246,6 +246,20 @@
       "when": 1794700000001,
       "tag": "0034_credit_confirmed_b2b_purchases",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1794720000000,
+      "tag": "0035_taxpayer_correction_apply",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1794720000001,
+      "tag": "0036_stock_quantity_real",
+      "breakpoints": true
     }
   ]
 }

@@ -54,7 +54,7 @@ export interface SellThroughCalculation {
 
 const EPSILON = 0.000001;
 const SALE_MOVEMENTS = new Set(["sale", "retail_sale"]);
-const INBOUND_MOVEMENTS = new Set(["production", "import_receipt", "b2b_receipt_accepted"]);
+const INBOUND_MOVEMENTS = new Set(["production", "import_receipt", "b2b_receipt_accepted", "b2b_purchase_confirmed"]);
 const PURCHASE_MOVEMENTS = new Set(["import_receipt", "b2b_receipt_accepted"]);
 
 /** Resolve product > category > default, then latest effective record in scope. */

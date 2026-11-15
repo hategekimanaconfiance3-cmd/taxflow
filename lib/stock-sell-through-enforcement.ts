@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, inArray, lte, ne } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lte } from "drizzle-orm";
 import db from "@/db/drizzle";
 import { auditLog, b2bOrderAcceptance, product, stock, stockMovement, stockReservation, stockRestockRequest, stockSellThroughCycle, stockSellThroughThreshold, transaction } from "@/db/schema";
 import { calculateSellThrough, resolveSellThroughThreshold, type SellThroughMovement, type SellThroughThresholdRecord } from "@/lib/stock-sell-through";
@@ -47,7 +47,6 @@ export async function assertPurchasedStockReceiptEligible(
 
   const policyRows = await tx.select().from(stockSellThroughThreshold).where(and(
     eq(stockSellThroughThreshold.scopeType, "default"), eq(stockSellThroughThreshold.scopeKey, "*"),
-    ne(stockSellThroughThreshold.id, "taxflow-global-sell-through-default-75"),
     lte(stockSellThroughThreshold.effectiveAt, at),
   )).orderBy(desc(stockSellThroughThreshold.effectiveAt), desc(stockSellThroughThreshold.createdAt), desc(stockSellThroughThreshold.id)).limit(1);
   const policy = resolveSellThroughThreshold(policyRows as SellThroughThresholdRecord[], productId, item.categoryCode, at);
