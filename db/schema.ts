@@ -816,6 +816,9 @@ export const taxpayerCorrectionRequest = pgTable(
     assignedStaffId: text('assigned_staff_id').references(() => rraStaff.id, { onDelete: 'set null' }),
     recommendation: text('recommendation'),
     recommendationReason: text('recommendation_reason'),
+    appliedValue: text('applied_value'),
+    appliedByUserId: text('applied_by_user_id').references(() => user.id, { onDelete: 'set null' }),
+    appliedAt: timestamp('applied_at'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
   },
@@ -826,7 +829,7 @@ export const taxpayerCorrectionRequest = pgTable(
     index('taxpayer_correction_status_created_idx').on(table.status, table.createdAt),
     check('taxpayer_correction_field_key_check', sql`${table.fieldKey} IN ('name', 'businessName', 'email', 'phoneNumber', 'businessType')`),
     check('taxpayer_correction_category_check', sql`${table.category} IN ('personal_identity', 'business_profile')`),
-    check('taxpayer_correction_status_check', sql`${table.status} IN ('submitted', 'under_review', 'awaiting_evidence', 'recommended_approval', 'recommended_rejection')`),
+    check('taxpayer_correction_status_check', sql`${table.status} IN ('submitted', 'under_review', 'awaiting_evidence', 'recommended_approval', 'recommended_rejection', 'applied')`),
     check('taxpayer_correction_recommendation_check', sql`${table.recommendation} IS NULL OR ${table.recommendation} IN ('RECOMMEND_APPROVAL', 'RECOMMEND_REJECTION')`),
   ],
 );

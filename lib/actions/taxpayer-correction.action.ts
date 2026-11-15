@@ -292,3 +292,136 @@ export async function listActiveCorrectionOfficers() {
   return rows.filter((row) => (roleMap.get(row.id)?.length ? roleMap.get(row.id)!.includes("correction_officer") : row.clearanceLevel === "correction_officer"))
     .map(({ id, name, staffId }) => ({ id, name, staffId }));
 }
+
+// Schema for applying a correction
+const applySchema = z.object({
+  requestId: z.string().uuid(),
+  correctedValue: z.string().trim().min(1).max(500),
+  reason: z.string().trim().min(10).max(2000),
+}).strict();
+
+export async function applyTaxpayerCorrection(input: unknown): Promise<{ success: true }> {
+  const parsed = applySchema.safeParse(input);
+  if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? "Correction details are invalid.");
+  const session = await requireRRAPermission("taxpayer.correction.apply");
+  const isSuperAdmin = session.staff.clearanceRoles.includes("super_admin") || session.staff.clearanceLevel === "super_admin";
+
+  await db.transaction(async (tx) => {
+    // Super admin can apply any request; others can only apply their assigned ones.
+    const [item] = isSuperAdmin
+      ? await tx.select().from(taxpayerCorrectionRequest).where(eq(taxpayerCorrectionRequest.id, parsed.data.requestId)).for("update").limit(1)
+      : await tx.select().from(taxpayerCorrectionRequest)
+          .where(and(eq(taxpayerCorrectionRequest.id, parsed.data.requestId), eq(taxpayerCorrectionRequest.assignedStaffId, session.staff.id)))
+          .for("update").limit(1);
+
+    if (!item) throw new Error("Correction request not found or not accessible.");
+    if (item.status === "applied") throw new Error("This correction has already been applied.");
+    if (!["under_review", "recommended_approval", "awaiting_evidence"].includes(item.status)) {
+      throw new Error("This correction request cannot be applied in its current state.");
+    }
+
+    // Load the taxpayer record
+    const [taxpayer] = await tx.select().from(user).where(eq(user.id, item.taxpayerId)).for("update").limit(1);
+    if (!taxpayer) throw new Error("Taxpayer record not found.");
+
+    // Validate the corrected value against the field
+    const field = item.fieldKey as CorrectionField;
+    const previousValue = safeValue(taxpayer, field);
+    const correctedValue = parsed.data.correctedValue;
+
+    // Field-specific validation
+    if (field === "email") {
+      if (!z.string().email().safeParse(correctedValue).success) throw new Error("The corrected email address is not valid.");
+    }
+    if (field === "phoneNumber") {
+      if (!/^\+?[0-9\s\-()]{7,20}$/.test(correctedValue)) throw new Error("The corrected phone number is not valid.");
+    }
+
+    // Apply the correction to the user record
+    const updatePayload: Partial<typeof user.$inferInsert> = { [field]: correctedValue, updatedAt: new Date() };
+    await tx.update(user).set(updatePayload).where(eq(user.id, taxpayer.id));
+
+    // Record applied metadata on the request
+    const appliedAt = new Date();
+    await tx.update(taxpayerCorrectionRequest).set({
+      status: "applied",
+      appliedValue: correctedValue,
+      appliedByUserId: session.user.id,
+      appliedAt,
+      updatedAt: appliedAt,
+    }).where(eq(taxpayerCorrectionRequest.id, item.id));
+
+    // Immutable event record
+    await tx.insert(taxpayerCorrectionEvent).values({
+      requestId: item.id,
+      actorUserId: session.user.id,
+      eventType: "CORRECTION_APPLIED",
+      fromStatus: item.status,
+      toStatus: "applied",
+      reason: parsed.data.reason,
+      details: {
+        fieldKey: field,
+        previousValue,
+        appliedValue: correctedValue,
+        appliedByRole: isSuperAdmin ? "super_admin" : session.staff.clearanceLevel,
+      },
+    });
+
+    // Immutable audit log
+    await tx.insert(auditLog).values({
+      userId: session.user.id,
+      action: "TAXPAYER_CORRECTION_APPLIED",
+      targetType: "taxpayer_correction_request",
+      targetId: item.id,
+      metadata: JSON.stringify({
+        reference: item.reference,
+        fieldKey: field,
+        previousValue,
+        appliedValue: correctedValue,
+        taxpayerId: taxpayer.id,
+        isSuperAdminOverride: isSuperAdmin,
+      }),
+    });
+
+    // Notify the taxpayer
+    await tx.insert(notification).values({
+      userId: taxpayer.id,
+      type: "taxpayer_correction_applied",
+      title: "Your correction request has been completed",
+      message: `Your ${field} has been updated as requested. Reference: ${item.reference}.`,
+      link: "/dashboard/corrections",
+    });
+  });
+  return { success: true };
+}
+
+export async function getCorrectionRequestForAdmin(requestId: string) {
+  const parsedId = z.string().uuid().safeParse(requestId);
+  if (!parsedId.success) throw new Error("Correction request not found.");
+  const session = await requireRRAPermission("taxpayer.correction.apply");
+  const isSuperAdmin = session.staff.clearanceRoles.includes("super_admin") || session.staff.clearanceLevel === "super_admin";
+
+  const [item] = await db.select({
+    request: taxpayerCorrectionRequest,
+    taxpayerName: user.name, tin: user.tinNumber, businessName: user.businessName,
+  }).from(taxpayerCorrectionRequest)
+    .innerJoin(user, eq(user.id, taxpayerCorrectionRequest.taxpayerId))
+    .where(
+      isSuperAdmin
+        ? eq(taxpayerCorrectionRequest.id, parsedId.data)
+        : and(eq(taxpayerCorrectionRequest.id, parsedId.data), eq(taxpayerCorrectionRequest.assignedStaffId, session.staff.id))
+    ).limit(1);
+
+  if (!item) throw new Error("Correction request not found.");
+  const events = await db.select().from(taxpayerCorrectionEvent)
+    .where(eq(taxpayerCorrectionEvent.requestId, parsedId.data))
+    .orderBy(taxpayerCorrectionEvent.createdAt);
+  const evidence = await db.select({
+    id: taxpayerCorrectionEvidence.id, filename: taxpayerCorrectionEvidence.filename,
+    sizeBytes: taxpayerCorrectionEvidence.sizeBytes, createdAt: taxpayerCorrectionEvidence.createdAt,
+  }).from(taxpayerCorrectionEvidence)
+    .where(eq(taxpayerCorrectionEvidence.requestId, parsedId.data))
+    .orderBy(taxpayerCorrectionEvidence.createdAt);
+
+  return { ...item, events, evidence, isSuperAdmin };
+}

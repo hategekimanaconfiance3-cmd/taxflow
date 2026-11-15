@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { requireRRAPermission } from "@/lib/auth-guard";
-import { getAssignedCorrectionRequest } from "@/lib/actions/taxpayer-correction.action";
+import { getCorrectionRequestForAdmin } from "@/lib/actions/taxpayer-correction.action";
 import { TaxpayerCorrectionReview } from "@/components/admin/taxpayer-correction-review";
 
 export const metadata = { title: "Correction Request Review · TaxFlow" };
@@ -8,9 +8,9 @@ export const metadata = { title: "Correction Request Review · TaxFlow" };
 export default async function TaxpayerCorrectionReviewPage({ params }: { params: Promise<{ requestId: string }> }) {
   await requireRRAPermission("taxpayer.correction.read_assigned");
   const { requestId } = await params;
-  let correction: Awaited<ReturnType<typeof getAssignedCorrectionRequest>>;
+  let correction: Awaited<ReturnType<typeof getCorrectionRequestForAdmin>>;
   try {
-    correction = await getAssignedCorrectionRequest(requestId);
+    correction = await getCorrectionRequestForAdmin(requestId);
   } catch {
     notFound();
   }
