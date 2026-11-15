@@ -339,21 +339,34 @@ export async function deleteFaq(id: string): Promise<{ success: true }> {
 // Seed default content
 // ---------------------------------------------------------------------------
 
-export async function seedDefaultArticles(): Promise<{ seeded: number; skipped: number }> {
+export async function seedDefaultArticles(): Promise<{ seeded: number; updated: number; skipped: number }> {
     const { user } = await requireRRASession("super_admin");
 
     let seeded = 0;
+    let updated = 0;
     let skipped = 0;
 
     for (const article of DEFAULT_KNOWLEDGE_ARTICLES) {
         const [existing] = await db
-            .select({ id: knowledgeArticle.id })
+            .select({ id: knowledgeArticle.id, content: knowledgeArticle.content })
             .from(knowledgeArticle)
             .where(eq(knowledgeArticle.slug, article.slug))
             .limit(1);
 
         if (existing) {
-            skipped++;
+            // Always update content so re-seeding refreshes articles with latest content
+            await db.update(knowledgeArticle).set({
+                title: article.title,
+                summary: article.summary,
+                content: article.content,
+                tags: article.tags,
+                isPublished: true,
+                publishedAt: new Date(),
+                updatedBy: user.id,
+                updatedAt: new Date(),
+                version: sql`${knowledgeArticle.version} + 1`,
+            }).where(eq(knowledgeArticle.slug, article.slug));
+            updated++;
             continue;
         }
 
@@ -372,7 +385,7 @@ export async function seedDefaultArticles(): Promise<{ seeded: number; skipped: 
         seeded++;
     }
 
-    // Seed FAQs
+    // Seed FAQs (upsert by question+section)
     for (const faq of SEED_FAQS) {
         const [existing] = await db
             .select({ id: knowledgeFaq.id })
@@ -396,8 +409,8 @@ export async function seedDefaultArticles(): Promise<{ seeded: number; skipped: 
         userId: user.id,
         action: "KNOWLEDGE_CENTER_SEEDED",
         targetType: "knowledge_article",
-        metadata: { seeded, skipped },
+        metadata: { seeded, updated, skipped },
     }, async (entry) => { await db.insert(auditLog).values(entry); });
 
-    return { seeded, skipped };
+    return { seeded, updated, skipped };
 }
