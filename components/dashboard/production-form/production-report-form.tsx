@@ -783,7 +783,7 @@ export function ProductionReportForm({
       {/* ══════════════════════════════════════════════════════════════════════
           STEP 2 — MATERIALS (Recipe builder OR recipe selector)
       ══════════════════════════════════════════════════════════════════════ */}
-      {(step === "recipe" || (step !== "product" && step !== "recipe")) && (
+      {step !== "product" && (
         <Card className={step !== "recipe" ? "opacity-60" : ""}>
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">

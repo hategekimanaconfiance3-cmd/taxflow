@@ -9,7 +9,6 @@ import { GeoCardSkeleton } from "@/components/admin/loading-skeletons";
 import {
   MapPin,
   Trophy,
-  TrendingDown,
   Users,
   ArrowLeftRight,
   CheckCircle2,
@@ -40,12 +39,6 @@ const PROVINCE_COLORS = [
   "#f59e0b", // Eastern — amber
   "#ec4899", // Western — pink
 ];
-
-const ROLE_LABELS: Record<string, string> = {
-  manufacturer: "Manufacturing",
-  wholesaler: "Wholesale",
-  retailer: "Retail",
-};
 
 interface TooltipArgs {
   active?: boolean;
@@ -97,9 +90,9 @@ function ProvinceCard({
   onClick: () => void;
 }) {
   const statusIcon =
-    province.collectionRate >= 80 ? (
+    province.compliancePct >= 80 ? (
       <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-    ) : province.collectionRate >= 50 ? (
+    ) : province.compliancePct >= 50 ? (
       <AlertCircle className="h-3.5 w-3.5 text-amber-500" />
     ) : (
       <AlertCircle className="h-3.5 w-3.5 text-red-500" />
@@ -123,9 +116,9 @@ function ProvinceCard({
         </div>
         {statusIcon}
       </div>
-      <p className="text-base font-bold tracking-tight">{formatCompact(province.vatOwed)} RWF</p>
-      <p className="text-[10px] text-muted-foreground mt-0.5">VAT obligations</p>
-      <CollectionBar rate={province.collectionRate} color={color} />
+      <p className="text-base font-bold tracking-tight">{formatCompact(province.vatCollected)} RWF</p>
+      <p className="text-[10px] text-muted-foreground mt-0.5">Output VAT recorded</p>
+      <CollectionBar rate={province.compliancePct} color={color} />
       <div className="flex items-center justify-between mt-2 text-[10px] text-muted-foreground">
         <span className="flex items-center gap-0.5">
           <Users className="h-2.5 w-2.5" />
@@ -133,13 +126,8 @@ function ProvinceCard({
         </span>
         <span className="flex items-center gap-0.5">
           <ArrowLeftRight className="h-2.5 w-2.5" />
-          {province.txnCount}
+          {formatCompact(province.taxPaid)} RWF paid
         </span>
-        {province.topRole && (
-          <Badge variant="outline" className="text-[9px] h-4 px-1 capitalize">
-            {ROLE_LABELS[province.topRole] ?? province.topRole}
-          </Badge>
-        )}
       </div>
     </button>
   );
@@ -179,12 +167,15 @@ export function ProvinceTaxMap(_props: { from?: string; to?: string } = {}) {
     data.provinces.map((p, i) => [p.province, PROVINCE_COLORS[i % PROVINCE_COLORS.length]]),
   );
 
-  // Chart data with both vatOwed and vatCollected
+  // The endpoint exposes output VAT and confirmed payments, not tax owed.
   const chartData = data.provinces.map((p) => ({
     name: p.province.replace(" Province", "").replace(" City", ""),
-    "VAT Owed": p.vatOwed,
-    "VAT Collected": p.vatCollected,
+    "Output VAT": p.vatCollected,
+    "Tax Paid": p.taxPaid,
   }));
+  const nationalCollectionRate = data.totalVat === 0
+    ? 100
+    : Math.min(100, Math.round(data.provinces.reduce((sum, p) => sum + p.taxPaid, 0) / data.totalVat * 1000) / 10);
 
   return (
     <Card className="col-span-2">
@@ -196,24 +187,18 @@ export function ProvinceTaxMap(_props: { from?: string; to?: string } = {}) {
               Tax Distribution by Province
             </CardTitle>
             <p className="text-xs text-muted-foreground mt-0.5">
-              VAT obligations vs collected · click a province to inspect
+              Output VAT and confirmed tax payments · click a province to inspect
             </p>
           </div>
           <div className="flex items-center gap-2 text-xs">
-            {data.bestProvince && (
+            {data.topProvince && (
               <div className="flex items-center gap-1 text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">
                 <Trophy className="h-3 w-3" />
-                <span className="font-medium">{data.bestProvince.replace(" Province", "")}</span>
-              </div>
-            )}
-            {data.worstProvince && data.worstProvince !== data.bestProvince && (
-              <div className="flex items-center gap-1 text-red-700 bg-red-50 border border-red-200 rounded-full px-2 py-0.5">
-                <TrendingDown className="h-3 w-3" />
-                <span className="font-medium">{data.worstProvince.replace(" Province", "")}</span>
+                <span className="font-medium">Highest VAT: {data.topProvince.replace(" Province", "")}</span>
               </div>
             )}
             <span className="text-muted-foreground/60 font-mono text-[10px]">
-              {data.nationalCollectionRate}% national rate
+              {nationalCollectionRate}% payment / output VAT
             </span>
           </div>
         </div>
@@ -249,7 +234,7 @@ export function ProvinceTaxMap(_props: { from?: string; to?: string } = {}) {
                 iconSize={8}
                 wrapperStyle={{ fontSize: 11, paddingTop: 8 }}
               />
-              <Bar dataKey="VAT Owed" radius={[3, 3, 0, 0]}>
+              <Bar dataKey="Output VAT" radius={[3, 3, 0, 0]}>
                 {data.provinces.map((p, i) => (
                   <Cell
                     key={p.province}
@@ -260,7 +245,7 @@ export function ProvinceTaxMap(_props: { from?: string; to?: string } = {}) {
                   />
                 ))}
               </Bar>
-              <Bar dataKey="VAT Collected" radius={[3, 3, 0, 0]}>
+              <Bar dataKey="Tax Paid" radius={[3, 3, 0, 0]}>
                 {data.provinces.map((p) => (
                   <Cell
                     key={p.province}
@@ -306,37 +291,37 @@ export function ProvinceTaxMap(_props: { from?: string; to?: string } = {}) {
                 variant="outline"
                 className={cn(
                   "text-xs",
-                  selectedProvince.collectionRate >= 80
+                  selectedProvince.compliancePct >= 80
                     ? "border-emerald-200 text-emerald-700 bg-emerald-50"
-                    : selectedProvince.collectionRate >= 50
+                    : selectedProvince.compliancePct >= 50
                     ? "border-amber-200 text-amber-700 bg-amber-50"
                     : "border-red-200 text-red-700 bg-red-50",
                 )}
               >
-                {selectedProvince.collectionRate}% collected
+                {selectedProvince.compliancePct}% paid
               </Badge>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
               <div>
-                <p className="text-muted-foreground">VAT Owed</p>
-                <p className="font-bold text-sm mt-0.5">{formatCompact(selectedProvince.vatOwed)} RWF</p>
+                <p className="text-muted-foreground">Output VAT</p>
+                <p className="font-bold text-sm mt-0.5">{formatCompact(selectedProvince.vatCollected)} RWF</p>
               </div>
               <div>
-                <p className="text-muted-foreground">VAT Collected</p>
+                <p className="text-muted-foreground">Tax Paid</p>
                 <p className="font-bold text-sm mt-0.5">{formatCompact(selectedProvince.vatCollected)} RWF</p>
               </div>
               <div>
                 <p className="text-muted-foreground">Outstanding</p>
                 <p className="font-bold text-sm mt-0.5 text-red-600">
-                  {formatCompact(Math.max(0, selectedProvince.vatOwed - selectedProvince.vatCollected))} RWF
+                  {formatCompact(Math.max(0, selectedProvince.vatCollected - selectedProvince.taxPaid))} RWF
                 </p>
               </div>
               <div>
-                <p className="text-muted-foreground">Avg Txn Value</p>
-                <p className="font-bold text-sm mt-0.5">{formatCompact(selectedProvince.avgTxnValue)} RWF</p>
+                <p className="text-muted-foreground">Traders</p>
+                <p className="font-bold text-sm mt-0.5">{selectedProvince.traderCount}</p>
               </div>
             </div>
-            <CollectionBar rate={selectedProvince.collectionRate} color={colorMap[selectedProvince.province]} />
+            <CollectionBar rate={selectedProvince.compliancePct} color={colorMap[selectedProvince.province]} />
           </div>
         )}
       </CardContent>

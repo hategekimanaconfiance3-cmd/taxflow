@@ -5,6 +5,28 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Database, Server, CheckCircle2, XCircle, AlertTriangle, Cpu } from 'lucide-react';
 
+function StatusBadge({ healthy, label }: { healthy: boolean; label?: string }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      {healthy ? (
+        <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+      ) : (
+        <XCircle className="h-4 w-4 text-red-500" />
+      )}
+      <Badge
+        variant="outline"
+        className={
+          healthy
+            ? 'border-emerald-200 text-emerald-700 bg-emerald-50/60 text-[11px]'
+            : 'border-red-200 text-red-700 bg-red-50/60 text-[11px]'
+        }
+      >
+        {label ?? (healthy ? 'Healthy' : 'Unhealthy')}
+      </Badge>
+    </div>
+  );
+}
+
 async function checkDatabaseHealth(): Promise<{ healthy: boolean; latencyMs: number; error?: string }> {
   const start = Date.now();
   try {
@@ -28,28 +50,6 @@ export default async function SystemHealthPage() {
       .from(sql`"user"`)
       .then(([r]) => r ?? { traders: 0, staff: 0 }),
   ]);
-
-  function StatusBadge({ healthy, label }: { healthy: boolean; label?: string }) {
-    return (
-      <div className="flex items-center gap-1.5">
-        {healthy ? (
-          <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-        ) : (
-          <XCircle className="h-4 w-4 text-red-500" />
-        )}
-        <Badge
-          variant="outline"
-          className={
-            healthy
-              ? 'border-emerald-200 text-emerald-700 bg-emerald-50/60 text-[11px]'
-              : 'border-red-200 text-red-700 bg-red-50/60 text-[11px]'
-          }
-        >
-          {label ?? (healthy ? 'Healthy' : 'Unhealthy')}
-        </Badge>
-      </div>
-    );
-  }
 
   const latencyStatus =
     dbHealth.latencyMs > 1000 ? 'critical' : dbHealth.latencyMs > 500 ? 'elevated' : 'normal';

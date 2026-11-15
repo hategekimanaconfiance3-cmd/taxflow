@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useSyncExternalStore } from "react";
 import { getQueueCount, processQueue } from "./queue";
 import type { QueuedAction } from "./db";
 
@@ -10,26 +10,21 @@ export type { QueuedAction } from "./db";
 /**
  * Hook to track online/offline status.
  */
+function subscribeToOnlineStatus(onChange: () => void) {
+    window.addEventListener("online", onChange);
+    window.addEventListener("offline", onChange);
+    return () => {
+        window.removeEventListener("online", onChange);
+        window.removeEventListener("offline", onChange);
+    };
+}
+
+function getOnlineSnapshot() {
+    return navigator.onLine;
+}
+
 export function useOnlineStatus() {
-    const [isOnline, setIsOnline] = useState(true);
-
-    useEffect(() => {
-        // Set initial state
-        setIsOnline(navigator.onLine);
-
-        const goOnline = () => setIsOnline(true);
-        const goOffline = () => setIsOnline(false);
-
-        window.addEventListener("online", goOnline);
-        window.addEventListener("offline", goOffline);
-
-        return () => {
-            window.removeEventListener("online", goOnline);
-            window.removeEventListener("offline", goOffline);
-        };
-    }, []);
-
-    return isOnline;
+    return useSyncExternalStore(subscribeToOnlineStatus, getOnlineSnapshot, () => true);
 }
 
 type SyncStatus = "idle" | "syncing" | "synced" | "error";
@@ -81,13 +76,14 @@ export function useSyncQueue(
 
     // Refresh count on mount and when online status changes
     useEffect(() => {
-        refreshCount();
+        const timer = window.setTimeout(() => void refreshCount(), 0);
+        return () => window.clearTimeout(timer);
     }, [refreshCount, isOnline]);
 
     // Auto-sync when coming back online
     useEffect(() => {
         if (isOnline && queueCount > 0 && executor) {
-            syncNow();
+            window.setTimeout(() => void syncNow(), 0);
         }
     }, [isOnline]); // eslint-disable-line react-hooks/exhaustive-deps
 

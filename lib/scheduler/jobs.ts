@@ -29,7 +29,7 @@ function hoursAgo(n: number): Date {
 // Checks for rapid stock depletion events in the last 30 minutes
 // ---------------------------------------------------------------------------
 
-async function runQuickScan(): Promise<void> {
+async function runQuickScan(): Promise<boolean> {
   try {
     const since = new Date(Date.now() - 30 * 60 * 1000); // last 30 min
 
@@ -69,8 +69,10 @@ async function runQuickScan(): Promise<void> {
         mv.productId ?? undefined,
       );
     }
+    return true;
   } catch (err) {
     console.error('[Scheduler:QuickScan] Error:', err);
+    return false;
   }
 }
 
@@ -79,7 +81,7 @@ async function runQuickScan(): Promise<void> {
 // Checks for sales without matching production or purchases
 // ---------------------------------------------------------------------------
 
-async function runHourlyScan(): Promise<void> {
+async function runHourlyScan(): Promise<boolean> {
   try {
     const thirtyDaysAgo = daysAgo(30);
 
@@ -154,8 +156,10 @@ async function runHourlyScan(): Promise<void> {
         sold.productId ?? undefined,
       );
     }
+    return true;
   } catch (err) {
     console.error('[Scheduler:HourlyScan] Error:', err);
+    return false;
   }
 }
 
@@ -164,7 +168,7 @@ async function runHourlyScan(): Promise<void> {
 // Checks for repeated stock loss patterns (≥3 loss events in 30 days)
 // ---------------------------------------------------------------------------
 
-async function runSixHourScan(): Promise<void> {
+async function runSixHourScan(): Promise<boolean> {
   try {
     const thirtyDaysAgo = daysAgo(30);
 
@@ -204,8 +208,10 @@ async function runSixHourScan(): Promise<void> {
         group.productId,
       );
     }
+    return true;
   } catch (err) {
     console.error('[Scheduler:SixHourScan] Error:', err);
+    return false;
   }
 }
 
@@ -214,7 +220,7 @@ async function runSixHourScan(): Promise<void> {
 // Reviews all open findings for stale data, escalates if unreviewed >7 days
 // ---------------------------------------------------------------------------
 
-async function runDailyScan(): Promise<void> {
+async function runDailyScan(): Promise<boolean> {
   try {
     const sevenDaysAgo = daysAgo(7);
 
@@ -258,9 +264,22 @@ async function runDailyScan(): Promise<void> {
     }
 
     console.log(`[Scheduler:DailyScan] Reviewed ${staleFindings.length} stale findings.`);
+    return true;
   } catch (err) {
     console.error('[Scheduler:DailyScan] Error:', err);
+    return false;
   }
+}
+
+/** Execute each bounded monitoring scan once for serverless scheduled runs. */
+export async function runMonitoringScansOnce(): Promise<{ failedScans: number }> {
+  const results = await Promise.all([
+    runQuickScan(),
+    runHourlyScan(),
+    runSixHourScan(),
+    runDailyScan(),
+  ]);
+  return { failedScans: results.filter((result) => !result).length };
 }
 
 // ---------------------------------------------------------------------------

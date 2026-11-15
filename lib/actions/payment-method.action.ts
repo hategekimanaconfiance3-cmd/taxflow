@@ -8,6 +8,7 @@ import { requireTraderSession } from "@/lib/auth-guard";
 import { logAudit } from "@/lib/audit";
 import { maskIdentifier, PAYMENT_PROVIDERS, PROVIDER_LABELS } from "@/lib/utils/payment-masking";
 import { decryptPaymentData, encryptPaymentData } from "@/lib/payment-data-encryption";
+import type { PaymentMethodProvider } from "@/lib/utils/payment-masking";
 export type { PaymentMethodProvider } from "@/lib/utils/payment-masking";
 
 // ---------------------------------------------------------------------------

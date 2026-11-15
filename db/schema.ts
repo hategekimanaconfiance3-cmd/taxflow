@@ -1906,3 +1906,53 @@ export const aiAuditLogRelations = relations(aiAuditLog, ({ one }) => ({
 
 // ---------------------------------------------------------------------------
 
+// Knowledge Center
+export const knowledgeArticle = pgTable(
+  'knowledge_article',
+  {
+    id: text('id').primaryKey().default(sql`gen_random_uuid()::text`),
+    slug: text('slug').unique().notNull(),
+    title: text('title').notNull(),
+    content: text('content').notNull().default(''),
+    summary: text('summary').notNull().default(''),
+    section: text('section').notNull(),
+    tags: text('tags').array().notNull().default(sql`'{}'::text[]`),
+    roleVisibility: text('role_visibility').array().notNull().default(sql`'{}'::text[]`),
+    isPublished: boolean('is_published').notNull().default(false),
+    isArchived: boolean('is_archived').notNull().default(false),
+    version: integer('version').notNull().default(1),
+    createdBy: text('created_by').notNull(),
+    updatedBy: text('updated_by'),
+    publishedAt: timestamp('published_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('knowledge_article_section_idx').on(table.section),
+    index('knowledge_article_published_idx').on(table.isPublished),
+  ],
+);
+
+export const knowledgeArticleHistory = pgTable('knowledge_article_history', {
+  id: text('id').primaryKey().default(sql`gen_random_uuid()::text`),
+  articleId: text('article_id').notNull().references(() => knowledgeArticle.id, { onDelete: 'cascade' }),
+  title: text('title').notNull(),
+  content: text('content').notNull(),
+  summary: text('summary').notNull(),
+  version: integer('version').notNull(),
+  changedBy: text('changed_by').notNull(),
+  changedAt: timestamp('changed_at').notNull().defaultNow(),
+});
+
+export const knowledgeFaq = pgTable('knowledge_faq', {
+  id: text('id').primaryKey().default(sql`gen_random_uuid()::text`),
+  question: text('question').notNull(),
+  answer: text('answer').notNull(),
+  section: text('section').notNull(),
+  sortOrder: integer('sort_order').notNull().default(0),
+  isPublished: boolean('is_published').notNull().default(true),
+  createdBy: text('created_by').notNull(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+

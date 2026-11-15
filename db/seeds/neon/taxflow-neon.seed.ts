@@ -9,28 +9,30 @@ import path from 'path';
 // Import the extracted data
 const extractedDataPath = path.join(__dirname, '..', '..', '..', 'data', 'extracted-data.json');
 const extractedDataRaw = fs.readFileSync(extractedDataPath, 'utf8');
-const extractedData = JSON.parse(extractedDataRaw);
+const extractedData = JSON.parse(extractedDataRaw) as {
+  users: Array<typeof user.$inferInsert>;
+  accounts: Array<typeof account.$inferInsert>;
+  rraStaff: Array<typeof rraStaff.$inferInsert>;
+};
 
 // Helper function to convert string timestamps to Date objects
-function convertTimestamps(obj: any): any {
+function convertTimestamps<T>(obj: T): T {
   if (obj === null || obj === undefined) return obj;
 
   if (typeof obj === 'string' && obj.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z$/)) {
-    return new Date(obj);
+    return new Date(obj) as T;
   }
 
   if (Array.isArray(obj)) {
-    return obj.map(convertTimestamps);
+    return obj.map(convertTimestamps) as T;
   }
 
   if (typeof obj === 'object') {
-    const result: any = {};
-    for (const key in obj) {
-      if (obj.hasOwnProperty(key)) {
-        result[key] = convertTimestamps(obj[key]);
-      }
+    const result: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(obj)) {
+      result[key] = convertTimestamps(value);
     }
-    return result;
+    return result as T;
   }
 
   return obj;
@@ -42,6 +44,9 @@ const accounts = convertTimestamps(extractedData.accounts);
 const rraStaffMembers = convertTimestamps(extractedData.rraStaff);
 
 async function seedTaxFlowNeonDB() {
+  if (process.env.NODE_ENV === 'production' || process.env.ALLOW_DESTRUCTIVE_SEED !== 'true') {
+    throw new Error('This seed script deletes existing rows. Set ALLOW_DESTRUCTIVE_SEED=true in a non-production environment to proceed.');
+  }
   console.log('Starting to seed TaxFlow Neon DB...');
 
   // Connection to Neon DB

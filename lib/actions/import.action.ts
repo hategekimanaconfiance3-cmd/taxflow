@@ -8,6 +8,7 @@ import { requireTraderSession, requireRRASession, requireAnyRRAPermission } from
 import { assertPurchasedStockReceiptEligible } from "@/lib/stock-sell-through-enforcement";
 import { hasRRAPermission } from "@/lib/rra-rbac";
 import { logAudit } from "@/lib/audit";
+import { triggerManufacturerAICheck } from "@/lib/ai/manufacturer-hooks";
 import { createNotification } from "@/lib/notifications";
 import { emitToUser } from "@/lib/realtime";
 import { ensureImportDocumentExists, importBlobPathname, isImportFilenameForDeclaration } from "@/lib/import-files";
@@ -429,6 +430,15 @@ export async function confirmImportArrival(
     }
 
     const { declaration, quantityToActivate, discrepancy, confidentialMaterialReceipt } = confirmation;
+
+    if (!confidentialMaterialReceipt) {
+        void triggerManufacturerAICheck({
+            businessId: declaration.businessId,
+            event: "IMPORT_RECEIVED",
+            referenceId: declaration.id,
+            declarationId: declaration.id,
+        });
+    }
 
     // Notify the trader (outside transaction — non-critical)
     try {

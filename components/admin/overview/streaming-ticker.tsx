@@ -5,7 +5,7 @@ import { useSocket } from '@/lib/socket-client';
 import { formatRWF } from '@/components/dashboard/stat-card/stat-card';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Radio, ChevronDown, ChevronRight, Building2 } from 'lucide-react';
+import { Radio, Building2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { TickerRow, TickerItem } from '@/app/api/admin/ticker/route';
 
@@ -36,16 +36,10 @@ const STATUS_LABELS: Record<string, string> = {
   expired: 'Cancelled',
 };
 
-function productsSummary(items: TickerItem[]): string {
-  if (items.length === 0) return '—';
-  if (items.length === 1) return items[0].productName;
-  return `${items[0].productName} +${items.length - 1} more`;
-}
-
-function computeInsight(rows: TickerRow[]): string {
+function computeInsight(rows: TickerItem[]): string {
   if (rows.length === 0) return 'No significant activity in the last 60 minutes';
   const failed = rows.filter((r) => ['rejected', 'failed'].includes(r.status));
-  const highValue = rows.filter((r) => r.totalAmount >= 1_000_000); // ≥ 1M RWF
+  const highValue = rows.filter((r) => r.amount >= 1_000_000); // ≥ 1M RWF
   if (failed.length > 0 && highValue.length > 0) {
     return `⚠️ ${failed.length} failed transaction${failed.length !== 1 ? 's' : ''} · ${highValue.length} high-value transaction${highValue.length !== 1 ? 's' : ''} detected`;
   }
@@ -59,12 +53,10 @@ function computeInsight(rows: TickerRow[]): string {
 }
 
 interface ExpandableRowProps {
-  row: TickerRow & { isNew?: boolean };
+  row: TickerItem & { isNew?: boolean };
 }
 
 function ExpandableRow({ row }: ExpandableRowProps) {
-  const [expanded, setExpanded] = useState(false);
-  const hasItems = row.items.length > 0;
   const isFailed = ['rejected', 'failed'].includes(row.status);
 
   return (
@@ -78,86 +70,18 @@ function ExpandableRow({ row }: ExpandableRowProps) {
           : 'border-transparent bg-muted/30 hover:bg-muted/50',
       )}
     >
-      {/* ── Main row ── */}
-      <button
-        type="button"
-        className="w-full text-left"
-        onClick={() => hasItems && setExpanded((v) => !v)}
-      >
-        <div className="grid items-center gap-x-4 px-3 py-2 text-xs"
-          style={{ gridTemplateColumns: '1fr 130px 110px 90px 100px' }}>
-          {/* Business name + TIN */}
-          <div className="min-w-0">
-            <p className="truncate font-medium">
-              {row.businessName ?? 'Unknown Business'}
-            </p>
-            {row.tinNumber && (
-              <p className="text-[9px] text-muted-foreground/60 font-mono">
-                TIN: {row.tinNumber}
-              </p>
-            )}
-          </div>
-
-          {/* Products summary */}
-          <span className="text-muted-foreground text-[11px] truncate hidden sm:block">
-            {productsSummary(row.items)}
-          </span>
-
-          {/* Total amount */}
-          <span className="font-mono font-semibold whitespace-nowrap text-right">
-            {formatRWF(row.totalAmount)}
-          </span>
-
-          {/* VAT */}
-          <span className="font-mono text-muted-foreground whitespace-nowrap text-right text-[10px]">
-            {formatRWF(row.vatAmount)}
-          </span>
-
-          {/* Status + time + chevron */}
-          <div className="flex flex-col items-end gap-0.5">
-            <div className="flex items-center gap-1">
-              <Badge
-                variant="outline"
-                className={cn('text-[9px] px-1.5 py-0 h-4 border', STATUS_STYLES[row.status] ?? 'bg-zinc-500/10 text-zinc-600 border-zinc-200')}
-              >
-                {STATUS_LABELS[row.status] ?? row.status}
-              </Badge>
-              {hasItems && (
-                expanded
-                  ? <ChevronDown className="h-3 w-3 text-muted-foreground/50" />
-                  : <ChevronRight className="h-3 w-3 text-muted-foreground/50" />
-              )}
-            </div>
-            <span className="text-[9px] text-muted-foreground/60">{relativeTime(row.createdAt)}</span>
-          </div>
+      <div className="grid items-center gap-x-4 px-3 py-2 text-xs" style={{ gridTemplateColumns: '1fr 100px 120px 90px 100px' }}>
+        <div className="min-w-0">
+          <p className="truncate font-medium">{row.businessName || 'Unknown Business'}</p>
+          <p className="text-[9px] text-muted-foreground/60 capitalize">{row.type}</p>
         </div>
-      </button>
-
-      {/* ── Expanded items ── */}
-      {expanded && hasItems && (
-        <div className="border-t border-dashed border-muted px-3 pb-2 pt-1.5">
-          <div className="space-y-1">
-            {row.items.map((item, i) => (
-              <div
-                key={i}
-                className="grid gap-x-4 text-[10px] text-muted-foreground"
-                style={{ gridTemplateColumns: '1fr 130px 110px 90px' }}
-              >
-                <span className="truncate pl-1">{item.productName}</span>
-                <span className="text-left whitespace-nowrap hidden sm:block">
-                  {item.quantity} × {formatRWF(item.unitPrice)}
-                </span>
-                <span className="font-mono font-medium text-foreground text-right whitespace-nowrap">
-                  {formatRWF(item.totalPrice)}
-                </span>
-                <span className="font-mono text-right whitespace-nowrap text-muted-foreground/70">
-                  {formatRWF(item.vatAmount)}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+        <span className="text-muted-foreground text-[11px] capitalize hidden sm:block">{row.type}</span>
+        <span className="font-mono font-semibold whitespace-nowrap text-right">{formatRWF(row.amount)}</span>
+        <Badge variant="outline" className={cn('text-[9px] px-1.5 py-0 h-4 border', STATUS_STYLES[row.status] ?? 'bg-zinc-500/10 text-zinc-600 border-zinc-200')}>
+          {STATUS_LABELS[row.status] ?? row.status}
+        </Badge>
+        <span className="text-[9px] text-muted-foreground/60 text-right">{relativeTime(row.createdAt)}</span>
+      </div>
     </div>
   );
 }
@@ -168,7 +92,7 @@ interface StreamingTickerProps {
 }
 
 export function StreamingTicker({ userId, insight }: StreamingTickerProps) {
-  const [rows, setRows] = useState<(TickerRow & { isNew?: boolean })[]>([]);
+  const [rows, setRows] = useState<(TickerItem & { isNew?: boolean })[]>([]);
   const [loading, setLoading] = useState(true);
   const fetchRef = useRef(false);
 
@@ -176,8 +100,8 @@ export function StreamingTicker({ userId, insight }: StreamingTickerProps) {
     try {
       const res = await fetch('/api/admin/ticker');
       if (!res.ok) return;
-      const data: TickerRow[] = await res.json();
-      setRows(data.map((r) => ({ ...r, isNew: r.id === markNewId })));
+      const data: TickerRow = await res.json();
+      setRows(data.items.map((r) => ({ ...r, isNew: r.id === markNewId })));
     } finally {
       setLoading(false);
     }

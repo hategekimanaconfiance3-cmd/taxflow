@@ -71,8 +71,8 @@ const statusSchema = z.object({
   reason: z.string().trim().min(10, "Provide at least 10 characters for audit reason.").max(500),
 });
 
-type BankFields = z.infer<typeof bankSchema>;
-type MomoFields = z.infer<typeof momoSchema>;
+type BankFields = z.output<typeof bankSchema>;
+type MomoFields = z.output<typeof momoSchema>;
 type ReviewFields = z.infer<typeof reviewFormSchema>;
 type StatusFields = z.infer<typeof statusSchema>;
 type Notice = { tone: "success" | "error"; message: string } | null;
@@ -134,12 +134,12 @@ export function RraCollectionAccountsWorkspace({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [txOpen, setTxOpen] = useState(false);
-  const [transactions, setTransactions] = useState<Awaited<ReturnType<typeof getAccountPayments>> extends { success: true; data: infer D } ? D : never>([]);
+  const [transactions, setTransactions] = useState<Extract<Awaited<ReturnType<typeof getAccountPayments>>, { success: true }>['data']>([]);
   const [txLoading, setTxLoading] = useState(false);
   const [filterStatus, setFilterStatus] = useState<"all" | "pending" | "verified" | "active" | "inactive">("all");
 
-  const bankForm = useForm<BankFields>({ resolver: zodResolver(bankSchema), defaultValues: { accountType: "bank_account", currency: "RWF" } });
-  const momoForm = useForm<MomoFields>({ resolver: zodResolver(momoSchema), defaultValues: { accountType: "mobile_money", currency: "RWF" } });
+  const bankForm = useForm<z.input<typeof bankSchema>, unknown, BankFields>({ resolver: zodResolver(bankSchema), defaultValues: { accountType: "bank_account", currency: "RWF" } });
+  const momoForm = useForm<z.input<typeof momoSchema>, unknown, MomoFields>({ resolver: zodResolver(momoSchema), defaultValues: { accountType: "mobile_money", currency: "RWF" } });
   const reviewForm = useForm<ReviewFields>({ resolver: zodResolver(reviewFormSchema), defaultValues: { decision: "verified", reason: "" } });
   const statusForm = useForm<StatusFields>({ resolver: zodResolver(statusSchema), defaultValues: { reason: "" } });
   const deleteForm = useForm<StatusFields>({ resolver: zodResolver(statusSchema), defaultValues: { reason: "" } });

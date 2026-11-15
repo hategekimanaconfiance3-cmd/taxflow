@@ -2,7 +2,7 @@
 // Called from server actions after a manufacturer performs any action.
 // MUST be called in a try/catch — errors here must never break the caller's action.
 
-import { aiEventTrigger } from '@/db/schema';
+import { auditLog } from '@/db/schema';
 import db from '@/db/drizzle';
 import {
   checkImportVsStock,
@@ -115,15 +115,19 @@ export async function triggerManufacturerAICheck(payload: ManufacturerHookPayloa
       else if (signal.severity === 'warning' && highestSeverity !== 'critical') highestSeverity = 'warning';
     }
 
-    // Log the hook execution to ai_event_trigger
-    await db.insert(aiEventTrigger).values({
-      businessId: payload.businessId,
-      event: payload.event,
-      referenceId: payload.referenceId ?? null,
-      signalsChecked: JSON.stringify(signalsChecked),
-      findingsCreated: JSON.stringify(findingsCreated),
-      staffNotified: JSON.stringify([]), // updated by routeFindingToRRAStaff
-      severity: findingsCreated.length > 0 ? highestSeverity : null,
+    // Keep a durable audit record in the schema that is deployed today.
+    await db.insert(auditLog).values({
+      userId: payload.businessId,
+      action: 'MANUFACTURER_AI_SIGNALS_CHECKED',
+      targetType: 'business',
+      targetId: payload.businessId,
+      metadata: JSON.stringify({
+        event: payload.event,
+        referenceId: payload.referenceId ?? null,
+        signalsChecked,
+        findingsCreated,
+        severity: findingsCreated.length > 0 ? highestSeverity : null,
+      }),
     });
 
   } catch (error) {

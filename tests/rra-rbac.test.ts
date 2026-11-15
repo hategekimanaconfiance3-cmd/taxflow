@@ -22,13 +22,16 @@ import { staffAccountSchema, staffAssignmentRoleSchema, staffRoleSchema, staffRo
 // Role catalogue
 // ---------------------------------------------------------------------------
 
-test("exactly 9 proposed RRA roles are defined in the expected order", () => {
-    assert.equal(RRA_ROLE_OPTIONS.length, 9);
+test("the proposed RRA role catalogue contains the current twelve roles in order", () => {
+    assert.equal(RRA_ROLE_OPTIONS.length, 12);
     assert.deepEqual(RRA_ROLE_OPTIONS.map((r) => r.value), [
         "super_admin",
         "director_executive",
         "tax_compliance_officer",
-        "audit_investigation_officer",
+        "tax_audit_officer",
+        "revenue_investigator",
+        "taxpayer_support_officer",
+        "taxpayer_registration_officer",
         "product_traceability_officer",
         "customs_import_officer",
         "payments_reconciliation_officer",
@@ -83,9 +86,8 @@ test("isRRARole returns false for trader roles and unknown strings", () => {
 // Super Admin does not bypass the separate taxpayer/formula confidentiality permissions.
 // ---------------------------------------------------------------------------
 
-test("super_admin has explicit permissions without inheriting manufacturing operations or restricted data access", () => {
+test("super_admin has approved administration permissions without inheriting confidential formula access", () => {
     const excluded = new Set<RRAPermission>([
-        "taxpayer.intelligence.search",
         "production.formula.read",
         "production.material.receipt.review",
         "production.batch.review",
@@ -99,6 +101,7 @@ test("super_admin has explicit permissions without inheriting manufacturing oper
         );
     }
     for (const perm of excluded) assert.equal(hasRRAPermission("super_admin", perm), false);
+    assert.equal(hasRRAPermission("super_admin", "taxpayer.intelligence.search"), true);
 });
 
 // ---------------------------------------------------------------------------
@@ -320,7 +323,7 @@ test("direct role match always succeeds regardless of aliases", () => {
 // Staff account creation schema — only proposed roles accepted
 // ---------------------------------------------------------------------------
 
-test("new staff accounts can only be assigned one of the 9 proposed roles", () => {
+test("new staff accounts can only be assigned one of the twelve proposed roles", () => {
     for (const role of RRA_ROLE_OPTIONS) {
         assert.ok(
             staffAssignmentRoleSchema.safeParse(role.value).success,

@@ -61,7 +61,7 @@ export default async function AuditExplorerPage({ searchParams }: AuditExplorerP
         count: sql<number>`COUNT(*)::int`.as('count'),
       })
       .from(auditLog)
-      .where(gte(auditLog.createdAt, new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)))
+      .where(sql`${auditLog.createdAt} >= NOW() - INTERVAL '7 days'`)
       .groupBy(auditLog.action)
       .orderBy(desc(sql`COUNT(*)`))
       .limit(8),
@@ -70,7 +70,7 @@ export default async function AuditExplorerPage({ searchParams }: AuditExplorerP
     db
       .select({ count: sql<number>`COUNT(*)::int`.as('count') })
       .from(auditLog)
-      .where(gte(auditLog.createdAt, new Date(Date.now() - 24 * 60 * 60 * 1000)))
+      .where(sql`${auditLog.createdAt} >= NOW() - INTERVAL '24 hours'`)
       .then(([r]) => r?.count ?? 0),
   ]);
 

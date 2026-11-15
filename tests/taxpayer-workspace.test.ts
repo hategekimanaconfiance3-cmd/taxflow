@@ -17,5 +17,5 @@ test("taxpayer workspace record categories follow existing RRA permissions", () 
   assert.equal(hasRRAPermission("audit_investigation_officer", "payments.read"), false);
   assert.equal(hasRRAPermission("product_traceability_officer", "stock.read"), true);
   assert.equal(hasRRAPermission("product_traceability_officer", "tax.records.read"), false);
-  assert.equal(hasRRAPermission("super_admin", "taxpayer.intelligence.search"), false);
+  assert.equal(hasRRAPermission("super_admin", "taxpayer.intelligence.search"), true);
 });

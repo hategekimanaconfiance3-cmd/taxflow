@@ -3,6 +3,7 @@ import { createServer } from 'http';
 import next from 'next';
 import { parse } from 'url';
 import { initSocketServer } from './lib/socket-server';
+import { startScheduledJobs } from './lib/scheduler/jobs';
 
 const dev = process.env.NODE_ENV !== 'production';
 const hostname = process.env.HOST || 'localhost';
@@ -12,6 +13,7 @@ const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
 
 app.prepare().then(() => {
+  startScheduledJobs();
   const httpServer = createServer((req, res) => {
     const parsedUrl = parse(req.url!, true);
     handle(req, res, parsedUrl);

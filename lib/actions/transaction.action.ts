@@ -18,10 +18,12 @@ import { checkAndAlertCompliance } from '@/lib/actions/compliance.action';
 import { getBusinessComplianceStatus } from '@/lib/compliance-status';
 import { getSystemConfig } from '@/lib/actions/system-config.action';
 import { validatePriceFloor } from '@/lib/ai/price-suggestion';
+import type { PriceSuggestion } from '@/lib/ai/price-suggestion';
 import { calculateVat } from '@/lib/intelligence/tax-engine';
 import { assertVerifiedBusinessOwner } from '@/lib/b2b-authorization';
 import { createSalesInvoiceForTransaction } from '@/lib/sales-invoice-service';
 import { attemptSalesInvoiceEmail } from '@/lib/sales-invoice-delivery';
+import { triggerManufacturerAICheck } from '@/lib/ai/manufacturer-hooks';
 
 /** Keep optional post-commit work out of the sale/confirmation response path. */
 function schedulePostTransactionWork(input: {
@@ -29,6 +31,7 @@ function schedulePostTransactionWork(input: {
   actorUserId: string;
   transactionId: string;
   operation: 'confirmation' | 'retail sale';
+  manufacturerSignal?: { businessId: string; productId: string; quantity: number };
 }) {
   after(async () => {
     const tasks: Promise<unknown>[] = [];
@@ -46,6 +49,15 @@ function schedulePostTransactionWork(input: {
         code: error instanceof Error ? error.name : 'unknown_error',
       });
     }));
+    if (input.manufacturerSignal) {
+      tasks.push(triggerManufacturerAICheck({
+        businessId: input.manufacturerSignal.businessId,
+        event: 'SALE_CREATED',
+        referenceId: input.transactionId,
+        productId: input.manufacturerSignal.productId,
+        quantity: input.manufacturerSignal.quantity,
+      }));
+    }
     await Promise.allSettled(tasks);
   });
 }
@@ -378,7 +390,11 @@ async function createSaleForConfirmationInternal(data: {
   // Fire-and-forget price floor checks (never block the sale)
   data.items.forEach((item) => { validatePriceFloor(item.productId, session.user.id, item.unitPrice).catch(() => {}); });
 
-  const priceCheck = { valid: true, error: null, suggestion: null as any };
+  const priceCheck: { valid: true; error: null; suggestion: PriceSuggestion | null } = {
+    valid: true,
+    error: null,
+    suggestion: null,
+  };
   const validatedItems = data.items.map((item, i) => {
     const details = productRows[i]?.[0];
     if (!details) throw new Error('A selected product is not in your authorized inventory.');
@@ -819,6 +835,11 @@ export async function confirmTransaction(transactionId: string) {
     actorUserId: session.user.id,
     transactionId: txn.id,
     operation: 'confirmation',
+    manufacturerSignal: txn.productId ? {
+      businessId: txn.sellerId,
+      productId: txn.productId,
+      quantity: txn.quantity,
+    } : undefined,
   });
 
   return { success: true as const, invoiceId: confirmation.invoiceId };
@@ -1211,6 +1232,11 @@ export async function createRetailSale(data: {
       actorUserId: session.user.id,
       transactionId: result.txn.id,
       operation: 'retail sale',
+      manufacturerSignal: {
+        businessId: session.user.id,
+        productId: data.productId,
+        quantity: data.quantity,
+      },
     });
   }
 

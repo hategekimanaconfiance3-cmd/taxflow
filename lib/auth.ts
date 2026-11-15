@@ -174,6 +174,26 @@ export const auth = betterAuth({
       },
     },
   },
+  databaseHooks: {
+    user: {
+      create: {
+        before: async (newUser) => {
+          // Self-registration may choose a trader category, but must never be
+          // able to provision RRA staff or administrative roles.
+          const traderRoles = new Set(['manufacturer', 'wholesaler', 'retailer']);
+          const requestedRole = newUser.role;
+          return {
+            data: {
+              ...newUser,
+              role: typeof requestedRole === 'string' && traderRoles.has(requestedRole)
+                ? requestedRole
+                : 'retailer',
+            },
+          };
+        },
+      },
+    },
+  },
 });
 
 export type Session = typeof auth.$Infer.Session;

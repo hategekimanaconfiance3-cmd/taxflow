@@ -37,6 +37,7 @@ import {
     Eye,
     Landmark,
     SlidersHorizontal,
+    BookOpen,
 } from "lucide-react";
 import { hasRRAPermission, type RRARole } from "@/lib/rra-rbac";
 
@@ -197,7 +198,7 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 label: "Manufacturing Activity",
                 href: "/admin/manufacturing-activity",
                 icon: Package,
-                allowedRoles: ALL.filter((role) => !["taxpayer_support_officer", "taxpayer_registration_officer"].includes(role)),
+                allowedRoles: ALL.filter((role) => hasRRAPermission(role, "taxpayer.activity.read")),
             },
             {
                 label: "Taxpayer Corrections",
@@ -209,12 +210,7 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 label: "Transactions",
                 href: "/admin/transactions",
                 icon: ArrowLeftRight,
-                allowedRoles: [
-                    "super_admin",
-                    "audit_officer",
-                    "audit_investigation_officer",
-                    "tax_audit_officer",
-                ],
+                allowedRoles: ALL.filter((role) => hasRRAPermission(role, "transaction.read")),
             },
             {
                 label: "Import Declarations",
@@ -628,6 +624,17 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                         allowedRoles: ["super_admin"],
                     },
                 ],
+            },
+        ],
+    },
+    {
+        label: "Help & Resources",
+        items: [
+            {
+                label: "How TaxFlow Works",
+                href: "/admin/knowledge",
+                icon: BookOpen,
+                allowedRoles: ALL,
             },
         ],
     },

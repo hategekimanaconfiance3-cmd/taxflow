@@ -29,30 +29,23 @@ interface TooltipArgs {
 
 function AnomalyTooltip({ active, payload, label }: TooltipArgs) {
   if (!active || !payload?.length) return null;
-  const pricing = payload.find(p => p.name === "pricingAnomalies")?.value ?? 0;
-  const compliance = payload.find(p => p.name === "complianceFlags")?.value ?? 0;
-  const gaps = payload.find(p => p.name === "transactionGaps")?.value ?? 0;
-  const total = (pricing as number) + (compliance as number) + (gaps as number);
+  const suspicious = payload.find(p => p.name === "suspiciousCount")?.value ?? 0;
+  const audits = payload.find(p => p.name === "auditCount")?.value ?? 0;
+  const total = payload.find(p => p.name === "anomalyCount")?.value ?? 0;
   return (
     <div className="rounded-lg border bg-background shadow-lg px-3 py-2.5 text-xs space-y-1 min-w-[160px]">
       <p className="font-semibold">{label}</p>
       <div className="space-y-0.5">
-        {(pricing as number) > 0 && (
+        {(suspicious as number) > 0 && (
           <div className="flex items-center justify-between gap-3">
-            <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-amber-500" />Pricing</span>
-            <span className="font-mono font-semibold text-amber-600">{pricing}</span>
+            <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-red-500" />Suspicious flags</span>
+            <span className="font-mono font-semibold text-red-600">{suspicious}</span>
           </div>
         )}
-        {(compliance as number) > 0 && (
+        {(audits as number) > 0 && (
           <div className="flex items-center justify-between gap-3">
-            <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-red-500" />Compliance</span>
-            <span className="font-mono font-semibold text-red-600">{compliance}</span>
-          </div>
-        )}
-        {(gaps as number) > 0 && (
-          <div className="flex items-center justify-between gap-3">
-            <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-blue-400" />Txn gaps</span>
-            <span className="font-mono font-semibold text-blue-500">{gaps}</span>
+            <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-blue-400" />Audit actions</span>
+            <span className="font-mono font-semibold text-blue-500">{audits}</span>
           </div>
         )}
         {total > 0 && (
@@ -85,13 +78,14 @@ export function AnomalyTimeline() {
 
   if (!data) return null;
 
-  const TrendIcon = data.trend === "increasing" ? TrendingUp : data.trend === "decreasing" ? TrendingDown : Minus;
-  const trendColor = data.trend === "increasing" ? "text-red-600" : data.trend === "decreasing" ? "text-emerald-600" : "text-muted-foreground";
-  const trendLabel = data.trend === "increasing" ? "Anomalies increasing" : data.trend === "decreasing" ? "Anomalies decreasing" : "Stable";
+  const TrendIcon = data.trend === "up" ? TrendingUp : data.trend === "down" ? TrendingDown : Minus;
+  const trendColor = data.trend === "up" ? "text-red-600" : data.trend === "down" ? "text-emerald-600" : "text-muted-foreground";
+  const trendLabel = data.trend === "up" ? "Recorded events increasing" : data.trend === "down" ? "Recorded events decreasing" : "Stable";
 
   const chartData = data.timeline;
 
-  const avg = data.totalAnomalies > 0 ? data.totalAnomalies / data.timeline.length : 0;
+  const avg = data.totalAnomalies > 0 && data.timeline.length > 0 ? data.totalAnomalies / data.timeline.length : 0;
+  const peakDay = data.timeline.reduce((peak, day) => !peak || day.anomalyCount > peak.anomalyCount ? day : peak, data.timeline[0]);
 
   return (
     <Card>
@@ -106,14 +100,14 @@ export function AnomalyTimeline() {
               <TrendIcon className="h-3.5 w-3.5" />
               {trendLabel}
             </div>
-            {data.peakDate && (
+            {peakDay && (
               <Badge variant="secondary" className="bg-red-100 text-red-700 text-[10px]">
-                Peak: {data.peakDate} ({data.peakTotal})
+                Peak: {peakDay.date} ({peakDay.anomalyCount})
               </Badge>
             )}
           </div>
         </div>
-        <p className="text-[10px] text-muted-foreground">Last 30 days · pricing anomalies, compliance flags, transaction gaps</p>
+        <p className="text-[10px] text-muted-foreground">Last 30 days · suspicious flags and recorded audit actions</p>
       </CardHeader>
       <CardContent className="space-y-4">
         {/* KPIs */}
@@ -124,8 +118,8 @@ export function AnomalyTimeline() {
           </div>
           <div className="rounded-lg border px-3 py-2 text-center">
             <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Peak day</p>
-            <p className="text-sm font-bold mt-0.5">{data.peakDate ?? "—"}</p>
-            {data.peakTotal > 0 && <p className="text-[9px] text-red-600 font-mono">{data.peakTotal} events</p>}
+            <p className="text-sm font-bold mt-0.5">{peakDay?.date ?? "—"}</p>
+            {peakDay && peakDay.anomalyCount > 0 && <p className="text-[9px] text-red-600 font-mono">{peakDay.anomalyCount} events</p>}
           </div>
           <div className="rounded-lg border px-3 py-2 text-center">
             <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Daily avg</p>
@@ -139,8 +133,8 @@ export function AnomalyTimeline() {
             <div className="flex items-center gap-3 rounded-lg border bg-emerald-50/40 border-emerald-200 px-4 py-3">
               <ShieldCheck className="h-8 w-8 text-emerald-500 shrink-0" />
               <div>
-                <p className="text-sm font-semibold text-emerald-700">No anomalies detected in the last 30 days</p>
-                <p className="text-[11px] text-muted-foreground">All signals within normal ranges — system scanned pricing, compliance, and transaction patterns daily.</p>
+                <p className="text-sm font-semibold text-emerald-700">No matching events recorded in the last 30 days</p>
+                <p className="text-[11px] text-muted-foreground">This view summarizes selected audit-log events; it does not establish that all trader activity was anomaly-free.</p>
               </div>
             </div>
 
@@ -149,22 +143,22 @@ export function AnomalyTimeline() {
               {[
                 {
                   icon: "bg-amber-500",
-                  label: "Pricing Patterns",
-                  desc: "All product prices within ±15% of 90-day median. No below-market or extreme drop transactions detected.",
+                  label: "Suspicious flags",
+                  desc: "The chart counts suspicious flags recorded in the audit log.",
                   result: "Clear",
                   resultColor: "text-emerald-600 bg-emerald-50 border-emerald-200",
                 },
                 {
                   icon: "bg-red-500",
-                  label: "Compliance Events",
-                  desc: "No price ceiling violations, suspended clearances, or suspicious activity markers logged in the audit trail.",
+                  label: "Audit actions",
+                  desc: "The chart counts audit actions for the selected case workflow events.",
                   result: "Clear",
                   resultColor: "text-emerald-600 bg-emerald-50 border-emerald-200",
                 },
                 {
                   icon: "bg-blue-400",
-                  label: "Transaction Volume",
-                  desc: "Daily transaction counts are consistent with the 30-day rolling average. No unusual drop or spike days detected.",
+                  label: "Scope",
+                  desc: "This report is an audit-event summary, not a transaction anomaly detector.",
                   result: "Clear",
                   resultColor: "text-emerald-600 bg-emerald-50 border-emerald-200",
                 },
@@ -224,9 +218,8 @@ export function AnomalyTimeline() {
                     />
                   )}
                   <Tooltip content={<AnomalyTooltip />} cursor={{ stroke: "hsl(var(--border))", strokeWidth: 1 }} />
-                  <Area type="monotone" dataKey="complianceFlags" stackId="1" stroke="#ef4444" strokeWidth={1.5} fill="url(#complianceGrad)" name="complianceFlags" />
-                  <Area type="monotone" dataKey="pricingAnomalies" stackId="1" stroke="#f59e0b" strokeWidth={1.5} fill="url(#pricingGrad)" name="pricingAnomalies" />
-                  <Area type="monotone" dataKey="transactionGaps" stackId="1" stroke="#60a5fa" strokeWidth={1} fill="url(#gapsGrad)" name="transactionGaps" />
+                  <Area type="monotone" dataKey="suspiciousCount" stackId="1" stroke="#ef4444" strokeWidth={1.5} fill="url(#complianceGrad)" name="suspiciousCount" />
+                  <Area type="monotone" dataKey="auditCount" stackId="1" stroke="#60a5fa" strokeWidth={1} fill="url(#gapsGrad)" name="auditCount" />
                 </AreaChart>
               </ResponsiveContainer>
             </div>

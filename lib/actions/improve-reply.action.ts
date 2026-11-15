@@ -43,7 +43,7 @@ export async function improveReply(
     // Validate input
     const parsed = improveReplySchema.safeParse(input);
     if (!parsed.success) {
-        throw new Error(parsed.error.errors[0]?.message ?? "Invalid input.");
+        throw new Error(parsed.error.issues[0]?.message ?? "Invalid input.");
     }
     const { draft, ticketSubject, ticketCategory } = parsed.data;
 
@@ -98,7 +98,7 @@ Rules:
             model: google(model),
             system: systemPrompt,
             prompt: `Draft reply to rewrite:\n\n${draft}`,
-            maxTokens: 1024,
+            maxOutputTokens: 1024,
         });
         result = text?.trim() ?? "";
     } catch {

@@ -257,18 +257,26 @@ export function usePriceSuggestion(productId: string | null) {
     const [loading, setLoading] = useState(false);
 
     useEffect(() => {
-        if (!productId) {
-            setSuggestion(null);
-            return;
-        }
+        if (!productId) return;
 
-        setLoading(true);
-        fetch(`/api/ai/price-suggestion?productId=${productId}`)
-            .then(res => res.ok ? res.json() : null)
-            .then(data => setSuggestion(data))
-            .catch(() => setSuggestion(null))
-            .finally(() => setLoading(false));
+        const controller = new AbortController();
+        let isCurrent = true;
+        const timer = window.setTimeout(() => {
+            if (!isCurrent) return;
+            setLoading(true);
+            fetch(`/api/ai/price-suggestion?productId=${encodeURIComponent(productId)}`, { signal: controller.signal })
+                .then((res) => res.ok ? res.json() as Promise<PriceSuggestion | null> : null)
+                .then((data) => { if (isCurrent) setSuggestion(data); })
+                .catch(() => { if (isCurrent) setSuggestion(null); })
+                .finally(() => { if (isCurrent) setLoading(false); });
+        }, 0);
+
+        return () => {
+            isCurrent = false;
+            window.clearTimeout(timer);
+            controller.abort();
+        };
     }, [productId]);
 
-    return { suggestion, loading };
+    return { suggestion: productId ? suggestion : null, loading: productId ? loading : false };
 }

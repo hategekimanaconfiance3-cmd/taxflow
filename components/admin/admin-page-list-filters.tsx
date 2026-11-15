@@ -76,8 +76,6 @@ export function AdminPageListFilters() {
   const active = Boolean(query.trim() || from || through);
   const filterRef = useRef({ query, from, through, active });
   const applyRef = useRef<() => void>(() => undefined);
-  filterRef.current = { query, from, through, active };
-
   useEffect(() => {
     const root = document.querySelector<HTMLElement>("main");
     if (!root) return;
@@ -115,7 +113,10 @@ export function AdminPageListFilters() {
     return () => { observer.disconnect(); applyRef.current = () => undefined; };
   }, []);
 
-  useEffect(() => { applyRef.current(); }, [query, from, through, active]);
+  useEffect(() => {
+    filterRef.current = { query, from, through, active };
+    applyRef.current();
+  }, [query, from, through, active]);
 
   const summary = useMemo(() => active
     ? `${counts.visible} of ${counts.total} rows shown`

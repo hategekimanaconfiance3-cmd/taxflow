@@ -25,9 +25,9 @@ test('ambiguous messages go to the manual general queue', () => {
 test('department routing is role-scoped and does not give every officer the taxpayer queue', () => {
   assert.equal(canRoleHandleCategory('customs_import_officer', 'imports', DEFAULT_MESSAGING_ROUTES), true);
   assert.equal(canRoleHandleCategory('data_ai_analyst', 'imports', DEFAULT_MESSAGING_ROUTES), false);
-  assert.equal(canRoleHandleCategory('super_admin', 'imports', DEFAULT_MESSAGING_ROUTES), false);
+  assert.equal(canRoleHandleCategory('super_admin', 'imports', DEFAULT_MESSAGING_ROUTES), true);
   assert.equal(canRoleHandleCategory('super_admin', 'general', DEFAULT_MESSAGING_ROUTES), true);
-  assert.equal(hasRRAPermission('super_admin', 'taxpayer.intelligence.search'), false);
+  assert.equal(hasRRAPermission('super_admin', 'taxpayer.intelligence.search'), true);
 });
 
 test('message input derives sender identity from the session instead of accepting client identity fields', () => {

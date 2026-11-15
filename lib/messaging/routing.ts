@@ -48,10 +48,10 @@ export const DEFAULT_MESSAGING_ROUTES: MessagingRouteRule[] = [
 ];
 
 const KEYWORDS: Record<Exclude<MessageCategory, 'general'>, string[]> = {
-  tax_declaration: ['declaration', 'filing', 'return', 'declare tax', 'umusoro', 'umusoro', 'déclaration', 'déclarer', 'impôt'],
+  tax_declaration: ['declaration', 'filing', 'return', 'declare tax', 'umusoro', 'gutanga imenyekanisha', 'déclaration', 'déclarer', 'impôt'],
   tin_registration: ['tin', 'register', 'registration', 'taxpayer number', 'kwiyandikisha', 'kwandikisha', 'enregistrement', 'immatriculation'],
   vat_invoice: ['vat', 'tva', 'invoice', 'e-invoice', 'facture', 'inyemezabuguzi', 'vat receipt'],
-  tax_payment: ['payment', 'paid', 'pay tax', 'refund', 'ubwishyu', 'kwishyura', 'paiement', 'remboursement'],
+  tax_payment: ['payment', 'paid', 'pay tax', 'refund', 'ubwishyu', 'kwishyura', 'kwishyura umusoro', 'paiement', 'remboursement'],
   production: ['production', 'manufacturing', 'batch', 'recipe', 'umusaruro', 'production batch', 'fabrication'],
   inventory_transactions: ['inventory', 'stock', 'transaction', 'wholesale', 'retail', 'ububiko', 'ibicuruzwa', 'stock movement', 'transaction'],
   imports: ['import', 'customs', 'clearance', 'customs reference', 'ibitumizwa', 'douane', 'importation'],
@@ -98,6 +98,9 @@ export function routeRuleFor(category: MessageCategory, rules: readonly Messagin
 
 export function canRoleHandleCategory(role: string, category: MessageCategory, rules: readonly MessagingRouteRule[]): boolean {
   if (!isRRARole(role)) return false;
+  if (role === 'super_admin') {
+    return CATEGORY_PERMISSIONS[category].some((permission) => hasRRAPermission(role, permission));
+  }
   return routeRuleFor(category, rules).roles.includes(role)
     && CATEGORY_PERMISSIONS[category].some((permission) => hasRRAPermission(role, permission));
 }

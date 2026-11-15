@@ -2,9 +2,9 @@
 // Routes aiFinding records to the right RRA staff member based on rraStaff.clearanceLevel permissions.
 // Also pushes real-time Socket.IO events to connected officers.
 
-import { eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import db from '@/db/drizzle';
-import { rraStaff, notification, user } from '@/db/schema';
+import { rraStaff, rraStaffRole, notification, user } from '@/db/schema';
 import { emitToUser } from '@/lib/realtime';
 import { hasRRAPermission, isRRARole, type RRAPermission } from '@/lib/rra-rbac';
 import { Resend } from 'resend';
@@ -57,28 +57,31 @@ export async function routeFindingToRRAStaff(payload: FindingRouterPayload): Pro
   try {
     const requiredPermission = FINDING_PERMISSION_MAP[payload.findingType] ?? 'ai.findings.read';
 
-    // Fetch all active RRA staff with their clearanceLevel (which is the role)
+    // Read all active assigned roles; clearanceLevel is only the legacy primary role.
     const activeStaff = await db
       .select({
         userId: rraStaff.userId,
-        role: rraStaff.clearanceLevel,
+        role: rraStaffRole.role,
       })
-      .from(rraStaff)
-      .where(eq(rraStaff.isActive, true));
+      .from(rraStaffRole)
+      .innerJoin(rraStaff, eq(rraStaffRole.staffRecordId, rraStaff.id))
+      .innerJoin(user, eq(rraStaff.userId, user.id))
+      .where(and(eq(rraStaff.isActive, true), eq(user.isActive, true)));
 
     // Filter to staff who have the required permission
-    const eligibleUserIds: string[] = [];
+    const eligibleUserIds = new Set<string>();
     for (const staff of activeStaff) {
       if (!isRRARole(staff.role)) continue;
       const hasPermission = hasRRAPermission(staff.role, requiredPermission);
       // Critical findings always go to super_admin too
       const isSuperAdmin = staff.role === 'super_admin';
       if (hasPermission || (payload.severity === 'critical' && isSuperAdmin)) {
-        eligibleUserIds.push(staff.userId);
+        eligibleUserIds.add(staff.userId);
       }
     }
 
-    if (eligibleUserIds.length === 0) return [];
+    if (eligibleUserIds.size === 0) return [];
+    const recipientIds = [...eligibleUserIds];
 
     // Build notifications
     const businessLabel = payload.businessName ?? payload.businessId.slice(0, 8);
@@ -88,7 +91,7 @@ export async function routeFindingToRRAStaff(payload: FindingRouterPayload): Pro
       : `New ${payload.severity} finding detected for ${businessLabel}.`;
     const link = `/admin/intelligence/business/${payload.businessId}`;
 
-    const notifs = eligibleUserIds.map((userId) => ({
+    const notifs = recipientIds.map((userId) => ({
       userId,
       type: 'ai_finding',
       title,
@@ -100,7 +103,7 @@ export async function routeFindingToRRAStaff(payload: FindingRouterPayload): Pro
     await db.insert(notification).values(notifs);
 
     // Push real-time event to each officer's browser
-    for (const userId of eligibleUserIds) {
+    for (const userId of recipientIds) {
       emitToUser(userId, 'new_ai_finding', {
         findingId: payload.findingId,
         findingType: payload.findingType,
@@ -114,13 +117,13 @@ export async function routeFindingToRRAStaff(payload: FindingRouterPayload): Pro
     }
 
     // Send email alerts for critical findings
-    if (payload.severity === 'critical' && eligibleUserIds.length > 0 && process.env.RESEND_API_KEY) {
+    if (payload.severity === 'critical' && recipientIds.length > 0 && process.env.RESEND_API_KEY) {
       try {
-        // Fetch email addresses for eligible staff
+        // Email every eligible officer, not only the first recipient.
         const staffUsers = await db
           .select({ id: user.id, email: user.email, name: user.name })
           .from(user)
-          .where(eq(user.id, eligibleUserIds[0])); // Start with first to avoid mass-emailing in a loop
+          .where(inArray(user.id, recipientIds));
 
         // Email each eligible officer individually
         for (const officer of staffUsers) {
@@ -154,7 +157,7 @@ export async function routeFindingToRRAStaff(payload: FindingRouterPayload): Pro
       }
     }
 
-    return eligibleUserIds;
+    return recipientIds;
   } catch (error) {
     console.error('[FindingRouter] Failed to route finding to RRA staff:', error);
     return [];

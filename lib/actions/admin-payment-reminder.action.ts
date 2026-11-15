@@ -141,7 +141,6 @@ export async function sendBulkPaymentReminders() {
         userId: session.user.id,
         action: "BULK_PAYMENT_REMINDERS_SENT",
         targetType: "user",
-        targetId: null,
         metadata: {
             count: sent,
             sentBy: staff.id,

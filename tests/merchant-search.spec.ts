@@ -11,6 +11,8 @@
  */
 
 import { describe, it, expect, beforeEach, vi, type Mock } from "vitest";
+import { searchTaxpayers } from "@/lib/actions/taxpayer-search.action";
+import { getMerchantProfileById, editMerchantProfile } from "@/lib/actions/merchant-profile.action";
 
 // ---------------------------------------------------------------------------
 // Decide whether to run integration tests
@@ -100,22 +102,17 @@ function setAuthDenied() {
 }
 
 // ---------------------------------------------------------------------------
-// Import SUT after mocks are set up
-// ---------------------------------------------------------------------------
-
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const { searchTaxpayers } = require("@/lib/actions/taxpayer-search.action") as typeof import("@/lib/actions/taxpayer-search.action");
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const { getMerchantProfileById, editMerchantProfile } = require("@/lib/actions/merchant-profile.action") as typeof import("@/lib/actions/merchant-profile.action");
-
-// ---------------------------------------------------------------------------
 // 1. Search authorization
 // ---------------------------------------------------------------------------
 
 describe("searchTaxpayers — authorization", () => {
-  it("throws when administrator lacks taxpayer.intelligence.search", async () => {
+  it("returns a fail-closed error when administrator lacks taxpayer.intelligence.search", async () => {
     setAuthDenied();
-    await expect(searchTaxpayers({ query: "Hirwa" }, 1)).rejects.toThrow();
+    const result = await searchTaxpayers({ query: "Hirwa" }, 1);
+    expect(result).toMatchObject({
+      rows: [],
+      error: { failurePhase: "authorization" },
+    });
   });
 
   it("resolves for a role that has taxpayer.intelligence.search", async () => {
@@ -129,10 +126,8 @@ describe("searchTaxpayers — authorization", () => {
     await expect(searchTaxpayers({ query: "100000001" }, 1)).resolves.toBeDefined();
   });
 
-  it("resolves for super_admin when other operational role also present", async () => {
-    // Super admin alone does not have taxpayer.intelligence.search per RBAC map.
-    // This test validates that the permission check is role-based, not role-name bypass.
-    setAuth(["super_admin", "audit_investigation_officer"]);
+  it("resolves for super_admin alone through its explicit search permission", async () => {
+    setAuth(["super_admin"]);
     await expect(searchTaxpayers({ query: "Ltd" }, 1)).resolves.toBeDefined();
   });
 });
@@ -259,12 +254,9 @@ describe("getMerchantProfileById — permission scoping", () => {
     expect(hasRRAPermission("correction_officer", "stock.correction.review")).toBe(true);
   });
 
-  it("super_admin does NOT get taxpayer.intelligence.search directly", async () => {
-    // Super admin is a system-management role; taxpayer data access requires
-    // an operational role. Per RBAC map, super_admin has taxpayer.compliance.read
-    // but NOT taxpayer.intelligence.search.
+  it("super_admin gets taxpayer.intelligence.search explicitly", async () => {
     const { hasRRAPermission } = await import("@/lib/rra-rbac");
-    expect(hasRRAPermission("super_admin", "taxpayer.intelligence.search")).toBe(false);
+    expect(hasRRAPermission("super_admin", "taxpayer.intelligence.search")).toBe(true);
   });
 
   it("compliance.followup.manage is required for canManageDisputes", async () => {

@@ -14,7 +14,7 @@ import { Sheet, SheetContent, SheetTrigger, SheetTitle } from '@/components/ui/s
 import { Button } from '@/components/ui/button';
 import {
   LogOut, Menu, Shield, Bell, ChevronDown, ChevronRight, User, HelpCircle,
-  Search, Brain, Send, Sparkles, RotateCcw, X, Check, Loader2,
+  Search, Brain, Send, Sparkles, RotateCcw, X, Check, Loader2, BookOpen,
 } from 'lucide-react';
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { CommandPalette, type CommandItem } from '@/components/ui/command-palette';
@@ -818,6 +818,20 @@ export function AdminShell({ userId, userName, staffId, clearanceLevel, clearanc
 
             {/* Right side controls */}
             <div className="flex items-center gap-1">
+              {/* Knowledge Center */}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Link
+                    href="/admin/knowledge"
+                    aria-label="How TaxFlow Works – Knowledge Center"
+                    className="relative flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                  >
+                    <BookOpen className="h-4 w-4" />
+                  </Link>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">How TaxFlow Works</TooltipContent>
+              </Tooltip>
+
               {/* Notification Bell */}
               <NotificationBell href="/admin/notifications" userId={userId} />
 

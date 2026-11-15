@@ -40,7 +40,7 @@ type ConversationRow = {
   assignedToId: string | null; routingReason: string | null; lastMessage: string; lastMessageAt: Date; unreadCount: number;
 };
 type MessageRow = { id: string; senderUserId: string; senderName: string; senderType: string; senderRole: string; body: string; createdAt: Date };
-type StaffRecipient = { userId: string; name: string; staffId: string; department: string | null; role: string };
+type StaffRecipient = { userId: string; name: string; staffId: string; department: string | null; role?: string };
 type TaxpayerRecipient = { userId: string; name: string; businessName: string | null; tin: string | null; role: string };
 
 const CATEGORY_LABELS: Record<MessageCategory, string> = {

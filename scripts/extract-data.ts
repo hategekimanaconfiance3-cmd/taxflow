@@ -1,4 +1,7 @@
 import 'dotenv/config';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { user, account, rraStaff } from '../db/schema';
@@ -38,17 +41,13 @@ async function extractData() {
     };
 
     // Save to file
-    const fs = require('fs');
-    const path = require('path');
-    const outputPath = path.join(__dirname, '..', 'data', 'extracted-data.json');
+    const outputPath = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'data', 'extracted-data.json');
 
     // Ensure the data directory exists
-    const dataDir = path.dirname(outputPath);
-    if (!fs.existsSync(dataDir)) {
-      fs.mkdirSync(dataDir, { recursive: true });
-    }
+    const dataDir = dirname(outputPath);
+    await mkdir(dataDir, { recursive: true });
 
-    fs.writeFileSync(outputPath, JSON.stringify(extractedData, null, 2));
+    await writeFile(outputPath, JSON.stringify(extractedData, null, 2));
     console.log(`Data extracted and saved to: ${outputPath}`);
 
     // Display sample data
@@ -75,7 +74,7 @@ async function extractData() {
 }
 
 // Run the extraction
-if (require.main === module) {
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   extractData()
     .then(() => {
       console.log('\nData extraction completed successfully!');

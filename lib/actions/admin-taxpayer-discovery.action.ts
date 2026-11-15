@@ -161,7 +161,7 @@ export async function getGhostTaxpayers(limit = 50): Promise<GhostTaxpayer[]> {
         .filter((t): t is string => t !== null);
 
     // Query TIN DB for active records NOT in the registered set
-    let ghostQuery = tinDb
+    const ghostQuery = tinDb
         .select({
             tinNumber: tinRecord.tinNumber,
             businessName: tinRecord.businessName,

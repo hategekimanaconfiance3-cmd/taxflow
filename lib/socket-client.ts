@@ -54,7 +54,10 @@ export function useSocket(
 ) {
     const [connected, setConnected] = useState(false);
     const eventsRef = useRef(events);
-    eventsRef.current = events;
+
+    useEffect(() => {
+        eventsRef.current = events;
+    }, [events]);
 
     useEffect(() => {
         if (!userId) return;
@@ -71,8 +74,9 @@ export function useSocket(
         socket.on("connect", onConnect);
         socket.on("disconnect", onDisconnect);
 
-        // Set initial state
-        setConnected(socket.connected);
+        // Defer the initial external-store snapshot so the effect does not
+        // synchronously schedule a render while it is being installed.
+        const initialStateTimer = window.setTimeout(() => setConnected(socket.connected), 0);
 
         // Subscribe to events
         const eventNames = Object.keys(eventsRef.current || {});
@@ -85,6 +89,7 @@ export function useSocket(
         return () => {
             socket.off("connect", onConnect);
             socket.off("disconnect", onDisconnect);
+            window.clearTimeout(initialStateTimer);
             for (const event of eventNames) {
                 socket.off(event);
             }

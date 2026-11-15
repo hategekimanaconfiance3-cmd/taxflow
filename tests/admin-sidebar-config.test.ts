@@ -33,9 +33,9 @@ test("Correction Officers can navigate to AI Assistant without gaining Intellige
   assert.equal(links.some((item) => item.href === "/admin/intelligence/findings"), false);
 });
 
-test("admin command-search destinations are limited to the assigned roles", () => {
+test("admin command-search destinations follow the assigned role permissions", () => {
   const superAdminLinks = getAdminNavigationLinks("super_admin");
-  assert.equal(superAdminLinks.some((item) => item.href === "/admin/traders"), false);
+  assert.equal(superAdminLinks.some((item) => item.href === "/admin/traders"), true);
   assert.equal(superAdminLinks.some((item) => item.href === "/admin/super"), true);
 
   const customsLinks = getAdminNavigationLinks("customs_import_officer");
@@ -66,9 +66,10 @@ test("Manufacturing Activity navigation matches its explicit read permission for
     const canReadActivity = hasRRAPermission(role, "taxpayer.activity.read");
     const seesActivity = getAdminSidebarItems(role).some((item) => item.href === "/admin/manufacturing-activity");
     assert.equal(seesActivity, canReadActivity, `${role} activity navigation must match taxpayer.activity.read`);
-    assert.equal(hasRRAPermission(role, "taxpayer.account.manage"), true, `${role} should be able to manage manufacturer account status`);
-    assert.equal(hasRRAPermission(role, "taxpayer.profile.edit"), true, `${role} should be able to edit limited manufacturer names`);
   }
+  assert.equal(hasRRAPermission("super_admin", "taxpayer.account.manage"), true);
+  assert.equal(hasRRAPermission("taxpayer_support_officer", "taxpayer.account.manage"), false);
+  assert.equal(hasRRAPermission("taxpayer_registration_officer", "taxpayer.profile.edit"), false);
   assert.equal(hasRRAPermission("correction_officer", "tax.records.read"), false);
   assert.equal(hasRRAPermission("correction_officer", "payments.read"), false);
 });
