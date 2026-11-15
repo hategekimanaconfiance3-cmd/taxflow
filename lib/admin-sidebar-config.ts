@@ -636,6 +636,12 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 icon: BookOpen,
                 allowedRoles: ALL,
             },
+            {
+                label: "Manage Knowledge Center",
+                href: "/admin/knowledge/manage",
+                icon: BookOpen,
+                allowedRoles: ["super_admin"],
+            },
         ],
     },
 ];

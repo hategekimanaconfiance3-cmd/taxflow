@@ -73,7 +73,7 @@ export default async function InventoryPage() {
               {inventory.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={5} className="text-center py-8 text-muted-foreground text-sm">
-                    No inventory yet. Add products via the Production page.
+                    No inventory recorded yet. Add stock via Production or accept an incoming purchase.
                   </TableCell>
                 </TableRow>
               )}

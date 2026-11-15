@@ -224,6 +224,18 @@ export async function recordB2BReceipt(input: unknown): Promise<{ success: true;
       )).limit(1);
     if (!acceptance) throw new Error('This legacy transaction has no explicit order-acceptance evidence and cannot accept a new receipt.');
 
+    const [acceptanceStockCredit] = await tx.select({ id: stockMovement.id }).from(stockMovement)
+      .where(and(
+        eq(stockMovement.sourceType, 'b2b_order_acceptance'),
+        eq(stockMovement.sourceId, acceptance.id),
+        eq(stockMovement.businessId, txn.buyerId),
+        eq(stockMovement.productId, txn.productId),
+      )).limit(1);
+    const [priorReceiptTotals] = await tx.select({
+      count: sql<number>`count(*)`,
+      accepted: sql<number>`coalesce(sum(${b2bReceipt.acceptedQuantity}), 0)`,
+    }).from(b2bReceipt).where(eq(b2bReceipt.transactionId, txn.id));
+
     const [prior] = await tx.select().from(b2bReceipt).where(and(
       eq(b2bReceipt.dispatchId, dispatch.id), eq(b2bReceipt.idempotencyKey, data.idempotencyKey),
     )).limit(1);
@@ -244,7 +256,7 @@ export async function recordB2BReceipt(input: unknown): Promise<{ success: true;
       throw new Error('Measured receipt quantity cannot exceed the quantity recorded on this dispatch.');
     }
 
-    if (data.acceptedQuantity > 0) {
+    if (data.acceptedQuantity > 0 && !acceptanceStockCredit) {
       const [priorAcceptedPart] = await tx.select({ id: b2bReceipt.id }).from(b2bReceipt).where(and(
         eq(b2bReceipt.transactionId, txn.id), gt(b2bReceipt.acceptedQuantity, 0),
       )).limit(1);
@@ -263,7 +275,42 @@ export async function recordB2BReceipt(input: unknown): Promise<{ success: true;
     }).returning({ id: b2bReceipt.id });
     if (!saved) throw new Error('Receipt evidence could not be saved.');
 
-    if (data.acceptedQuantity > 0) {
+    let stockAdjustment = 0;
+    if (acceptanceStockCredit) {
+      // Confirmation already credited the ordered quantity. On the first
+      // measured receipt, replace that provisional credit with actual accepted
+      // goods; subsequent partial receipts add only their accepted quantity.
+      const adjustment = Number(priorReceiptTotals?.count ?? 0) === 0
+        ? data.acceptedQuantity - txn.quantity
+        : data.acceptedQuantity;
+      stockAdjustment = adjustment;
+      if (Math.abs(adjustment) > 0.000001) {
+        const [updatedBuyerStock] = await tx.insert(stock).values({
+          businessId: txn.buyerId,
+          productId: txn.productId,
+          quantity: adjustment,
+        }).onConflictDoUpdate({
+          target: [stock.businessId, stock.productId],
+          set: { quantity: sql`${stock.quantity} + ${adjustment}` },
+        }).returning({ quantity: stock.quantity });
+        if (!updatedBuyerStock) throw new Error('Buyer inventory could not be reconciled to the measured receipt.');
+        const after = updatedBuyerStock.quantity;
+        const before = after - adjustment;
+        await tx.insert(stockMovement).values({
+          businessId: txn.buyerId,
+          productId: txn.productId,
+          quantityDelta: adjustment,
+          quantityBefore: before,
+          quantityAfter: after,
+          movementType: 'b2b_receipt_reconciliation',
+          sourceType: 'b2b_receipt',
+          sourceId: saved.id,
+          actorUserId: session.user.id,
+          reason: `Measured receipt reconciled against confirmed transaction ${txn.id}`,
+        });
+      }
+    } else if (data.acceptedQuantity > 0) {
+      stockAdjustment = data.acceptedQuantity;
       const [updatedBuyerStock] = await tx.insert(stock).values({
         businessId: txn.buyerId, productId: txn.productId, quantity: data.acceptedQuantity,
       }).onConflictDoUpdate({
@@ -283,7 +330,7 @@ export async function recordB2BReceipt(input: unknown): Promise<{ success: true;
 
     await tx.insert(auditLog).values({
       userId: session.user.id, action: 'B2B_RECEIPT_RECORDED', targetType: 'b2b_receipt', targetId: saved.id,
-      metadata: JSON.stringify({ transactionId: txn.id, dispatchId: dispatch.id, buyerBusinessId: txn.buyerId, quantityReceived: data.quantityReceived, acceptedQuantity: data.acceptedQuantity, damagedQuantity: data.damagedQuantity, rejectedQuantity: data.rejectedQuantity, disputedQuantity: data.disputedQuantity, stockCredited: data.acceptedQuantity, taxChanged: false }),
+      metadata: JSON.stringify({ transactionId: txn.id, dispatchId: dispatch.id, buyerBusinessId: txn.buyerId, quantityReceived: data.quantityReceived, acceptedQuantity: data.acceptedQuantity, damagedQuantity: data.damagedQuantity, rejectedQuantity: data.rejectedQuantity, disputedQuantity: data.disputedQuantity, stockAdjustment, stockCreditedAtConfirmation: Boolean(acceptanceStockCredit), taxChanged: false }),
     });
     return saved.id;
   });

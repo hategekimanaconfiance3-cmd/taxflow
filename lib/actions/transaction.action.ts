@@ -622,8 +622,8 @@ export async function createTransaction(data: {
 }
 
 // ---------------------------------------------------------------------------
-// Accept B2B order. VAT remains at its existing confirmation trigger; stock is
-// credited only from separately recorded accepted receipt quantities.
+// Accept B2B order. Confirmation immediately credits the buyer's inventory;
+// later dispatch receipts reconcile that provisional quantity to measured goods.
 // ---------------------------------------------------------------------------
 
 export async function confirmTransaction(transactionId: string) {
@@ -717,6 +717,34 @@ export async function confirmTransaction(transactionId: string) {
     }).returning({ id: b2bOrderAcceptance.id, acceptedAt: b2bOrderAcceptance.acceptedAt });
     if (!acceptance) throw new Error('Order acceptance evidence could not be saved.');
 
+    // A confirmed incoming purchase is immediately visible in the buyer's
+    // inventory. The immutable stock movement makes this credit idempotency-
+    // traceable to the unique acceptance row and lets measured receipts later
+    // reconcile shortages, damage, or rejected quantities without double credit.
+    const [buyerStock] = await tx.insert(stock).values({
+      businessId: lockedTxn.buyerId,
+      productId: lockedTxn.productId,
+      quantity: lockedTxn.quantity,
+    }).onConflictDoUpdate({
+      target: [stock.businessId, stock.productId],
+      set: { quantity: sql`${stock.quantity} + ${lockedTxn.quantity}` },
+    }).returning({ quantity: stock.quantity });
+    if (!buyerStock) throw new Error('Buyer inventory could not be updated.');
+    const buyerQuantityAfter = buyerStock.quantity;
+    const buyerQuantityBefore = buyerQuantityAfter - lockedTxn.quantity;
+    await tx.insert(stockMovement).values({
+      businessId: lockedTxn.buyerId,
+      productId: lockedTxn.productId,
+      quantityDelta: lockedTxn.quantity,
+      quantityBefore: buyerQuantityBefore,
+      quantityAfter: buyerQuantityAfter,
+      movementType: 'b2b_purchase_confirmed',
+      sourceType: 'b2b_order_acceptance',
+      sourceId: acceptance.id,
+      actorUserId: session.user.id,
+      reason: `Buyer-confirmed purchase for transaction ${lockedTxn.id}`,
+    });
+
     // 3. Create VAT output record (seller)
     await tx.insert(vatRecord).values({
       transactionId: lockedTxn.id,
@@ -761,12 +789,12 @@ export async function confirmTransaction(transactionId: string) {
       beforeState: {
         status: 'pending',
         sellerStockQuantity: sellerStock.quantity,
-        buyerStockQuantity: null,
+        buyerStockQuantity: buyerQuantityBefore,
       },
       afterState: {
         status: 'confirmed',
         sellerStockQuantity: sellerQuantityAfter,
-        buyerStockQuantity: null,
+        buyerStockQuantity: buyerQuantityAfter,
         vatAmount: lockedTxn.vatAmount,
       },
       metadata: JSON.stringify({
@@ -777,7 +805,8 @@ export async function confirmTransaction(transactionId: string) {
         acceptanceId: acceptance.id,
         acceptedAt: acceptance.acceptedAt,
         acceptedBy: actorAuthority,
-        receiptRequiredForBuyerStockCredit: true,
+        receiptRequiredForBuyerStockCredit: false,
+        buyerStockCreditSource: 'b2b_order_acceptance',
         stockMovements: !reservation ? [{
             movementId: `${lockedTxn.id}:seller`,
             movementType: 'sale',
@@ -787,14 +816,14 @@ export async function confirmTransaction(transactionId: string) {
             quantityBefore: sellerStock.quantity,
             quantityAfter: sellerQuantityAfter,
           }] : [],
-        stockCreditedToBuyer: 0,
+        stockCreditedToBuyer: lockedTxn.quantity,
         reservationId: reservation?.id ?? null,
       }),
     });
 
     const [savedNotification] = await tx.insert(notification).values({
       userId: lockedTxn.sellerId, type: 'txn_confirmed', title: 'Order accepted',
-      message: `${session.user.name} accepted your order for ${lockedTxn.quantity} units. Dispatch and receipt are recorded separately.`,
+      message: `${session.user.name} accepted your order for ${lockedTxn.quantity} units. The quantity was added to the buyer's inventory; delivery receipts can reconcile actual quantities.`,
       link: '/dashboard/pending',
     }).returning();
     return { txn: lockedTxn, savedNotification, expired: false, invoiceId: issuedInvoice.id };

@@ -107,6 +107,22 @@ export async function getKnowledgeArticle(slug: string): Promise<KnowledgeArticl
 // Super-Admin reads
 // ---------------------------------------------------------------------------
 
+export async function getKnowledgeArticleById(id: string): Promise<KnowledgeArticleRow | null> {
+    await requireRRASession('super_admin');
+    const [row] = await db.select().from(knowledgeArticle).where(eq(knowledgeArticle.id, id)).limit(1);
+    return row ? (row as KnowledgeArticleRow) : null;
+}
+
+export async function getKnowledgeArticleHistory(articleId: string) {
+    await requireRRASession('super_admin');
+    const rows = await db
+        .select()
+        .from(knowledgeArticleHistory)
+        .where(eq(knowledgeArticleHistory.articleId, articleId))
+        .orderBy(desc(knowledgeArticleHistory.changedAt));
+    return rows;
+}
+
 export async function getAllKnowledgeArticles(): Promise<KnowledgeArticleRow[]> {
     await requireRRASession("super_admin");
     const rows = await db

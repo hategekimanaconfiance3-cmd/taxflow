@@ -6,8 +6,8 @@ import { Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 
-export function KnowledgeSearch() {
-  const [query, setQuery] = useState('');
+export function KnowledgeSearch({ initialQuery = '' }: { initialQuery?: string }) {
+  const [query, setQuery] = useState(initialQuery);
   const router = useRouter();
 
   function handleSubmit(e: FormEvent<HTMLFormElement>) {

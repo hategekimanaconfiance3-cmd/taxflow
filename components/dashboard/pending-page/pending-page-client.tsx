@@ -242,7 +242,7 @@ function ConfirmRejectActions({ transactionId }: { transactionId: string }) {
                     : "text-red-500"
                     }`}
             >
-                {result === "confirmed" ? "✓ Order accepted" : "✕ Rejected"}
+                {result === "confirmed" ? "✓ Accepted; inventory updated" : "✕ Rejected"}
                 {result === "confirmed" && invoiceId && (
                     <a className="ml-2 underline underline-offset-2" href={`/dashboard/invoices/${invoiceId}`}>View invoice</a>
                 )}
@@ -365,7 +365,7 @@ export function PendingPageClient({ incoming, outgoing, fulfillment }: PendingPa
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Pending Orders</h1>
-        <p className="text-sm text-muted-foreground mt-1">Accept or reject business orders. Dispatch and measured receipt are recorded separately.</p>
+        <p className="text-sm text-muted-foreground mt-1">Accepting an incoming order adds its quantity to inventory immediately. Record dispatch and measured receipts to reconcile actual deliveries.</p>
       </div>
 
       {/* Tabs */}
