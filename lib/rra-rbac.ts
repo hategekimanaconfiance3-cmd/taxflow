@@ -55,7 +55,7 @@ const PROPOSED_ROLE_PERMISSIONS: Record<RRAProposedRole, readonly RRAPermission[
     customs_import_officer: ["taxpayer.intelligence.search", "taxpayer.activity.read", "taxpayer.account.manage", "taxpayer.profile.edit", "imports.read", "imports.review", "production.material.receipt.review", "ai.assistant.use", "communications.staff.use"],
     payments_reconciliation_officer: ["taxpayer.intelligence.search", "taxpayer.activity.read", "taxpayer.account.manage", "taxpayer.profile.edit", "tax.records.read", "payments.read", "payments.reconcile", "payments.accounts.manage", "payments.accounts.review", "ai.assistant.use", "communications.staff.use"],
     data_ai_analyst: ["taxpayer.intelligence.search", "taxpayer.activity.read", "taxpayer.account.manage", "taxpayer.profile.edit", "analytics.read", "ai.findings.read", "data_quality.read", "reports.aggregate.read", "ai.assistant.use", "ai.feedback.review"],
-    stock_control_admin: ["taxpayer.activity.read", "taxpayer.account.manage", "taxpayer.profile.edit", "stock.threshold.read", "stock.threshold.manage.scoped", "stock.restock.read", "stock.restock.exception.review", "stock.restock.baseline.attest", "production.material.receipt.review", "production.batch.review", "production.material.adjust"],
+    stock_control_admin: ["taxpayer.activity.read", "taxpayer.account.manage", "taxpayer.profile.edit", "stock.threshold.read", "stock.threshold.manage.global", "stock.threshold.manage.scoped", "stock.restock.read", "stock.restock.exception.review", "stock.restock.baseline.attest", "production.material.receipt.review", "production.batch.review", "production.material.adjust"],
 };
 
 const LEGACY_ROLE_PERMISSIONS: Record<(typeof LEGACY_RRA_ROLES)[number], readonly RRAPermission[]> = {

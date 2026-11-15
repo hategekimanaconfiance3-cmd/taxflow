@@ -67,8 +67,6 @@ async function evaluateRequest(
   const thresholdRows = await tx.select().from(stockSellThroughThreshold).where(and(
       eq(stockSellThroughThreshold.scopeType, "default"),
       eq(stockSellThroughThreshold.scopeKey, "*"),
-      // The migration's 75% row is a bootstrap placeholder, not an approved policy.
-      ne(stockSellThroughThreshold.id, "taxflow-global-sell-through-default-75"),
       lte(stockSellThroughThreshold.effectiveAt, at),
     )).orderBy(desc(stockSellThroughThreshold.effectiveAt), desc(stockSellThroughThreshold.createdAt), desc(stockSellThroughThreshold.id)).limit(1);
   const threshold = resolveSellThroughThreshold(thresholdRows as SellThroughThresholdRecord[], productId, null, at);
