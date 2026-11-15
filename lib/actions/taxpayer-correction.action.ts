@@ -304,7 +304,7 @@ export async function applyTaxpayerCorrection(input: unknown): Promise<{ success
   const parsed = applySchema.safeParse(input);
   if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? "Correction details are invalid.");
   const session = await requireRRAPermission("taxpayer.correction.apply");
-  const isSuperAdmin = session.staff.clearanceRoles.includes("super_admin") || session.staff.clearanceLevel === "super_admin";
+  const isSuperAdmin = session.staff.clearanceRoles.includes("super_admin");
 
   await db.transaction(async (tx) => {
     // Super admin can apply any request; others can only apply their assigned ones.
@@ -396,10 +396,19 @@ export async function applyTaxpayerCorrection(input: unknown): Promise<{ success
 }
 
 export async function getCorrectionRequestForAdmin(requestId: string) {
+  const session = await requireRRAPermission("taxpayer.correction.read_assigned");
   const parsedId = z.string().uuid().safeParse(requestId);
-  if (!parsedId.success) throw new Error("Correction request not found.");
-  const session = await requireRRAPermission("taxpayer.correction.apply");
-  const isSuperAdmin = session.staff.clearanceRoles.includes("super_admin") || session.staff.clearanceLevel === "super_admin";
+  if (!parsedId.success) return null;
+  const isSuperAdmin = session.staff.clearanceRoles.includes("super_admin");
+  const can = (permission: Parameters<typeof hasRRAPermission>[1]) =>
+    session.staff.clearanceRoles.some((role) => hasRRAPermission(role, permission));
+  const permissions = {
+    canReadEvidence: can("taxpayer.correction.read_evidence"),
+    canRequestEvidence: can("taxpayer.correction.request_evidence"),
+    canComment: can("taxpayer.correction.add_review_comment"),
+    canRecommend: can("taxpayer.correction.recommend"),
+    canApply: can("taxpayer.correction.apply"),
+  };
 
   const [item] = await db.select({
     request: taxpayerCorrectionRequest,
@@ -412,16 +421,24 @@ export async function getCorrectionRequestForAdmin(requestId: string) {
         : and(eq(taxpayerCorrectionRequest.id, parsedId.data), eq(taxpayerCorrectionRequest.assignedStaffId, session.staff.id))
     ).limit(1);
 
-  if (!item) throw new Error("Correction request not found.");
+  // Keep missing and unassigned requests indistinguishable to avoid leaking records.
+  if (!item) return null;
+  const isAssigned = item.request.assignedStaffId === session.staff.id;
+  permissions.canRequestEvidence &&= isAssigned;
+  permissions.canComment &&= isAssigned;
+  permissions.canRecommend &&= isAssigned;
+  permissions.canApply &&= isSuperAdmin || isAssigned;
   const events = await db.select().from(taxpayerCorrectionEvent)
     .where(eq(taxpayerCorrectionEvent.requestId, parsedId.data))
     .orderBy(taxpayerCorrectionEvent.createdAt);
-  const evidence = await db.select({
-    id: taxpayerCorrectionEvidence.id, filename: taxpayerCorrectionEvidence.filename,
-    sizeBytes: taxpayerCorrectionEvidence.sizeBytes, createdAt: taxpayerCorrectionEvidence.createdAt,
-  }).from(taxpayerCorrectionEvidence)
-    .where(eq(taxpayerCorrectionEvidence.requestId, parsedId.data))
-    .orderBy(taxpayerCorrectionEvidence.createdAt);
+  const evidence = permissions.canReadEvidence
+    ? await db.select({
+        id: taxpayerCorrectionEvidence.id, filename: taxpayerCorrectionEvidence.filename,
+        sizeBytes: taxpayerCorrectionEvidence.sizeBytes, createdAt: taxpayerCorrectionEvidence.createdAt,
+      }).from(taxpayerCorrectionEvidence)
+        .where(eq(taxpayerCorrectionEvidence.requestId, parsedId.data))
+        .orderBy(taxpayerCorrectionEvidence.createdAt)
+    : [];
 
-  return { ...item, events, evidence, isSuperAdmin };
+  return { ...item, events, evidence, isSuperAdmin, permissions };
 }

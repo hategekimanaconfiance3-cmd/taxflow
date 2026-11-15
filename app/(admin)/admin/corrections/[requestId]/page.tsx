@@ -8,11 +8,7 @@ export const metadata = { title: "Correction Request Review · TaxFlow" };
 export default async function TaxpayerCorrectionReviewPage({ params }: { params: Promise<{ requestId: string }> }) {
   await requireRRAPermission("taxpayer.correction.read_assigned");
   const { requestId } = await params;
-  let correction: Awaited<ReturnType<typeof getCorrectionRequestForAdmin>>;
-  try {
-    correction = await getCorrectionRequestForAdmin(requestId);
-  } catch {
-    notFound();
-  }
+  const correction = await getCorrectionRequestForAdmin(requestId);
+  if (!correction) notFound();
   return <main className="mx-auto max-w-5xl space-y-6 p-6"><TaxpayerCorrectionReview correction={correction} /></main>;
 }

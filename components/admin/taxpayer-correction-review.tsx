@@ -25,6 +25,13 @@ type Review = {
   }>;
   evidence: Array<{ id: string; filename: string; sizeBytes: number; createdAt: Date }>;
   isSuperAdmin: boolean;
+  permissions: {
+    canReadEvidence: boolean;
+    canRequestEvidence: boolean;
+    canComment: boolean;
+    canRecommend: boolean;
+    canApply: boolean;
+  };
 };
 
 const FIELD_LABELS: Record<string, string> = {
@@ -48,7 +55,7 @@ const EVENT_LABELS: Record<string, string> = {
 };
 
 export function TaxpayerCorrectionReview({ correction }: { correction: Review }) {
-  const { request, events, evidence, isSuperAdmin } = correction;
+  const { request, events, evidence, isSuperAdmin, permissions } = correction;
   const router = useRouter();
   const [busy, startTransition] = useTransition();
   const [comment, setComment] = useState("");
@@ -76,7 +83,10 @@ export function TaxpayerCorrectionReview({ correction }: { correction: Review })
 
   const isOpen = ["under_review", "awaiting_evidence", "recommended_approval", "recommended_rejection"].includes(request.status);
   const isApplied = request.status === "applied";
-  const canApply = isOpen || (isSuperAdmin && !isApplied);
+  const canApply = permissions.canApply && ["under_review", "recommended_approval", "awaiting_evidence"].includes(request.status);
+  const canComment = permissions.canComment && ["under_review", "awaiting_evidence"].includes(request.status);
+  const canRequestEvidence = permissions.canRequestEvidence && ["under_review", "awaiting_evidence"].includes(request.status);
+  const canRecommend = permissions.canRecommend && request.status === "under_review" && request.recommendation === null;
 
   const statusBadgeClass = {
     submitted: "bg-yellow-100 text-yellow-800",
@@ -155,23 +165,25 @@ export function TaxpayerCorrectionReview({ correction }: { correction: Review })
       </section>
 
       {/* Evidence */}
-      <section className="rounded-lg border bg-card p-5">
-        <h2 className="font-semibold">Supporting evidence</h2>
-        {!evidence.length ? (
-          <p className="mt-2 text-sm text-muted-foreground">No evidence attached.</p>
-        ) : (
-          <ul className="mt-3 space-y-2">
-            {evidence.map((file) => (
-              <li key={file.id} className="flex items-center justify-between gap-3 text-sm">
-                <span>{file.filename} · {(file.sizeBytes / 1024).toFixed(0)} KB</span>
-                <a className="underline" href={`/api/corrections/evidence/${file.id}`} target="_blank" rel="noreferrer">
-                  Open securely
-                </a>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+      {permissions.canReadEvidence && (
+        <section className="rounded-lg border bg-card p-5">
+          <h2 className="font-semibold">Supporting evidence</h2>
+          {!evidence.length ? (
+            <p className="mt-2 text-sm text-muted-foreground">No evidence attached.</p>
+          ) : (
+            <ul className="mt-3 space-y-2">
+              {evidence.map((file) => (
+                <li key={file.id} className="flex items-center justify-between gap-3 text-sm">
+                  <span>{file.filename} · {(file.sizeBytes / 1024).toFixed(0)} KB</span>
+                  <a className="underline" href={`/api/corrections/evidence/${file.id}`} target="_blank" rel="noreferrer">
+                    Open securely
+                  </a>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
 
       {/* ── APPLY CORRECTION PANEL ─────────────────────────────────────── */}
       {canApply && (
@@ -272,12 +284,12 @@ export function TaxpayerCorrectionReview({ correction }: { correction: Review })
       )}
 
       {/* Review actions (comment / evidence / recommendation) — only while open */}
-      {isOpen ? (
+      {isOpen && (canComment || canRequestEvidence || canRecommend) ? (
         <section className="space-y-4 rounded-lg border bg-card p-5">
           <h2 className="font-semibold">Review actions</h2>
           <div className="grid gap-3 md:grid-cols-3">
             {/* Comment */}
-            <div className="space-y-2">
+            {canComment && <div className="space-y-2">
               <label className="text-sm font-medium" htmlFor="review-comment">Review comment</label>
               <textarea
                 id="review-comment"
@@ -292,9 +304,9 @@ export function TaxpayerCorrectionReview({ correction }: { correction: Review })
               >
                 Add comment
               </button>
-            </div>
+            </div>}
             {/* Evidence request */}
-            <div className="space-y-2">
+            {canRequestEvidence && <div className="space-y-2">
               <label className="text-sm font-medium" htmlFor="evidence-request">Request more evidence · reason required</label>
               <textarea
                 id="evidence-request"
@@ -309,9 +321,9 @@ export function TaxpayerCorrectionReview({ correction }: { correction: Review })
               >
                 Request evidence
               </button>
-            </div>
+            </div>}
             {/* Recommendation */}
-            <div className="space-y-2">
+            {canRecommend && <div className="space-y-2">
               <label className="text-sm font-medium" htmlFor="recommendation">Recommendation</label>
               <select
                 id="recommendation"
@@ -336,11 +348,11 @@ export function TaxpayerCorrectionReview({ correction }: { correction: Review })
               >
                 Submit recommendation
               </button>
-            </div>
+            </div>}
           </div>
-          <p className="text-xs text-muted-foreground">A recommendation is advisory. Use &quot;Apply Correction&quot; above to execute the actual change.</p>
+          {permissions.canRecommend && <p className="text-xs text-muted-foreground">A recommendation is advisory. Use &quot;Apply Correction&quot; above to execute the actual change.</p>}
         </section>
-      ) : !isApplied ? (
+      ) : permissions.canRecommend && !isOpen && !isApplied ? (
         <section className="rounded-lg border bg-card p-5">
           <h2 className="font-semibold">Recommendation recorded</h2>
           <p className="mt-2 text-sm">{request.recommendation?.replaceAll("_", " ")}</p>
