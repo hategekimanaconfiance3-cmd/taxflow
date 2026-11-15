@@ -88,7 +88,7 @@ Authorized officers can compare purchase records, sales records, inventory level
 
 ## 4. Supply Chain Diagram
 
-```
+~~~
 [Raw Material Supplier]
         ↓ Purchase / Import
 [Manufacturer]
@@ -111,7 +111,7 @@ Authorized officers can compare purchase records, sales records, inventory level
 [Final Customer]
    • EBM Receipt (where integrated)
         ↑ All stages monitored by RRA via TaxFlow
-```
+~~~
 
 ---
 
@@ -1258,14 +1258,14 @@ When a standard monitoring officer reviews a manufacturer's records, they see:
 
 **Example of protected view:**
 
-```
+~~~
 Material 1: ◆◆◆◆◆◆◆◆◆◆◆◆ — 12 kg (planned: 12 kg) ✓
 Material 2: ◆◆◆◆◆◆◆◆◆◆◆◆ — 9 kg (planned: 8.5 kg) ⚠
 Material 3: ◆◆◆◆◆◆◆◆◆◆◆◆ — 3 kg (planned: 3 kg) ✓
 
 Planned output: 1,000 litres
 Actual output: 102 litres ⚠ SIGNIFICANT DEVIATION
-```
+~~~
 
 The officer can see that Material 2 was slightly over-consumed and the output is drastically below plan — without learning what Material 2 is.
 
@@ -2239,7 +2239,7 @@ Every consequential account action must be:
 
 ## 2. The Account Lifecycle
 
-```
+~~~
 [Application Submitted]
          ↓
 [Identity & TIN Verification]
@@ -2257,7 +2257,7 @@ Every consequential account action must be:
 [Restored]      [Suspended]
                      ↓
               [Restored] or [Deactivated]
-```
+~~~
 
 ---
 
