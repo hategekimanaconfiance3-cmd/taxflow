@@ -3,7 +3,7 @@
 import "server-only";
 import { createHash } from "node:crypto";
 import { get } from "@vercel/blob";
-import { and, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, ne } from "drizzle-orm";
 import { z } from "zod";
 import db from "@/db/drizzle";
 import {
@@ -300,13 +300,18 @@ const applySchema = z.object({
   reason: z.string().trim().min(10).max(2000),
 }).strict();
 
-export async function applyTaxpayerCorrection(input: unknown): Promise<{ success: true }> {
+class CorrectionApplyError extends Error {}
+
+type CorrectionApplyResult = { success: true } | { success: false; error: string };
+
+export async function applyTaxpayerCorrection(input: unknown): Promise<CorrectionApplyResult> {
   const parsed = applySchema.safeParse(input);
-  if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? "Correction details are invalid.");
+  if (!parsed.success) return { success: false, error: parsed.error.issues[0]?.message ?? "Correction details are invalid." };
   const session = await requireRRAPermission("taxpayer.correction.apply");
   const isSuperAdmin = session.staff.clearanceRoles.includes("super_admin");
 
-  await db.transaction(async (tx) => {
+  try {
+    await db.transaction(async (tx) => {
     // Super admin can apply any request; others can only apply their assigned ones.
     const [item] = isSuperAdmin
       ? await tx.select().from(taxpayerCorrectionRequest).where(eq(taxpayerCorrectionRequest.id, parsed.data.requestId)).for("update").limit(1)
@@ -314,15 +319,15 @@ export async function applyTaxpayerCorrection(input: unknown): Promise<{ success
           .where(and(eq(taxpayerCorrectionRequest.id, parsed.data.requestId), eq(taxpayerCorrectionRequest.assignedStaffId, session.staff.id)))
           .for("update").limit(1);
 
-    if (!item) throw new Error("Correction request not found or not accessible.");
-    if (item.status === "applied") throw new Error("This correction has already been applied.");
+    if (!item) throw new CorrectionApplyError("Correction request not found or not accessible.");
+    if (item.status === "applied") throw new CorrectionApplyError("This correction has already been applied.");
     if (!["under_review", "recommended_approval", "awaiting_evidence"].includes(item.status)) {
-      throw new Error("This correction request cannot be applied in its current state.");
+      throw new CorrectionApplyError("This correction request cannot be applied in its current state.");
     }
 
     // Load the taxpayer record
     const [taxpayer] = await tx.select().from(user).where(eq(user.id, item.taxpayerId)).for("update").limit(1);
-    if (!taxpayer) throw new Error("Taxpayer record not found.");
+    if (!taxpayer) throw new CorrectionApplyError("Taxpayer record not found.");
 
     // Validate the corrected value against the field
     const field = item.fieldKey as CorrectionField;
@@ -331,10 +336,23 @@ export async function applyTaxpayerCorrection(input: unknown): Promise<{ success
 
     // Field-specific validation
     if (field === "email") {
-      if (!z.string().email().safeParse(correctedValue).success) throw new Error("The corrected email address is not valid.");
+      if (!z.string().email().safeParse(correctedValue).success) throw new CorrectionApplyError("The corrected email address is not valid.");
     }
     if (field === "phoneNumber") {
-      if (!/^\+?[0-9\s\-()]{7,20}$/.test(correctedValue)) throw new Error("The corrected phone number is not valid.");
+      if (!/^\+?[0-9\s\-()]{7,20}$/.test(correctedValue)) throw new CorrectionApplyError("The corrected phone number is not valid.");
+    }
+
+    // Phone numbers and emails are unique account identifiers. Check before
+    // updating so duplicate values receive a useful message instead of a DB error.
+    if (field === "phoneNumber" || field === "email") {
+      const uniqueColumn = field === "phoneNumber" ? user.phoneNumber : user.email;
+      const [existing] = await tx.select({ id: user.id }).from(user)
+        .where(and(eq(uniqueColumn, correctedValue), ne(user.id, taxpayer.id))).limit(1);
+      if (existing) {
+        throw new CorrectionApplyError(field === "phoneNumber"
+          ? "That phone number is already registered to another taxpayer account."
+          : "That email address is already registered to another taxpayer account.");
+      }
     }
 
     // Apply the correction to the user record
@@ -391,8 +409,38 @@ export async function applyTaxpayerCorrection(input: unknown): Promise<{ success
       message: `Your ${field} has been updated as requested. Reference: ${item.reference}.`,
       link: "/dashboard/corrections",
     });
-  });
-  return { success: true };
+    });
+    return { success: true };
+  } catch (error) {
+    if (error instanceof CorrectionApplyError) return { success: false, error: error.message };
+
+    const wrappedError = error && typeof error === "object"
+      ? error as { code?: unknown; constraint?: unknown; cause?: unknown }
+      : {};
+    const cause = wrappedError.cause && typeof wrappedError.cause === "object"
+      ? wrappedError.cause as { code?: unknown; constraint?: unknown }
+      : {};
+    const code = typeof wrappedError.code === "string" ? wrappedError.code : cause.code;
+    const constraint = typeof wrappedError.constraint === "string"
+      ? wrappedError.constraint
+      : typeof cause.constraint === "string" ? cause.constraint : "";
+    if (code === "23505") {
+      if (constraint.includes("phone_number")) {
+        return { success: false, error: "That phone number is already registered to another taxpayer account." };
+      }
+      if (constraint.includes("email")) {
+        return { success: false, error: "That email address is already registered to another taxpayer account." };
+      }
+      return { success: false, error: "A conflicting account value already exists. No changes were saved." };
+    }
+
+    console.error("Failed to apply taxpayer correction", {
+      requestId: parsed.data.requestId,
+      code: typeof code === "string" ? code : undefined,
+      constraint: constraint || undefined,
+    });
+    return { success: false, error: "We couldn't apply this correction. No changes were saved; please try again or contact an administrator." };
+  }
 }
 
 export async function getCorrectionRequestForAdmin(requestId: string) {

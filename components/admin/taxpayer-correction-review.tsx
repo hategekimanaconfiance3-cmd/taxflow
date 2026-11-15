@@ -73,7 +73,11 @@ export function TaxpayerCorrectionReview({ correction }: { correction: Review })
       setError("");
       setSuccessMsg("");
       try {
-        await operation();
+        const result = await operation();
+        if (result && typeof result === "object" && "success" in result && result.success === false && "error" in result) {
+          setError(typeof result.error === "string" ? result.error : "The request could not be updated.");
+          return;
+        }
         if (successText) setSuccessMsg(successText);
         router.refresh();
       } catch (cause) {
