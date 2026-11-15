@@ -87,6 +87,8 @@ export function SellThroughThresholdForm({
   });
 
   const submit = form.handleSubmit((values) => {
+    const confirmed = window.confirm(`Schedule a ${values.thresholdPercent}% global sell-through threshold effective ${values.effectiveAt} UTC? This prospective TaxFlow policy is audited and may change trader eligibility decisions.`);
+    if (!confirmed) return;
     const data = new FormData();
     data.set("scopeType", values.scopeType);
     data.set("scopeKey", values.scopeKey);
@@ -113,7 +115,8 @@ export function SellThroughThresholdForm({
       </label>
       <label className="space-y-1 text-sm font-medium md:col-span-2">
         Reason for this policy change
-        <textarea className={`${controlClass} min-h-20`} {...form.register("reason")} disabled={pending} />
+        <textarea className={`${controlClass} min-h-20`} maxLength={1000} placeholder="Explain the approved policy basis and why this threshold is appropriate." {...form.register("reason")} disabled={pending} />
+        <span className="block text-xs font-normal text-muted-foreground">At least 8 characters. The reason is included in the audit history.</span>
         <ErrorText>{form.formState.errors.reason?.message}</ErrorText>
       </label>
       <div className="md:col-span-2">
@@ -132,6 +135,8 @@ export function RestockExceptionReviewForm({ requestId }: { requestId: string })
     defaultValues: { requestId, decision: "approve", reason: "" },
   });
   const submit = form.handleSubmit((values) => {
+    const confirmed = window.confirm(`${values.decision === "approve" ? "Approve" : "Reject"} this exception request? Your decision and reason will be saved to the audit history. Approval does not post stock or tax.`);
+    if (!confirmed) return;
     const data = new FormData();
     data.set("requestId", values.requestId);
     data.set("decision", values.decision);
@@ -148,8 +153,9 @@ export function RestockExceptionReviewForm({ requestId }: { requestId: string })
         <option value="reject">Reject exception</option>
       </select>
       <label className="space-y-1 text-sm">
-        <span className="sr-only">Review reason</span>
-        <input className={controlClass} placeholder="Required review reason" {...form.register("reason")} disabled={pending} />
+        <span className="font-medium">Officer decision reason</span>
+        <input className={controlClass} minLength={8} maxLength={1000} placeholder="Explain the decision (at least 8 characters)" {...form.register("reason")} disabled={pending} />
+        <span className="block text-xs text-muted-foreground">The decision and reason are added to the audit history.</span>
         <ErrorText>{form.formState.errors.reason?.message}</ErrorText>
       </label>
       <button type="submit" className={buttonClass} disabled={pending}>{pending ? "Saving…" : "Record decision"}</button>
@@ -157,13 +163,26 @@ export function RestockExceptionReviewForm({ requestId }: { requestId: string })
   );
 }
 
-export function BaselineAttestationForm({ businessId, productId }: { businessId: string; productId: string }) {
+export function BaselineAttestationForm({
+  businessId,
+  productId,
+  recordedQuantity,
+  unit,
+}: {
+  businessId: string;
+  productId: string;
+  recordedQuantity: number;
+  unit: string;
+}) {
   const [pending, startTransition] = useTransition();
   const form = useForm<z.input<typeof stockSellThroughBaselineAttestationSchema>, unknown, z.output<typeof stockSellThroughBaselineAttestationSchema>>({
     resolver: zodResolver(stockSellThroughBaselineAttestationSchema),
     defaultValues: { businessId, productId, reason: "" },
   });
+  const reasonLength = (form.watch("reason") ?? "").trim().length;
   const submit = form.handleSubmit((values) => {
+    const confirmed = window.confirm(`Use the current recorded balance of ${recordedQuantity.toLocaleString()} ${unit} as a new prospective calculation baseline? This does not verify the physical stock count and will be recorded in the audit history.`);
+    if (!confirmed) return;
     const data = new FormData();
     data.set("businessId", values.businessId);
     data.set("productId", values.productId);
@@ -176,11 +195,21 @@ export function BaselineAttestationForm({ businessId, productId }: { businessId:
       <input type="hidden" {...form.register("businessId")} />
       <input type="hidden" {...form.register("productId")} />
       <label className="space-y-1 text-sm">
-        <span className="sr-only">Baseline attestation reason</span>
-        <input className={controlClass} placeholder="Reason after reviewing recorded balance" {...form.register("reason")} disabled={pending} />
+        <span className="font-medium">Reason for attestation <span className="text-red-700">(required)</span></span>
+        <input
+          className={controlClass}
+          minLength={10}
+          maxLength={1000}
+          placeholder="Describe the ledger or movement evidence reviewed"
+          aria-invalid={Boolean(form.formState.errors.reason)}
+          aria-describedby={`baseline-reason-help-${productId}`}
+          {...form.register("reason")}
+          disabled={pending}
+        />
+        <span id={`baseline-reason-help-${productId}`} className="block text-xs text-amber-950">Enter at least 10 characters. This attests the recorded balance only; it is not a physical stock count. {reasonLength}/1000</span>
         <ErrorText>{form.formState.errors.reason?.message}</ErrorText>
       </label>
-      <button type="submit" className={buttonClass} disabled={pending}>{pending ? "Attesting…" : "Attest recorded opening balance"}</button>
+      <button type="submit" className={buttonClass} disabled={pending || reasonLength < 10}>{pending ? "Attesting…" : "Attest recorded balance"}</button>
     </form>
   );
 }
