@@ -516,7 +516,8 @@ export async function verifyIndustrialBatch(batchId: string, tolerancePercent = 
     declaredQuantity: productionBatch.declaredQuantity,
   }).from(productionBatch).where(eq(productionBatch.id, batchId)).limit(1);
   if (!batch) throw new Error('Production batch not found.');
-  if (!batch.factoryId) throw new Error('Production batch is not associated with a registered factory.');
+  const factoryId = batch.factoryId;
+  if (!factoryId) throw new Error('Production batch is not associated with a registered factory.');
 
   const [evidence] = await db.select().from(industrialBatchEvidence).where(eq(industrialBatchEvidence.batchId, batchId)).limit(1);
   const machineQuantity = evidence?.machineReportedQuantity == null ? null : Number(evidence.machineReportedQuantity);
@@ -547,7 +548,7 @@ export async function verifyIndustrialBatch(batchId: string, tolerancePercent = 
     if (outcome !== 'matched') {
       await tx.insert(industrialAlert).values({
         manufacturerId: batch.manufacturerId,
-        factoryId: batch.factoryId,
+        factoryId,
         batchId,
         alertType: outcome === 'no_machine_evidence' ? 'MACHINE_EVIDENCE_MISSING' : 'PRODUCTION_QUANTITY_DISCREPANCY',
         severity: outcome === 'no_machine_evidence' ? 'high' : 'medium',
