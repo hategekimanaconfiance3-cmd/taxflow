@@ -36,6 +36,7 @@ export function RegisterTaxpayerDialog() {
         tinNumber: "",
         businessName: "",
         phoneNumber: "",
+        nationalIdNumber: "",
         role: "manufacturer" as "manufacturer" | "wholesaler" | "retailer",
     });
 
@@ -67,6 +68,7 @@ export function RegisterTaxpayerDialog() {
             tinNumber: "",
             businessName: "",
             phoneNumber: "",
+            nationalIdNumber: "",
             role: "manufacturer",
         });
         setError(null);
@@ -146,6 +148,24 @@ export function RegisterTaxpayerDialog() {
                                     placeholder="Company Ltd"
                                 />
                             </div>
+                            <div className="space-y-2">
+                                <Label>National ID Number *</Label>
+                                <Input
+                                    value={form.nationalIdNumber}
+                                    onChange={(e) =>
+                                        updateField(
+                                            "nationalIdNumber",
+                                            e.target.value.replace(/\D/g, "").slice(0, 16),
+                                        )
+                                    }
+                                    placeholder="1198012345678901"
+                                    maxLength={16}
+                                    inputMode="numeric"
+                                />
+                                <p className="text-xs text-muted-foreground">
+                                    16-digit Rwandan National ID (NID)
+                                </p>
+                            </div>
                             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                                 <div className="space-y-2">
                                     <Label>Email *</Label>
@@ -220,7 +240,8 @@ export function RegisterTaxpayerDialog() {
                                     isPending ||
                                     !form.name.trim() ||
                                     !form.email.trim() ||
-                                    !form.tinNumber.trim()
+                                    !form.tinNumber.trim() ||
+                                    form.nationalIdNumber.length !== 16
                                 }
                                 className="gap-2"
                             >

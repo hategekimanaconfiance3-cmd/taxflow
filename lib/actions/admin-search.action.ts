@@ -30,6 +30,7 @@ export async function searchTraders(query: string) {
                     ${user.tinNumber} ILIKE ${"%" + q + "%"}
                     OR ${user.businessName} ILIKE ${"%" + q + "%"}
                     OR ${user.name} ILIKE ${"%" + q + "%"}
+                    OR ${user.nationalId} ILIKE ${"%" + q + "%"}
                 )`,
         )
         .limit(8);
