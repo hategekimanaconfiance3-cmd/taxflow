@@ -18,21 +18,16 @@ import { eq, or } from 'drizzle-orm';
 import { hashPassword } from 'better-auth/crypto';
 import { user, account, rraStaff } from '../schema';
 import crypto from 'node:crypto';
+import { requireSeedDatabase } from './safety';
 
-if (process.env.NODE_ENV === 'production') {
-  throw new Error('[test-accounts.seed] Seeding is disabled in production.');
+const databaseUrl = requireSeedDatabase('DATABASE_URL', 'disposable');
+
+const RAW_PASSWORD = process.env.TAXFLOW_SEED_PASSWORD;
+if (!RAW_PASSWORD || RAW_PASSWORD.length < 12) {
+  throw new Error('[test-accounts.seed] Set TAXFLOW_SEED_PASSWORD to at least 12 characters.');
 }
 
-if (!process.env.DATABASE_URL) {
-  throw new Error('[test-accounts.seed] DATABASE_URL environment variable is required.');
-}
-
-const RAW_PASSWORD = process.env.TAXFLOW_SEED_PASSWORD || 'Conf123%';
-if (RAW_PASSWORD.length < 8) {
-  throw new Error('[test-accounts.seed] Set TAXFLOW_SEED_PASSWORD to at least 8 characters.');
-}
-
-const client = postgres(process.env.DATABASE_URL);
+const client = postgres(databaseUrl);
 const db = drizzle(client);
 
 const ROLES: Array<'manufacturer' | 'wholesaler' | 'retailer'> = [
@@ -116,7 +111,7 @@ async function seed() {
         .update(account)
         .set({ password: hashed })
         .where(eq(account.userId, existing.id));
-      console.log(`  ℹ️   TIN ${m.tinNumber} already exists — password updated to Conf123%`);
+      console.log(`  Existing TIN ${m.tinNumber} updated with the supplied seed password.`);
       merchantsUpdated++;
       continue;
     }
@@ -163,7 +158,7 @@ async function seed() {
       .update(account)
       .set({ password: hashed })
       .where(eq(account.userId, existingStaff.userId));
-    console.log(`  ✅  SA-001 already exists (userId: ${existingStaff.userId}) — password updated to Conf123%`);
+    console.log(`  SA-001 already exists (userId: ${existingStaff.userId}) — password updated from the supplied seed password.`);
   } else {
     let adminUserId: string;
 
@@ -232,11 +227,11 @@ async function seed() {
   console.log('  ┌─────────────────────────────────────────────┐');
   console.log('  │  MERCHANTS — login at /sign-in              │');
   console.log('  │  TIN: 100000001 … 100000010                 │');
-  console.log('  │  Password: Conf123%                         │');
+  console.log('  │  Password: supplied through TAXFLOW_SEED_PASSWORD │');
   console.log('  ├─────────────────────────────────────────────┤');
   console.log('  │  RRA STAFF — login at /admin-login          │');
   console.log('  │  Staff ID: SA-001                           │');
-  console.log('  │  Password: Conf123%                         │');
+  console.log('  │  Password: supplied through TAXFLOW_SEED_PASSWORD │');
   console.log('  └─────────────────────────────────────────────┘\n');
 
   await client.end();

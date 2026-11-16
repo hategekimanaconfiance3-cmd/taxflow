@@ -246,6 +246,55 @@
       "when": 1794700000001,
       "tag": "0034_credit_confirmed_b2b_purchases",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1794700000002,
+      "tag": "0035_taxpayer_correction_apply",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1794700000003,
+      "tag": "0036_factory_registration_and_production_lines",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1794700000004,
+      "tag": "0037_industrial_equipment_gateway_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1794700000005,
+      "tag": "0038_industrial_batch_traceability",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1794700000006,
+      "tag": "0039_industrial_verification_alerts",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1794700000007,
+      "tag": "0040_industrial_compliance",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1794700000008,
+      "tag": "0041_industrial_batch_reference_support",
+      "breakpoints": true
     }
   ]
 }

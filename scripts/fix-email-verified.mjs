@@ -1,10 +1,12 @@
 import pg from 'pg';
+import 'dotenv/config';
+import { disposableDatabaseUrl, requireMutationConfirmation } from './safety.mjs';
 
 const { Client } = pg;
 const client = new Client({
-  connectionString: 'postgresql://neondb_owner:npg_Hv6dFJ3QonEi@ep-still-rain-b4rhpmff-pooler.c-6.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require',
-  ssl: { rejectUnauthorized: false }
+  connectionString: disposableDatabaseUrl()
 });
+requireMutationConfirmation('TAXFLOW_CONFIRM_ACCOUNT_REPAIR', 'REPAIR_TEST_ACCOUNTS_ON_DISPOSABLE_DB');
 await client.connect();
 
 // Check BOTH emailVerified columns for RRA staff

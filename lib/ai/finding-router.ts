@@ -15,7 +15,9 @@ import CriticalFindingAlert from '@/emails/critical-finding-alert';
 // This prevents build-time crashes when RESEND_API_KEY is not set.
 let _resend: Resend | null = null;
 function getResend(): Resend {
-  if (!_resend) _resend = new Resend(process.env.RESEND_API_KEY);
+  const resendApiKey = process.env.RESEND_API_KEY?.trim();
+  if (!resendApiKey) throw new Error('RESEND_API_KEY is not configured.');
+  if (!_resend) _resend = new Resend(resendApiKey);
   return _resend;
 }
 

@@ -3,7 +3,7 @@ import { createAdapter } from '@socket.io/redis-adapter';
 import Redis from 'ioredis';
 import { CHANNEL } from './realtime';
 
-const REDIS_URL = process.env.REDIS_URL || 'redis://:Taxflow07857@localhost:6380';
+const REDIS_URL = process.env.REDIS_URL?.trim() || null;
 
 let io: SocketIOServer | null = null;
 
@@ -46,6 +46,11 @@ export function initSocketServer(httpServer: import('http').Server) {
     enableOfflineQueue: false,
     retryStrategy: () => null,
   };
+
+  if (!REDIS_URL) {
+    console.warn('[Socket.IO] REDIS_URL is not configured; using in-memory realtime mode.');
+    return io;
+  }
 
   const pubClient = new Redis(REDIS_URL, redisOpts);
   const subClient = pubClient.duplicate();

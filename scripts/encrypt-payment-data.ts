@@ -3,6 +3,10 @@ import { eq } from "drizzle-orm";
 import db from "../db/drizzle";
 import { paymentMethod, rraCollectionAccount } from "../db/schema";
 import { encryptPaymentData, isPaymentDataEncrypted } from "../lib/payment-data-encryption";
+import { disposableDatabaseUrl, requireMutationConfirmation } from "./safety.mjs";
+
+disposableDatabaseUrl();
+requireMutationConfirmation('TAXFLOW_CONFIRM_PAYMENT_DATA_ENCRYPTION', 'ENCRYPT_PAYMENT_DATA_ON_DISPOSABLE_DB');
 
 async function main() {
   const apply = process.argv.includes("--apply");

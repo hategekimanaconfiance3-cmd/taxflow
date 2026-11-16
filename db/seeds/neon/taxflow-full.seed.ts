@@ -22,6 +22,7 @@ import {
   staffBulletin,
   systemConfig,
 } from '../../schema';
+import { requireSeedDatabase } from '../safety';
 
 // ---------------------------------------------------------------------------
 // TaxFlow Full Seed — RRA Staff + 58 traders (90% of 64 TIN businesses)
@@ -29,8 +30,7 @@ import {
 //         import declarations, disputes, support tickets, staff bulletins
 // ---------------------------------------------------------------------------
 
-if (process.env.NODE_ENV === 'production') throw new Error('Demo data seeding is disabled in production.');
-if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL is required to seed demo data.');
+const databaseUrl = requireSeedDatabase('DATABASE_URL', 'nonproduction');
 if (!process.env.TAXFLOW_SEED_PASSWORD || process.env.TAXFLOW_SEED_PASSWORD.length < 12) {
   throw new Error('Set TAXFLOW_SEED_PASSWORD to a value of at least 12 characters.');
 }
@@ -1862,7 +1862,7 @@ const TRANSACTIONS: TxDef[] = [
 async function seedTaxFlowFull(): Promise<void> {
   console.log('🌱 TaxFlow Full Seed — 58 traders + complete supply chain...\n');
 
-  const client = postgres(process.env.DATABASE_URL!);
+    const client = postgres(databaseUrl);
   const db = drizzle(client);
 
   try {

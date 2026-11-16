@@ -2,6 +2,7 @@ import {
     LayoutDashboard,
     Package,
     Factory,
+    Cpu,
     ShoppingCart,
     ShoppingBag,
     ArrowLeftRight,
@@ -109,6 +110,18 @@ export const SIDEBAR_GROUPS: SidebarGroup[] = [
     {
         label: "Operations",
         items: [
+            {
+                label: "Factories",
+                href: "/dashboard/factories",
+                icon: Factory,
+                roles: ["manufacturer"],
+            },
+            {
+                label: "Industrial Integration",
+                href: "/dashboard/industrial",
+                icon: Cpu,
+                roles: ["manufacturer"],
+            },
             {
                 label: "Production Entry",
                 href: "/dashboard/production",

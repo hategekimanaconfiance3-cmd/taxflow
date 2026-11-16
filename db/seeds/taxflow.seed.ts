@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { hashPassword } from "better-auth/crypto";
 import { user, account, rraStaff } from "../schema";
 import crypto from "node:crypto";
+import { requireSeedDatabase } from "./safety";
 
 // ---------------------------------------------------------------------------
 // Taxflow Database Seed — RRA Staff Accounts (Local Development)
@@ -22,19 +23,13 @@ import crypto from "node:crypto";
 // Login with Staff ID at /admin-login
 // ---------------------------------------------------------------------------
 
-if (process.env.NODE_ENV === "production") {
-    throw new Error("The RRA demo seed is disabled in production.");
-}
-
-if (!process.env.DATABASE_URL) {
-    throw new Error("DATABASE_URL is required to run the RRA demo seed.");
-}
+const databaseUrl = requireSeedDatabase("DATABASE_URL", "disposable");
 
 if (!process.env.TAXFLOW_SEED_PASSWORD || process.env.TAXFLOW_SEED_PASSWORD.length < 12) {
     throw new Error("Set TAXFLOW_SEED_PASSWORD to a value of at least 12 characters.");
 }
 
-const client = postgres(process.env.DATABASE_URL);
+const client = postgres(databaseUrl);
 const db = drizzle(client);
 
 const PASSWORD = process.env.TAXFLOW_SEED_PASSWORD;

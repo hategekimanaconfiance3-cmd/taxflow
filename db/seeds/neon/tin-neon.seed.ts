@@ -5,6 +5,7 @@ import * as schema from '../../tin-schema';
 import { citizen, tinRecord } from '../../tin-schema';
 import fs from 'fs';
 import path from 'path';
+import { requireSeedDatabase } from '../safety';
 
 // Import the extracted data
 const extractedDataPath = path.join(__dirname, '..', '..', '..', 'data', 'tin-extracted-data.json');
@@ -42,13 +43,13 @@ const citizens = convertTimestamps(extractedData.citizens);
 const tinRecords = convertTimestamps(extractedData.tinRecords);
 
 async function seedTinNeonDB() {
-  if (process.env.NODE_ENV === 'production' || process.env.ALLOW_DESTRUCTIVE_SEED !== 'true') {
+  if (process.env.ALLOW_DESTRUCTIVE_SEED !== 'true') {
     throw new Error('This seed script deletes existing rows. Set ALLOW_DESTRUCTIVE_SEED=true in a non-production environment to proceed.');
   }
   console.log('Starting to seed TIN Neon DB...');
 
   // Connection to Neon DB
-  const connectionString = process.env.TIN_DATABASE_URL!;
+  const connectionString = requireSeedDatabase('TIN_DATABASE_URL', 'nonproduction');
   const client = postgres(connectionString);
   const db = drizzle(client, { schema });
 

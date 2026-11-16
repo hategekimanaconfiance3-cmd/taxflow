@@ -14,19 +14,31 @@ import {
 import { Resend } from 'resend';
 import TaxFlowEmail from '@/components/resend/email-ui';
 
-// Ensure BETTER_AUTH_SECRET is available — fall back to a dev default so auth
-// doesn't crash if the env var is missing in the deployment.
+// Ensure BETTER_AUTH_SECRET is available; weak or missing configuration is rejected.
+// Missing or weak configuration is a startup error in every environment.
 if (!process.env.BETTER_AUTH_SECRET) {
-  process.env.BETTER_AUTH_SECRET = 'b3yX7U2Kp4mR8tQ1vL9wH6sD5nN2cF8k';
-  if (process.env.NODE_ENV === 'production') {
-    console.warn('[TaxFlow] WARNING: BETTER_AUTH_SECRET env var is not set. Using fallback. Add it to Vercel env vars.');
-  }
+  throw new Error('BETTER_AUTH_SECRET must be configured; no fallback secret is permitted.');
 }
 
-// Initialize Resend lazily to avoid crashing if RESEND_API_KEY is not set in production
-const getResend = () => new Resend(process.env.RESEND_API_KEY ?? 're_placeholder');
+const authSecret = process.env.BETTER_AUTH_SECRET?.trim() ?? '';
+if (
+  authSecret.length < 32 ||
+  ['your-secret-at-least-32-chars-long', 'change-me', 'unsafe-dev-key', 'secret'].includes(authSecret.toLowerCase())
+) {
+  throw new Error('BETTER_AUTH_SECRET must be at least 32 characters and must not be a known placeholder.');
+}
+
+// Initialize Resend lazily; missing provider configuration must not use a fake key.
+const getResend = () => {
+  const resendApiKey = process.env.RESEND_API_KEY?.trim();
+  if (!resendApiKey) {
+    throw new Error('RESEND_API_KEY is not configured.');
+  }
+  return new Resend(resendApiKey);
+};
 
 export const auth = betterAuth({
+  secret: authSecret,
   baseURL: process.env.BETTER_AUTH_URL || process.env.NEXT_PUBLIC_APP_URL,
   database: drizzleAdapter(db, {
     provider: 'pg',

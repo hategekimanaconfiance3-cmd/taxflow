@@ -3,13 +3,15 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import * as schema from '../../tin-schema';
 import { citizen, tinRecord } from '../../tin-schema';
+import { requireSeedDatabase } from '../safety';
 
 // ---------------------------------------------------------------------------
 // Comprehensive TIN DB Seed — All 30 Rwanda Districts, 5 Provinces
 // 64 businesses total: Kigali heavy on manufacturers, Musanze has 4 traders
 // ---------------------------------------------------------------------------
 
-const client = postgres(process.env.TIN_DATABASE_URL!);
+const tinDatabaseUrl = requireSeedDatabase('TIN_DATABASE_URL', 'nonproduction');
+const client = postgres(tinDatabaseUrl);
 const db = drizzle(client, { schema });
 
 // ── Citizens ────────────────────────────────────────────────────────────────

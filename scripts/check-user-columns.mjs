@@ -1,7 +1,8 @@
 import pg from 'pg';
+import 'dotenv/config';
+import { requiredEnv } from './safety.mjs';
 const { Pool } = pg;
-const DB = 'postgresql://neondb_owner:npg_Hv6dFJ3QonEi@ep-still-rain-b4rhpmff-pooler.c-6.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require';
-const pool = new Pool({ connectionString: DB });
+const pool = new Pool({ connectionString: requiredEnv('DATABASE_URL') });
 
 // Check columns in user table
 const cols = await pool.query(

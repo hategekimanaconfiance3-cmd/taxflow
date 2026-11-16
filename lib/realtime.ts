@@ -1,6 +1,6 @@
 import Redis from 'ioredis';
 
-const REDIS_URL = process.env.REDIS_URL || 'redis://:Taxflow07857@localhost:6380';
+const REDIS_URL = process.env.REDIS_URL?.trim() || null;
 const CHANNEL = 'taxflow:realtime';
 
 /**
@@ -14,6 +14,7 @@ const CHANNEL = 'taxflow:realtime';
 export function emitToUser(userId: string, event: string, data: Record<string, unknown>) {
   try {
     const pub = getPublisher();
+    if (!pub) return;
     const message = JSON.stringify({
       userId,
       event,
@@ -41,7 +42,8 @@ export function emitToUsers(userIds: string[], event: string, data: Record<strin
 
 let publisher: Redis | null = null;
 
-function getPublisher(): Redis {
+function getPublisher(): Redis | null {
+  if (!REDIS_URL) return null;
   if (!publisher) {
     publisher = new Redis(REDIS_URL, {
       maxRetriesPerRequest: 1,

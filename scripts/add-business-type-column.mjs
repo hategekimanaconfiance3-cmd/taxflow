@@ -1,7 +1,9 @@
 import pg from 'pg';
+import 'dotenv/config';
+import { disposableDatabaseUrl, requireMutationConfirmation } from './safety.mjs';
 const { Pool } = pg;
-const DB = 'postgresql://neondb_owner:npg_Hv6dFJ3QonEi@ep-still-rain-b4rhpmff-pooler.c-6.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require';
-const pool = new Pool({ connectionString: DB });
+requireMutationConfirmation('TAXFLOW_CONFIRM_SCHEMA_REPAIR', 'ADD_BUSINESS_TYPE_TO_DISPOSABLE_DB');
+const pool = new Pool({ connectionString: disposableDatabaseUrl() });
 
 console.log('Adding missing business_type column to user table...');
 

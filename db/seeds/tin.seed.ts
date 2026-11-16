@@ -3,6 +3,7 @@ import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { citizen, tinRecord } from "../tin-schema";
 import crypto from "node:crypto";
+import { requireSeedDatabase } from "./safety";
 
 // ---------------------------------------------------------------------------
 // TIN Database Seed — Mock Government Registry
@@ -10,7 +11,8 @@ import crypto from "node:crypto";
 // Province → District → Sector → Cell → Village
 // ---------------------------------------------------------------------------
 
-const client = postgres(process.env.TIN_DATABASE_URL!);
+const tinDatabaseUrl = requireSeedDatabase("TIN_DATABASE_URL", "disposable");
+const client = postgres(tinDatabaseUrl);
 const db = drizzle(client);
 
 const CITIZENS = [

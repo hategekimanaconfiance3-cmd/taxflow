@@ -1156,6 +1156,502 @@ export const importDeclarationRelations = relations(importDeclaration, ({ one })
   }),
 }));
 
+// ---------------------------------------------------------------------------
+// Factory registration and production-line architecture
+// ---------------------------------------------------------------------------
+
+export const factory = pgTable(
+  'factory',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    factoryCode: text('factory_code').notNull(),
+    name: text('name').notNull(),
+    address: text('address').notNull(),
+    latitude: real('latitude'),
+    longitude: real('longitude'),
+    industryType: text('industry_type').notNull().default('beverage'),
+    registrationReference: text('registration_reference'),
+    productionCapacity: numeric('production_capacity', { precision: 24, scale: 6, mode: 'string' }),
+    productionCapacityUnit: text('production_capacity_unit'),
+    onboardingStatus: text('onboarding_status').notNull().default('draft'),
+    integrationStatus: text('integration_status').notNull().default('not_started'),
+    connectivityStatus: text('connectivity_status').notNull().default('unknown'),
+    verificationStatus: text('verification_status').notNull().default('unverified'),
+    submittedAt: timestamp('submitted_at'),
+    reviewedByUserId: text('reviewed_by_user_id').references(() => user.id),
+    reviewedAt: timestamp('reviewed_at'),
+    reviewNote: text('review_note'),
+    approvedAt: timestamp('approved_at'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().$onUpdate(() => new Date()).notNull(),
+  },
+  (table) => [
+    uniqueIndex('factory_manufacturer_code_uniq').on(table.manufacturerId, table.factoryCode),
+    index('factory_manufacturer_status_idx').on(table.manufacturerId, table.onboardingStatus),
+    index('factory_integration_status_idx').on(table.integrationStatus, table.connectivityStatus),
+    check('factory_coordinates_pair_check', sql`(${table.latitude} IS NULL AND ${table.longitude} IS NULL) OR (${table.latitude} BETWEEN -90 AND 90 AND ${table.longitude} BETWEEN -180 AND 180)`),
+    check('factory_capacity_pair_check', sql`(${table.productionCapacity} IS NULL AND ${table.productionCapacityUnit} IS NULL) OR (${table.productionCapacity} IS NOT NULL AND ${table.productionCapacity} > 0 AND ${table.productionCapacityUnit} IS NOT NULL AND length(trim(${table.productionCapacityUnit})) > 0)`),
+    check('factory_onboarding_status_check', sql`${table.onboardingStatus} IN ('draft', 'submitted', 'under_review', 'technical_assessment', 'integration_pending', 'integration_testing', 'approved', 'active', 'suspended', 'rejected')`),
+    check('factory_integration_status_check', sql`${table.integrationStatus} IN ('not_started', 'pending', 'testing', 'connected', 'non_compliant', 'exception')`),
+    check('factory_connectivity_status_check', sql`${table.connectivityStatus} IN ('unknown', 'online', 'degraded', 'offline')`),
+    check('factory_verification_status_check', sql`${table.verificationStatus} IN ('unverified', 'pending', 'verified', 'rejected')`),
+  ],
+);
+
+export const factoryProductionLine = pgTable(
+  'factory_production_line',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    factoryId: text('factory_id').notNull().references(() => factory.id),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    lineCode: text('line_code').notNull(),
+    name: text('name').notNull(),
+    productionCategory: text('production_category').notNull().default('beverage'),
+    productTypes: jsonb('product_types').$type<string[]>().notNull().default([]),
+    productionCapacity: numeric('production_capacity', { precision: 24, scale: 6, mode: 'string' }),
+    productionCapacityUnit: text('production_capacity_unit'),
+    operationalStatus: text('operational_status').notNull().default('planned'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().$onUpdate(() => new Date()).notNull(),
+  },
+  (table) => [
+    uniqueIndex('factory_line_factory_code_uniq').on(table.factoryId, table.lineCode),
+    index('factory_line_manufacturer_idx').on(table.manufacturerId),
+    index('factory_line_factory_status_idx').on(table.factoryId, table.operationalStatus),
+    check('factory_line_capacity_pair_check', sql`(${table.productionCapacity} IS NULL AND ${table.productionCapacityUnit} IS NULL) OR (${table.productionCapacity} IS NOT NULL AND ${table.productionCapacity} > 0 AND ${table.productionCapacityUnit} IS NOT NULL AND length(trim(${table.productionCapacityUnit})) > 0)`),
+    check('factory_line_operational_status_check', sql`${table.operationalStatus} IN ('planned', 'active', 'maintenance', 'suspended', 'decommissioned')`),
+  ],
+);
+
+export const factoryProductionStage = pgTable(
+  'factory_production_stage',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    lineId: text('line_id').notNull().references(() => factoryProductionLine.id),
+    stageCode: text('stage_code').notNull(),
+    name: text('name').notNull(),
+    sequenceNumber: integer('sequence_number').notNull(),
+    status: text('status').notNull().default('active'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().$onUpdate(() => new Date()).notNull(),
+  },
+  (table) => [
+    uniqueIndex('factory_stage_line_code_uniq').on(table.lineId, table.stageCode),
+    uniqueIndex('factory_stage_line_sequence_uniq').on(table.lineId, table.sequenceNumber),
+    index('factory_stage_line_status_idx').on(table.lineId, table.status),
+    check('factory_stage_sequence_positive_check', sql`${table.sequenceNumber} > 0`),
+    check('factory_stage_status_check', sql`${table.status} IN ('active', 'inactive')`),
+  ],
+);
+
+export const industrialEquipment = pgTable(
+  'industrial_equipment',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    factoryId: text('factory_id').notNull().references(() => factory.id),
+    productionLineId: text('production_line_id').notNull().references(() => factoryProductionLine.id),
+    equipmentCode: text('equipment_code').notNull(),
+    name: text('name').notNull(),
+    equipmentType: text('equipment_type').notNull(),
+    equipmentManufacturer: text('equipment_manufacturer'),
+    model: text('model'),
+    serialNumber: text('serial_number'),
+    installationDate: timestamp('installation_date'),
+    operationalStatus: text('operational_status').notNull().default('registered'),
+    communicationProtocol: text('communication_protocol').notNull().default('unknown'),
+    integrationMethod: text('integration_method').notNull().default('gateway'),
+    sensorConfiguration: jsonb('sensor_configuration').$type<Record<string, unknown>>().notNull().default({}),
+    measurementUnits: jsonb('measurement_units').$type<string[]>().notNull().default([]),
+    expectedProductionCapacity: numeric('expected_production_capacity', { precision: 24, scale: 6, mode: 'string' }),
+    expectedProductionCapacityUnit: text('expected_production_capacity_unit'),
+    calibrationStatus: text('calibration_status').notNull().default('pending'),
+    lastCalibrationDate: timestamp('last_calibration_date'),
+    nextCalibrationDate: timestamp('next_calibration_date'),
+    lastCommunicationAt: timestamp('last_communication_at'),
+    removedAt: timestamp('removed_at'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().$onUpdate(() => new Date()).notNull(),
+  },
+  (table) => [
+    uniqueIndex('industrial_equipment_factory_code_uniq').on(table.factoryId, table.equipmentCode),
+    uniqueIndex('industrial_equipment_manufacturer_serial_uniq').on(table.manufacturerId, table.serialNumber).where(sql`${table.serialNumber} IS NOT NULL`),
+    index('industrial_equipment_line_status_idx').on(table.productionLineId, table.operationalStatus),
+    index('industrial_equipment_calibration_idx').on(table.calibrationStatus, table.nextCalibrationDate),
+    check('industrial_equipment_operational_status_check', sql`${table.operationalStatus} IN ('registered', 'active', 'maintenance', 'inactive', 'removed')`),
+    check('industrial_equipment_protocol_check', sql`${table.communicationProtocol} IN ('unknown', 'opc_ua', 'modbus_tcp', 'modbus_rtu', 'industrial_ethernet', 'vendor_api', 'erp_mes', 'scada_historian', 'other')`),
+    check('industrial_equipment_integration_method_check', sql`${table.integrationMethod} IN ('gateway', 'api', 'manual_evidence', 'pending')`),
+    check('industrial_equipment_calibration_status_check', sql`${table.calibrationStatus} IN ('pending', 'valid', 'due', 'expired', 'not_required')`),
+    check('industrial_equipment_capacity_pair_check', sql`(${table.expectedProductionCapacity} IS NULL AND ${table.expectedProductionCapacityUnit} IS NULL) OR (${table.expectedProductionCapacity} IS NOT NULL AND ${table.expectedProductionCapacity} > 0 AND ${table.expectedProductionCapacityUnit} IS NOT NULL AND length(trim(${table.expectedProductionCapacityUnit})) > 0)`),
+  ],
+);
+
+export const industrialGateway = pgTable(
+  'industrial_gateway',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    factoryId: text('factory_id').notNull().references(() => factory.id),
+    gatewayCode: text('gateway_code').notNull(),
+    name: text('name').notNull(),
+    status: text('status').notNull().default('pending'),
+    softwareVersion: text('software_version'),
+    lastHeartbeatAt: timestamp('last_heartbeat_at'),
+    lastSyncAt: timestamp('last_sync_at'),
+    lastErrorAt: timestamp('last_error_at'),
+    revokedAt: timestamp('revoked_at'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().$onUpdate(() => new Date()).notNull(),
+  },
+  (table) => [
+    uniqueIndex('industrial_gateway_manufacturer_code_uniq').on(table.manufacturerId, table.gatewayCode),
+    index('industrial_gateway_factory_status_idx').on(table.factoryId, table.status),
+    index('industrial_gateway_health_idx').on(table.status, table.lastHeartbeatAt),
+    check('industrial_gateway_status_check', sql`${table.status} IN ('pending', 'active', 'suspended', 'revoked')`),
+  ],
+);
+
+export const industrialGatewayCredential = pgTable(
+  'industrial_gateway_credential',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    gatewayId: text('gateway_id').notNull().references(() => industrialGateway.id, { onDelete: 'cascade' }),
+    credentialType: text('credential_type').notNull().default('api_secret'),
+    credentialVersion: integer('credential_version').notNull(),
+    credentialHash: text('credential_hash').notNull(),
+    publicFingerprint: text('public_fingerprint'),
+    issuedAt: timestamp('issued_at').defaultNow().notNull(),
+    expiresAt: timestamp('expires_at'),
+    revokedAt: timestamp('revoked_at'),
+    lastUsedAt: timestamp('last_used_at'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('industrial_gateway_credential_version_uniq').on(table.gatewayId, table.credentialVersion),
+    index('industrial_gateway_credential_active_idx').on(table.gatewayId, table.revokedAt, table.expiresAt),
+    check('industrial_gateway_credential_type_check', sql`${table.credentialType} IN ('api_secret', 'mtls_certificate')`),
+    check('industrial_gateway_credential_version_check', sql`${table.credentialVersion} > 0`),
+  ],
+);
+
+export const industrialGatewayConnection = pgTable(
+  'industrial_gateway_connection',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    gatewayId: text('gateway_id').notNull().references(() => industrialGateway.id, { onDelete: 'cascade' }),
+    connectionType: text('connection_type').notNull(),
+    protocol: text('protocol').notNull(),
+    status: text('status').notNull().default('unknown'),
+    connectedAt: timestamp('connected_at'),
+    disconnectedAt: timestamp('disconnected_at'),
+    lastSeenAt: timestamp('last_seen_at'),
+    errorCode: text('error_code'),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().$onUpdate(() => new Date()).notNull(),
+  },
+  (table) => [
+    index('industrial_gateway_connection_gateway_idx').on(table.gatewayId, table.status),
+    check('industrial_gateway_connection_status_check', sql`${table.status} IN ('unknown', 'connected', 'degraded', 'disconnected', 'error')`),
+  ],
+);
+
+export const industrialEvent = pgTable(
+  'industrial_event',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    eventId: text('event_id').notNull(),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    gatewayId: text('gateway_id').notNull().references(() => industrialGateway.id),
+    factoryId: text('factory_id').notNull().references(() => factory.id),
+    productionLineId: text('production_line_id').notNull().references(() => factoryProductionLine.id),
+    equipmentId: text('equipment_id').notNull().references(() => industrialEquipment.id),
+    batchId: text('batch_id').references(() => productionBatch.id),
+    batchReference: text('batch_reference'),
+    eventType: text('event_type').notNull(),
+    stageCode: text('stage_code'),
+    stageSequenceNumber: integer('stage_sequence_number'),
+    sequenceNumber: integer('sequence_number').notNull(),
+    eventTimestamp: timestamp('event_timestamp').notNull(),
+    receivedTimestamp: timestamp('received_timestamp').defaultNow().notNull(),
+    measurements: jsonb('measurements').$type<Record<string, number>>().notNull().default({}),
+    unit: text('unit'),
+    source: text('source').notNull().default('industrial_gateway'),
+    schemaVersion: text('schema_version').notNull(),
+    originalPayload: jsonb('original_payload').$type<Record<string, unknown>>().notNull(),
+    normalizedPayload: jsonb('normalized_payload').$type<Record<string, unknown>>().notNull(),
+    payloadHash: text('payload_hash').notNull(),
+    validationStatus: text('validation_status').notNull().default('accepted'),
+    integrityStatus: text('integrity_status').notNull().default('verified'),
+    synchronizationStatus: text('synchronization_status').notNull().default('received'),
+    sequenceStatus: text('sequence_status').notNull().default('in_order'),
+    counterStatus: text('counter_status').notNull().default('normal'),
+    isSimulated: boolean('is_simulated').notNull().default(false),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('industrial_event_gateway_event_id_uniq').on(table.gatewayId, table.eventId),
+    index('industrial_event_equipment_sequence_idx').on(table.equipmentId, table.sequenceNumber),
+    index('industrial_event_factory_received_idx').on(table.factoryId, table.receivedTimestamp),
+    index('industrial_event_batch_timestamp_idx').on(table.batchId, table.eventTimestamp),
+    index('industrial_event_sync_status_idx').on(table.synchronizationStatus, table.receivedTimestamp),
+    check('industrial_event_sequence_positive_check', sql`${table.sequenceNumber} > 0`),
+    check('industrial_event_validation_status_check', sql`${table.validationStatus} IN ('accepted', 'rejected', 'duplicate')`),
+    check('industrial_event_integrity_status_check', sql`${table.integrityStatus} IN ('verified', 'unverified', 'failed')`),
+    check('industrial_event_sync_status_check', sql`${table.synchronizationStatus} IN ('received', 'acknowledged', 'failed')`),
+    check('industrial_event_sequence_status_check', sql`${table.sequenceStatus} IN ('in_order', 'out_of_order', 'gap', 'duplicate')`),
+    check('industrial_event_counter_status_check', sql`${table.counterStatus} IN ('normal', 'reset', 'rollover', 'decreased')`),
+  ],
+);
+
+export const industrialEventSequence = pgTable(
+  'industrial_event_sequence',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    gatewayId: text('gateway_id').notNull().references(() => industrialGateway.id, { onDelete: 'cascade' }),
+    equipmentId: text('equipment_id').notNull().references(() => industrialEquipment.id, { onDelete: 'cascade' }),
+    lastSequenceNumber: integer('last_sequence_number').notNull(),
+    lastCounterValue: real('last_counter_value'),
+    lastEventTimestamp: timestamp('last_event_timestamp').notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().$onUpdate(() => new Date()).notNull(),
+  },
+  (table) => [
+    uniqueIndex('industrial_event_sequence_gateway_equipment_uniq').on(table.gatewayId, table.equipmentId),
+    check('industrial_event_sequence_last_positive_check', sql`${table.lastSequenceNumber} > 0`),
+  ],
+);
+
+export const industrialEventSync = pgTable(
+  'industrial_event_sync',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    eventId: text('event_id').notNull().references(() => industrialEvent.id, { onDelete: 'cascade' }),
+    gatewayId: text('gateway_id').notNull().references(() => industrialGateway.id, { onDelete: 'cascade' }),
+    syncStatus: text('sync_status').notNull().default('received'),
+    attemptCount: integer('attempt_count').notNull().default(1),
+    firstSeenAt: timestamp('first_seen_at').defaultNow().notNull(),
+    acknowledgedAt: timestamp('acknowledged_at'),
+    errorMessage: text('error_message'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('industrial_event_sync_event_uniq').on(table.eventId),
+    index('industrial_event_sync_gateway_status_idx').on(table.gatewayId, table.syncStatus),
+    check('industrial_event_sync_status_check', sql`${table.syncStatus} IN ('received', 'acknowledged', 'failed')`),
+    check('industrial_event_sync_attempt_check', sql`${table.attemptCount} > 0`),
+  ],
+);
+
+export const industrialBatchEvidence = pgTable(
+  'industrial_batch_evidence',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    batchId: text('batch_id').notNull().references(() => productionBatch.id, { onDelete: 'cascade' }),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    machineReportedQuantity: numeric('machine_reported_quantity', { precision: 24, scale: 6, mode: 'string' }),
+    machineRejectedQuantity: numeric('machine_rejected_quantity', { precision: 24, scale: 6, mode: 'string' }),
+    lastMachineCounter: numeric('last_machine_counter', { precision: 24, scale: 6, mode: 'string' }),
+    eventCount: integer('event_count').notNull().default(0),
+    counterResetCount: integer('counter_reset_count').notNull().default(0),
+    firstEventAt: timestamp('first_event_at'),
+    lastEventAt: timestamp('last_event_at'),
+    verificationStatus: text('verification_status').notNull().default('pending'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().$onUpdate(() => new Date()).notNull(),
+  },
+  (table) => [
+    uniqueIndex('industrial_batch_evidence_batch_uniq').on(table.batchId),
+    index('industrial_batch_evidence_manufacturer_status_idx').on(table.manufacturerId, table.verificationStatus),
+    check('industrial_batch_evidence_status_check', sql`${table.verificationStatus} IN ('pending', 'supported', 'discrepant', 'insufficient_evidence')`),
+    check('industrial_batch_evidence_event_count_check', sql`${table.eventCount} >= 0`),
+    check('industrial_batch_evidence_reset_count_check', sql`${table.counterResetCount} >= 0`),
+  ],
+);
+
+export const industrialBatchStageHistory = pgTable(
+  'industrial_batch_stage_history',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    batchId: text('batch_id').notNull().references(() => productionBatch.id, { onDelete: 'cascade' }),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    eventId: text('event_id').notNull().references(() => industrialEvent.id),
+    stageCode: text('stage_code').notNull(),
+    stageName: text('stage_name').notNull(),
+    sequenceNumber: integer('sequence_number').notNull(),
+    status: text('status').notNull().default('completed'),
+    eventTimestamp: timestamp('event_timestamp').notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('industrial_batch_stage_event_uniq').on(table.eventId),
+    index('industrial_batch_stage_history_batch_idx').on(table.batchId, table.sequenceNumber, table.eventTimestamp),
+    check('industrial_batch_stage_status_check', sql`${table.status} IN ('started', 'completed', 'failed')`),
+    check('industrial_batch_stage_sequence_positive_check', sql`${table.sequenceNumber} > 0`),
+  ],
+);
+
+export const industrialVerificationResult = pgTable(
+  'industrial_verification_result',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    batchId: text('batch_id').notNull().references(() => productionBatch.id, { onDelete: 'cascade' }),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    machineQuantity: numeric('machine_quantity', { precision: 24, scale: 6, mode: 'string' }),
+    declaredQuantity: numeric('declared_quantity', { precision: 24, scale: 6, mode: 'string' }).notNull(),
+    varianceQuantity: numeric('variance_quantity', { precision: 24, scale: 6, mode: 'string' }),
+    tolerancePercent: real('tolerance_percent').notNull(),
+    outcome: text('outcome').notNull(),
+    reasonCodes: jsonb('reason_codes').$type<string[]>().notNull().default([]),
+    comparisonKey: text('comparison_key').notNull(),
+    checkedAt: timestamp('checked_at').defaultNow().notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('industrial_verification_comparison_key_uniq').on(table.comparisonKey),
+    index('industrial_verification_batch_checked_idx').on(table.batchId, table.checkedAt),
+    index('industrial_verification_manufacturer_outcome_idx').on(table.manufacturerId, table.outcome),
+    check('industrial_verification_tolerance_check', sql`${table.tolerancePercent} >= 0 AND ${table.tolerancePercent} <= 100`),
+    check('industrial_verification_outcome_check', sql`${table.outcome} IN ('matched', 'discrepant', 'no_machine_evidence', 'insufficient_evidence')`),
+  ],
+);
+
+export const industrialAlert = pgTable(
+  'industrial_alert',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    factoryId: text('factory_id').notNull().references(() => factory.id),
+    batchId: text('batch_id').references(() => productionBatch.id),
+    gatewayId: text('gateway_id').references(() => industrialGateway.id),
+    alertType: text('alert_type').notNull(),
+    severity: text('severity').notNull().default('medium'),
+    status: text('status').notNull().default('open'),
+    summary: text('summary').notNull(),
+    details: jsonb('details').$type<Record<string, unknown>>().notNull().default({}),
+    dedupeKey: text('dedupe_key').notNull(),
+    resolvedByUserId: text('resolved_by_user_id').references(() => user.id),
+    resolvedAt: timestamp('resolved_at'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('industrial_alert_dedupe_key_uniq').on(table.dedupeKey),
+    index('industrial_alert_factory_status_idx').on(table.factoryId, table.status, table.createdAt),
+    index('industrial_alert_manufacturer_status_idx').on(table.manufacturerId, table.status),
+    check('industrial_alert_severity_check', sql`${table.severity} IN ('low', 'medium', 'high', 'critical')`),
+    check('industrial_alert_status_check', sql`${table.status} IN ('open', 'acknowledged', 'resolved')`),
+  ],
+);
+
+export const industrialIntegrationPolicy = pgTable(
+  'industrial_integration_policy',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    factoryId: text('factory_id').notNull().references(() => factory.id, { onDelete: 'cascade' }),
+    mandatory: boolean('mandatory').notNull().default(true),
+    requiredEquipmentCount: integer('required_equipment_count').notNull().default(1),
+    requiredGatewayCount: integer('required_gateway_count').notNull().default(1),
+    integrationTestRequired: boolean('integration_test_required').notNull().default(true),
+    exceptionStatus: text('exception_status').notNull().default('none'),
+    exceptionReason: text('exception_reason'),
+    currentStatus: text('current_status').notNull().default('not_evaluated'),
+    lastEvaluatedAt: timestamp('last_evaluated_at'),
+    createdByUserId: text('created_by_user_id').notNull().references(() => user.id),
+    approvedByUserId: text('approved_by_user_id').references(() => user.id),
+    approvedAt: timestamp('approved_at'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().$onUpdate(() => new Date()).notNull(),
+  },
+  (table) => [
+    uniqueIndex('industrial_integration_policy_factory_uniq').on(table.factoryId),
+    index('industrial_integration_policy_status_idx').on(table.currentStatus, table.exceptionStatus),
+    check('industrial_integration_policy_equipment_count_check', sql`${table.requiredEquipmentCount} >= 0`),
+    check('industrial_integration_policy_gateway_count_check', sql`${table.requiredGatewayCount} >= 0`),
+    check('industrial_integration_policy_exception_check', sql`${table.exceptionStatus} IN ('none', 'pending', 'approved', 'rejected')`),
+    check('industrial_integration_policy_status_check', sql`${table.currentStatus} IN ('not_evaluated', 'compliant', 'non_compliant', 'exception', 'not_required')`),
+    check('industrial_integration_policy_exception_reason_check', sql`${table.exceptionStatus} = 'none' OR ${table.exceptionReason} IS NOT NULL`),
+  ],
+);
+
+export const industrialComplianceIncident = pgTable(
+  'industrial_compliance_incident',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    factoryId: text('factory_id').notNull().references(() => factory.id, { onDelete: 'cascade' }),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    policyId: text('policy_id').references(() => industrialIntegrationPolicy.id),
+    incidentType: text('incident_type').notNull(),
+    severity: text('severity').notNull().default('medium'),
+    status: text('status').notNull().default('open'),
+    summary: text('summary').notNull(),
+    details: jsonb('details').$type<Record<string, unknown>>().notNull().default({}),
+    resolvedByUserId: text('resolved_by_user_id').references(() => user.id),
+    resolvedAt: timestamp('resolved_at'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('industrial_compliance_incident_factory_status_idx').on(table.factoryId, table.status, table.createdAt),
+    index('industrial_compliance_incident_manufacturer_idx').on(table.manufacturerId, table.status),
+    check('industrial_compliance_incident_severity_check', sql`${table.severity} IN ('low', 'medium', 'high', 'critical')`),
+    check('industrial_compliance_incident_status_check', sql`${table.status} IN ('open', 'acknowledged', 'resolved')`),
+  ],
+);
+
+export const industrialEquipmentCalibration = pgTable(
+  'industrial_equipment_calibration',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    equipmentId: text('equipment_id').notNull().references(() => industrialEquipment.id, { onDelete: 'cascade' }),
+    calibrationReference: text('calibration_reference').notNull(),
+    status: text('status').notNull(),
+    calibratedAt: timestamp('calibrated_at').notNull(),
+    nextCalibrationAt: timestamp('next_calibration_at'),
+    certificateReference: text('certificate_reference'),
+    notes: text('notes'),
+    performedByUserId: text('performed_by_user_id').notNull().references(() => user.id),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('industrial_calibration_equipment_reference_uniq').on(table.equipmentId, table.calibrationReference),
+    index('industrial_calibration_equipment_date_idx').on(table.equipmentId, table.nextCalibrationAt),
+    check('industrial_calibration_status_check', sql`${table.status} IN ('valid', 'failed', 'superseded')`),
+  ],
+);
+
+export const factoryRelations = relations(factory, ({ one, many }) => ({
+  manufacturer: one(user, {
+    fields: [factory.manufacturerId],
+    references: [user.id],
+    relationName: 'factoryManufacturer',
+  }),
+  reviewedBy: one(user, {
+    fields: [factory.reviewedByUserId],
+    references: [user.id],
+    relationName: 'factoryReviewer',
+  }),
+  productionLines: many(factoryProductionLine),
+}));
+
+export const factoryProductionLineRelations = relations(factoryProductionLine, ({ one, many }) => ({
+  factory: one(factory, {
+    fields: [factoryProductionLine.factoryId],
+    references: [factory.id],
+  }),
+  manufacturer: one(user, {
+    fields: [factoryProductionLine.manufacturerId],
+    references: [user.id],
+    relationName: 'factoryLineManufacturer',
+  }),
+  stages: many(factoryProductionStage),
+}));
+
+export const factoryProductionStageRelations = relations(factoryProductionStage, ({ one }) => ({
+  line: one(factoryProductionLine, {
+    fields: [factoryProductionStage.lineId],
+    references: [factoryProductionLine.id],
+  }),
+}));
+
 export const disputeRelations = relations(dispute, ({ one }) => ({
   transaction: one(transaction, {
     fields: [dispute.transactionId],
@@ -1316,6 +1812,8 @@ export const productionBatch = pgTable(
     manufacturerId: text('manufacturer_id')
       .notNull()
       .references(() => user.id),
+    factoryId: text('factory_id').references(() => factory.id, { onDelete: 'set null' }),
+    productionLineId: text('production_line_id').references(() => factoryProductionLine.id, { onDelete: 'set null' }),
     productId: text('product_id')
       .notNull()
       .references(() => product.id),
@@ -1353,6 +1851,8 @@ export const productionBatch = pgTable(
   },
   (table) => [
     index('prod_batch_manufacturer_idx').on(table.manufacturerId),
+    index('prod_batch_factory_created_idx').on(table.factoryId, table.createdAt),
+    index('prod_batch_line_created_idx').on(table.productionLineId, table.createdAt),
     index('prod_batch_product_idx').on(table.productId),
     index('prod_batch_status_idx').on(table.status),
     check('production_batch_output_pair_check', sql`(${table.goodOutputQuantity} IS NULL AND ${table.rejectedOutputQuantity} IS NULL) OR (${table.goodOutputQuantity} IS NOT NULL AND ${table.rejectedOutputQuantity} IS NOT NULL AND ${table.goodOutputQuantity} >= 0 AND ${table.rejectedOutputQuantity} >= 0)`),
@@ -1822,11 +2322,19 @@ export const aiFeedback = pgTable(
 // Relations for new Phase 2 tables
 // ---------------------------------------------------------------------------
 
-export const productionBatchRelations = relations(productionBatch, ({ one }) => ({
+export const productionBatchRelations = relations(productionBatch, ({ one, many }) => ({
   manufacturer: one(user, {
     fields: [productionBatch.manufacturerId],
     references: [user.id],
     relationName: 'productionBatchManufacturer',
+  }),
+  factory: one(factory, {
+    fields: [productionBatch.factoryId],
+    references: [factory.id],
+  }),
+  productionLine: one(factoryProductionLine, {
+    fields: [productionBatch.productionLineId],
+    references: [factoryProductionLine.id],
   }),
   product: one(product, {
     fields: [productionBatch.productId],
@@ -1836,6 +2344,83 @@ export const productionBatchRelations = relations(productionBatch, ({ one }) => 
     fields: [productionBatch.recipeVersionId],
     references: [productionRecipe.id],
   }),
+  industrialEvents: many(industrialEvent),
+  industrialEvidence: many(industrialBatchEvidence),
+  industrialStageHistory: many(industrialBatchStageHistory),
+  industrialVerificationResults: many(industrialVerificationResult),
+  industrialAlerts: many(industrialAlert),
+}));
+
+export const industrialEquipmentRelations = relations(industrialEquipment, ({ one, many }) => ({
+  manufacturer: one(user, { fields: [industrialEquipment.manufacturerId], references: [user.id], relationName: 'industrialEquipmentManufacturer' }),
+  factory: one(factory, { fields: [industrialEquipment.factoryId], references: [factory.id] }),
+  productionLine: one(factoryProductionLine, { fields: [industrialEquipment.productionLineId], references: [factoryProductionLine.id] }),
+  calibrations: many(industrialEquipmentCalibration),
+  events: many(industrialEvent),
+}));
+
+export const industrialGatewayRelations = relations(industrialGateway, ({ one, many }) => ({
+  manufacturer: one(user, { fields: [industrialGateway.manufacturerId], references: [user.id], relationName: 'industrialGatewayManufacturer' }),
+  factory: one(factory, { fields: [industrialGateway.factoryId], references: [factory.id] }),
+  credentials: many(industrialGatewayCredential),
+  connections: many(industrialGatewayConnection),
+  events: many(industrialEvent),
+}));
+
+export const industrialGatewayCredentialRelations = relations(industrialGatewayCredential, ({ one }) => ({
+  gateway: one(industrialGateway, { fields: [industrialGatewayCredential.gatewayId], references: [industrialGateway.id] }),
+}));
+
+export const industrialGatewayConnectionRelations = relations(industrialGatewayConnection, ({ one }) => ({
+  gateway: one(industrialGateway, { fields: [industrialGatewayConnection.gatewayId], references: [industrialGateway.id] }),
+}));
+
+export const industrialEventRelations = relations(industrialEvent, ({ one, many }) => ({
+  manufacturer: one(user, { fields: [industrialEvent.manufacturerId], references: [user.id], relationName: 'industrialEventManufacturer' }),
+  gateway: one(industrialGateway, { fields: [industrialEvent.gatewayId], references: [industrialGateway.id] }),
+  factory: one(factory, { fields: [industrialEvent.factoryId], references: [factory.id] }),
+  productionLine: one(factoryProductionLine, { fields: [industrialEvent.productionLineId], references: [factoryProductionLine.id] }),
+  equipment: one(industrialEquipment, { fields: [industrialEvent.equipmentId], references: [industrialEquipment.id] }),
+  batch: one(productionBatch, { fields: [industrialEvent.batchId], references: [productionBatch.id] }),
+  syncRecords: many(industrialEventSync),
+}));
+
+export const industrialEventSequenceRelations = relations(industrialEventSequence, ({ one }) => ({
+  gateway: one(industrialGateway, { fields: [industrialEventSequence.gatewayId], references: [industrialGateway.id] }),
+  equipment: one(industrialEquipment, { fields: [industrialEventSequence.equipmentId], references: [industrialEquipment.id] }),
+}));
+
+export const industrialEventSyncRelations = relations(industrialEventSync, ({ one }) => ({
+  event: one(industrialEvent, { fields: [industrialEventSync.eventId], references: [industrialEvent.id] }),
+  gateway: one(industrialGateway, { fields: [industrialEventSync.gatewayId], references: [industrialGateway.id] }),
+}));
+
+export const industrialEquipmentCalibrationRelations = relations(industrialEquipmentCalibration, ({ one }) => ({
+  equipment: one(industrialEquipment, { fields: [industrialEquipmentCalibration.equipmentId], references: [industrialEquipment.id] }),
+  performedBy: one(user, { fields: [industrialEquipmentCalibration.performedByUserId], references: [user.id], relationName: 'industrialCalibrationPerformer' }),
+}));
+
+export const industrialBatchEvidenceRelations = relations(industrialBatchEvidence, ({ one }) => ({
+  batch: one(productionBatch, { fields: [industrialBatchEvidence.batchId], references: [productionBatch.id] }),
+  manufacturer: one(user, { fields: [industrialBatchEvidence.manufacturerId], references: [user.id], relationName: 'industrialBatchEvidenceManufacturer' }),
+}));
+
+export const industrialBatchStageHistoryRelations = relations(industrialBatchStageHistory, ({ one }) => ({
+  batch: one(productionBatch, { fields: [industrialBatchStageHistory.batchId], references: [productionBatch.id] }),
+  event: one(industrialEvent, { fields: [industrialBatchStageHistory.eventId], references: [industrialEvent.id] }),
+  manufacturer: one(user, { fields: [industrialBatchStageHistory.manufacturerId], references: [user.id], relationName: 'industrialBatchStageManufacturer' }),
+}));
+
+export const industrialVerificationResultRelations = relations(industrialVerificationResult, ({ one }) => ({
+  batch: one(productionBatch, { fields: [industrialVerificationResult.batchId], references: [productionBatch.id] }),
+  manufacturer: one(user, { fields: [industrialVerificationResult.manufacturerId], references: [user.id], relationName: 'industrialVerificationManufacturer' }),
+}));
+
+export const industrialAlertRelations = relations(industrialAlert, ({ one }) => ({
+  manufacturer: one(user, { fields: [industrialAlert.manufacturerId], references: [user.id], relationName: 'industrialAlertManufacturer' }),
+  factory: one(factory, { fields: [industrialAlert.factoryId], references: [factory.id] }),
+  batch: one(productionBatch, { fields: [industrialAlert.batchId], references: [productionBatch.id] }),
+  gateway: one(industrialGateway, { fields: [industrialAlert.gatewayId], references: [industrialGateway.id] }),
 }));
 
 export const productionMaterialRelations = relations(productionMaterial, ({ one }) => ({

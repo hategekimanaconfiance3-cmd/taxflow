@@ -20,6 +20,7 @@ import {
     supportTicket,
 } from "../schema";
 import crypto from "node:crypto";
+import { requireSeedDatabase } from "./safety";
 
 // ---------------------------------------------------------------------------
 // CLEAN RESEED — Delete all non-auth data + reseed focused supply chain
@@ -29,13 +30,12 @@ import crypto from "node:crypto";
 // Then seeds: products, stock (Confiance only), transactions, VAT, payments
 // ---------------------------------------------------------------------------
 
-if (process.env.NODE_ENV === "production") throw new Error("Demo data seeding is disabled in production.");
-if (!process.env.DATABASE_URL) throw new Error("DATABASE_URL is required to seed demo data.");
+const databaseUrl = requireSeedDatabase("DATABASE_URL", "disposable");
 if (!process.env.TAXFLOW_SEED_PASSWORD || process.env.TAXFLOW_SEED_PASSWORD.length < 12) {
     throw new Error("Set TAXFLOW_SEED_PASSWORD to a value of at least 12 characters.");
 }
 
-const client = postgres(process.env.DATABASE_URL);
+const client = postgres(databaseUrl);
 const db = drizzle(client);
 const SEED_PASSWORD = process.env.TAXFLOW_SEED_PASSWORD;
 

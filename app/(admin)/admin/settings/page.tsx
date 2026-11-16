@@ -2,7 +2,7 @@ import { hasRRARole, requireRRASession } from '@/lib/auth-guard';
 import { asc, eq } from 'drizzle-orm';
 import db from '@/db/drizzle';
 import { rraStaff, rraStaffRole, user } from '@/db/schema';
-import { getSystemConfig } from '@/lib/actions/system-config.action';
+import { getSystemConfig, getActiveSellThroughThreshold } from '@/lib/actions/system-config.action';
 import { SystemConfigEditor } from '@/components/admin/system-config-editor';
 import { StaffManagement, type StaffManagementMember } from '@/components/admin/staff-management';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,7 +11,10 @@ import { Settings, Users } from 'lucide-react';
 export default async function AdminSettingsPage() {
   const { staff } = await requireRRASession("super_admin");
 
-  const config = await getSystemConfig();
+  const [config, sellThroughThreshold] = await Promise.all([
+    getSystemConfig(),
+    getActiveSellThroughThreshold(),
+  ]);
   let staffMembers: StaffManagementMember[] = [];
   const isSuperAdmin = hasRRARole(staff, 'super_admin');
   if (isSuperAdmin) {
@@ -69,6 +72,7 @@ export default async function AdminSettingsPage() {
             vatRate={config.vatRate}
             disputeWindowHours={config.disputeWindowHours}
             buyerConfirmationWindowHours={config.buyerConfirmationWindowHours}
+            sellThroughThreshold={sellThroughThreshold}
           />
         </CardContent>
       </Card>

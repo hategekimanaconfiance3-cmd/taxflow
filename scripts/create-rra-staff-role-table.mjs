@@ -1,8 +1,10 @@
 import pg from 'pg';
 import { randomUUID } from 'crypto';
+import 'dotenv/config';
+import { disposableDatabaseUrl, requireMutationConfirmation } from './safety.mjs';
 const { Pool } = pg;
-const DB = 'postgresql://neondb_owner:npg_Hv6dFJ3QonEi@ep-still-rain-b4rhpmff-pooler.c-6.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require';
-const pool = new Pool({ connectionString: DB });
+requireMutationConfirmation('TAXFLOW_CONFIRM_SCHEMA_REPAIR', 'CREATE_RRA_ROLE_TABLE_ON_DISPOSABLE_DB');
+const pool = new Pool({ connectionString: disposableDatabaseUrl() });
 
 console.log('Creating rra_staff_role table...');
 

@@ -1,7 +1,9 @@
 import pg from 'pg';
+import 'dotenv/config';
+import { requiredEnv } from './safety.mjs';
 const { Client } = pg;
 const client = new Client({
-  connectionString: 'postgresql://neondb_owner:npg_6XgNdhp1bHjP@ep-still-rain-b4rhpmff-pooler.c-6.us-east-2.aws.neon.tech/neondb?sslmode=require'
+  connectionString: requiredEnv('DATABASE_URL')
 });
 await client.connect();
 

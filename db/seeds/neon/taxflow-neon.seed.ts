@@ -5,6 +5,7 @@ import * as schema from '../../schema';
 import { user, account, rraStaff } from '../../schema';
 import fs from 'fs';
 import path from 'path';
+import { requireSeedDatabase } from '../safety';
 
 // Import the extracted data
 const extractedDataPath = path.join(__dirname, '..', '..', '..', 'data', 'extracted-data.json');
@@ -44,13 +45,13 @@ const accounts = convertTimestamps(extractedData.accounts);
 const rraStaffMembers = convertTimestamps(extractedData.rraStaff);
 
 async function seedTaxFlowNeonDB() {
-  if (process.env.NODE_ENV === 'production' || process.env.ALLOW_DESTRUCTIVE_SEED !== 'true') {
+  if (process.env.ALLOW_DESTRUCTIVE_SEED !== 'true') {
     throw new Error('This seed script deletes existing rows. Set ALLOW_DESTRUCTIVE_SEED=true in a non-production environment to proceed.');
   }
   console.log('Starting to seed TaxFlow Neon DB...');
 
   // Connection to Neon DB
-  const connectionString = process.env.DATABASE_URL!;
+  const connectionString = requireSeedDatabase('DATABASE_URL', 'nonproduction');
   const client = postgres(connectionString);
   const db = drizzle(client, { schema });
 
