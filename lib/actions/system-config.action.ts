@@ -198,7 +198,7 @@ export async function updateSellThroughThresholdAction(data: {
 
     const parsed = sellThroughUpdateSchema.safeParse(data);
     if (!parsed.success) {
-        throw new Error(parsed.error.errors[0]?.message ?? "Invalid threshold value");
+        throw new Error(parsed.error.issues[0]?.message ?? "Invalid threshold value");
     }
 
     const { thresholdPercent, reason } = parsed.data;
