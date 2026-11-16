@@ -22,10 +22,15 @@ import { requireSeedDatabase } from './safety';
 
 const databaseUrl = requireSeedDatabase('DATABASE_URL', 'disposable');
 
-const RAW_PASSWORD = process.env.TAXFLOW_SEED_PASSWORD;
-if (!RAW_PASSWORD || RAW_PASSWORD.length < 12) {
-  throw new Error('[test-accounts.seed] Set TAXFLOW_SEED_PASSWORD to at least 12 characters.');
+function requiredSeedPassword(): string {
+  const password = process.env.TAXFLOW_SEED_PASSWORD;
+  if (!password || password.length < 12) {
+    throw new Error('[test-accounts.seed] Set TAXFLOW_SEED_PASSWORD to at least 12 characters.');
+  }
+  return password;
 }
+
+const RAW_PASSWORD = requiredSeedPassword();
 
 const client = postgres(databaseUrl);
 const db = drizzle(client);
