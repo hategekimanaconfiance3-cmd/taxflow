@@ -121,6 +121,28 @@ export const gatewayRegistrationSchema = z.object({
   softwareVersion: z.string().trim().max(80).nullable().optional(),
 });
 
+export const industrialIntegrationRequestSchema = z.object({
+  factoryId: z.string().uuid('Factory identifier is invalid.'),
+  environment: z.enum(['sandbox', 'production']),
+  integrationName: trimmedText('Integration name', 160),
+  requestedEquipmentIds: z.array(z.string().uuid('Equipment identifier is invalid.')).min(1).max(500),
+  gatewayName: z.string().trim().max(160).nullable().optional(),
+  notes: z.string().trim().max(2_000).nullable().optional(),
+  clientRequestId: z.string().trim().max(120).nullable().optional(),
+}).strict();
+
+export const industrialIntegrationReviewSchema = z.object({
+  requestId: z.string().uuid('Integration-request identifier is invalid.'),
+  decision: z.enum(['under_review', 'approved', 'rejected']),
+  note: z.string().trim().min(1, 'A review note is required.').max(2_000),
+  authorizedEquipmentIds: z.array(z.string().uuid('Equipment identifier is invalid.')).max(500).default([]),
+}).strict();
+
+export const industrialIntegrationActionSchema = z.object({
+  integrationId: z.string().uuid('Integration identifier is invalid.'),
+  reason: z.string().trim().min(1, 'A reason is required.').max(2_000),
+}).strict();
+
 const industrialEventMeasurementSchema = z.record(z.string().trim().min(1).max(80), z.number().finite().max(1_000_000_000_000));
 
 export const industrialEventSchema = z.object({
@@ -170,5 +192,8 @@ export type EquipmentRegistrationInput = z.infer<typeof equipmentRegistrationSch
 export type CalibrationRecordInput = z.infer<typeof calibrationRecordSchema>;
 export type EquipmentUpdateInput = z.infer<typeof equipmentUpdateSchema>;
 export type GatewayRegistrationInput = z.infer<typeof gatewayRegistrationSchema>;
+export type IndustrialIntegrationRequestInput = z.infer<typeof industrialIntegrationRequestSchema>;
+export type IndustrialIntegrationReviewInput = z.infer<typeof industrialIntegrationReviewSchema>;
+export type IndustrialIntegrationActionInput = z.infer<typeof industrialIntegrationActionSchema>;
 export type IndustrialEventInput = z.infer<typeof industrialEventSchema>;
 export type IntegrationPolicyInput = z.infer<typeof integrationPolicySchema>;

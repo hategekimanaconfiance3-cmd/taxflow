@@ -43,6 +43,8 @@ Requirements: Node.js 24 or compatible, pnpm 10+, PostgreSQL/Neon databases for 
 
    Set `PAYMENT_DATA_ENCRYPTION_KEY` before using saved payment methods or registering TF bank accounts. Generate a random 32-byte key (for example, `node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"`) and store its base64 value only in the deployment secret manager. Keep the key stable and backed up; encrypted data cannot be recovered without it.
 
+   Set `INDUSTRIAL_CREDENTIAL_ENCRYPTION_KEY` before approving TF-managed industrial integrations. It must be exactly 32 random bytes encoded as 64 hexadecimal characters. Keep it stable in the deployment secret manager; there is no fallback key and a missing key blocks credential provisioning.
+
 3. Reconcile and migrate the TaxFlow database:
 
    ```bash

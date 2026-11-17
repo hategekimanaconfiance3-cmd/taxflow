@@ -1287,12 +1287,73 @@ export const industrialEquipment = pgTable(
   ],
 );
 
+export const industrialIntegrationRequest = pgTable(
+  'industrial_integration_request',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    factoryId: text('factory_id').notNull().references(() => factory.id),
+    environment: text('environment').notNull(),
+    integrationName: text('integration_name').notNull(),
+    requestedEquipmentIds: jsonb('requested_equipment_ids').$type<string[]>().notNull().default([]),
+    gatewayName: text('gateway_name'),
+    notes: text('notes'),
+    clientRequestId: text('client_request_id'),
+    status: text('status').notNull().default('requested'),
+    reviewedByUserId: text('reviewed_by_user_id').references(() => user.id),
+    reviewedAt: timestamp('reviewed_at'),
+    reviewNote: text('review_note'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().$onUpdate(() => new Date()).notNull(),
+  },
+  (table) => [
+    index('industrial_integration_request_manufacturer_idx').on(table.manufacturerId, table.status),
+    index('industrial_integration_request_factory_idx').on(table.factoryId, table.status),
+    uniqueIndex('industrial_integration_request_client_id_uniq').on(table.manufacturerId, table.clientRequestId).where(sql`${table.clientRequestId} IS NOT NULL`),
+    check('industrial_integration_request_environment_check', sql`${table.environment} IN ('sandbox', 'production')`),
+    check('industrial_integration_request_status_check', sql`${table.status} IN ('requested', 'under_review', 'approved', 'rejected')`),
+  ],
+);
+
+export const industrialIntegration = pgTable(
+  'industrial_integration',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    requestId: text('request_id').notNull().references(() => industrialIntegrationRequest.id),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    factoryId: text('factory_id').notNull().references(() => factory.id),
+    integrationCode: text('integration_code').notNull(),
+    environment: text('environment').notNull(),
+    status: text('status').notNull().default('provisioning'),
+    authMode: text('auth_mode').notNull().default('signed_ed25519'),
+    requiresCredentialReissue: boolean('requires_credential_reissue').notNull().default(false),
+    activatedAt: timestamp('activated_at'),
+    suspendedAt: timestamp('suspended_at'),
+    revokedAt: timestamp('revoked_at'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().$onUpdate(() => new Date()).notNull(),
+  },
+  (table) => [
+    uniqueIndex('industrial_integration_request_uniq').on(table.requestId),
+    uniqueIndex('industrial_integration_code_uniq').on(table.integrationCode),
+    index('industrial_integration_manufacturer_status_idx').on(table.manufacturerId, table.status),
+    index('industrial_integration_factory_environment_idx').on(table.factoryId, table.environment),
+    check('industrial_integration_environment_check', sql`${table.environment} IN ('sandbox', 'production')`),
+    check('industrial_integration_status_check', sql`${table.status} IN ('provisioning', 'provisioned', 'active', 'suspended', 'revoked')`),
+    check('industrial_integration_auth_mode_check', sql`${table.authMode} IN ('signed_ed25519', 'bearer_legacy')`),
+  ],
+);
+
 export const industrialGateway = pgTable(
   'industrial_gateway',
   {
     id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
     manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
     factoryId: text('factory_id').notNull().references(() => factory.id),
+    integrationId: text('integration_id').references(() => industrialIntegration.id),
+    environment: text('environment').notNull().default('production'),
+    authMode: text('auth_mode').notNull().default('bearer_legacy'),
+    sourceType: text('source_type').notNull().default('manufacturer_gateway'),
     gatewayCode: text('gateway_code').notNull(),
     name: text('name').notNull(),
     status: text('status').notNull().default('pending'),
@@ -1307,8 +1368,12 @@ export const industrialGateway = pgTable(
   (table) => [
     uniqueIndex('industrial_gateway_manufacturer_code_uniq').on(table.manufacturerId, table.gatewayCode),
     index('industrial_gateway_factory_status_idx').on(table.factoryId, table.status),
+    index('industrial_gateway_integration_idx').on(table.integrationId, table.status),
     index('industrial_gateway_health_idx').on(table.status, table.lastHeartbeatAt),
     check('industrial_gateway_status_check', sql`${table.status} IN ('pending', 'active', 'suspended', 'revoked')`),
+    check('industrial_gateway_environment_check', sql`${table.environment} IN ('sandbox', 'production')`),
+    check('industrial_gateway_auth_mode_check', sql`${table.authMode} IN ('signed_ed25519', 'bearer_legacy')`),
+    check('industrial_gateway_source_type_check', sql`${table.sourceType} IN ('manufacturer_gateway', 'simulator')`),
   ],
 );
 
@@ -1321,6 +1386,9 @@ export const industrialGatewayCredential = pgTable(
     credentialVersion: integer('credential_version').notNull(),
     credentialHash: text('credential_hash').notNull(),
     publicFingerprint: text('public_fingerprint'),
+    publicSigningKey: text('public_signing_key'),
+    signingAlgorithm: text('signing_algorithm'),
+    issuanceReason: text('issuance_reason'),
     issuedAt: timestamp('issued_at').defaultNow().notNull(),
     expiresAt: timestamp('expires_at'),
     revokedAt: timestamp('revoked_at'),
@@ -1332,6 +1400,64 @@ export const industrialGatewayCredential = pgTable(
     index('industrial_gateway_credential_active_idx').on(table.gatewayId, table.revokedAt, table.expiresAt),
     check('industrial_gateway_credential_type_check', sql`${table.credentialType} IN ('api_secret', 'mtls_certificate')`),
     check('industrial_gateway_credential_version_check', sql`${table.credentialVersion} > 0`),
+    check('industrial_gateway_credential_signing_algorithm_check', sql`${table.signingAlgorithm} IS NULL OR ${table.signingAlgorithm} IN ('ed25519')`),
+  ],
+);
+
+export const industrialIntegrationEquipment = pgTable(
+  'industrial_integration_equipment',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    integrationId: text('integration_id').notNull().references(() => industrialIntegration.id, { onDelete: 'cascade' }),
+    equipmentId: text('equipment_id').notNull().references(() => industrialEquipment.id),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    factoryId: text('factory_id').notNull().references(() => factory.id),
+    authorizationStatus: text('authorization_status').notNull().default('authorized'),
+    authorizedByUserId: text('authorized_by_user_id').references(() => user.id),
+    authorizedAt: timestamp('authorized_at'),
+    revokedAt: timestamp('revoked_at'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('industrial_integration_equipment_uniq').on(table.integrationId, table.equipmentId),
+    index('industrial_integration_equipment_factory_idx').on(table.factoryId, table.authorizationStatus),
+    check('industrial_integration_equipment_status_check', sql`${table.authorizationStatus} IN ('pending', 'authorized', 'revoked')`),
+  ],
+);
+
+export const industrialCredentialDelivery = pgTable(
+  'industrial_credential_delivery',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    integrationId: text('integration_id').notNull().references(() => industrialIntegration.id, { onDelete: 'cascade' }),
+    credentialId: text('credential_id').notNull().references(() => industrialGatewayCredential.id, { onDelete: 'cascade' }),
+    ciphertext: text('ciphertext').notNull(),
+    nonce: text('nonce').notNull(),
+    authTag: text('auth_tag').notNull(),
+    encryptionKeyVersion: text('encryption_key_version').notNull(),
+    expiresAt: timestamp('expires_at').notNull(),
+    claimedAt: timestamp('claimed_at'),
+    claimedByUserId: text('claimed_by_user_id').references(() => user.id),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('industrial_credential_delivery_credential_uniq').on(table.credentialId),
+    index('industrial_credential_delivery_integration_idx').on(table.integrationId, table.claimedAt, table.expiresAt),
+  ],
+);
+
+export const industrialGatewayRequestNonce = pgTable(
+  'industrial_gateway_request_nonce',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    gatewayId: text('gateway_id').notNull().references(() => industrialGateway.id, { onDelete: 'cascade' }),
+    nonce: text('nonce').notNull(),
+    observedAt: timestamp('observed_at').defaultNow().notNull(),
+    expiresAt: timestamp('expires_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('industrial_gateway_request_nonce_uniq').on(table.gatewayId, table.nonce),
+    index('industrial_gateway_request_nonce_expiry_idx').on(table.expiresAt),
   ],
 );
 

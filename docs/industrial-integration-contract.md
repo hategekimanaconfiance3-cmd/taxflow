@@ -12,11 +12,19 @@ Authorization: Bearer <gateway-client-secret>
 
 Credential rotation revokes the prior credential. Revocation prevents further heartbeat and event ingestion. Secrets are not returned from list APIs or frontend source.
 
+TF-managed integrations reuse `industrialGateway` and `industrialGatewayCredential`, with separate factory identities for `sandbox` and `production`. New TF-managed gateways use an Ed25519 signing key in addition to the bearer secret. The private signing key is encrypted in a one-time delivery envelope and is never stored in plaintext.
+
+Signed requests include `X-TF-Timestamp`, `X-TF-Nonce`, `X-TF-Key-Version`, `X-TF-Signature-Version: v1`, and `X-TF-Signature`. The canonical value is the HTTP method, request path, timestamp, nonce, key version, and SHA-256 hash of the exact raw body, separated by newlines. TaxFlow rejects stale timestamps, reused gateway nonces, invalid signatures, revoked credentials, and inactive gateways. Legacy bearer-only gateways remain supported for compatibility.
+
 ## Endpoints
 
 - `POST /api/v1/industrial/heartbeat` — authenticated gateway heartbeat and connection evidence.
 - `POST /api/v1/industrial/events` — authenticated, rate-limited event ingestion.
 - Manufacturer session routes under `/api/equipment` and `/api/industrial/gateways` manage registrations and calibration records.
+
+Manufacturer lifecycle routes are available under `/api/industrial/integration-requests` and `/api/industrial/integrations`. They cover request/status, one-time credential claim, package retrieval, rotation, and evidence history. TF-only review, activation, suspension, revocation, and audit routes live under `/api/admin/industrial/integration-requests` and `/api/admin/industrial/integrations`.
+
+The lifecycle is request -> under review -> approved/rejected. Approval provisions the factory/environment integration, gateway, signed credential, one-time delivery envelope, and equipment allowlist in one transaction. The gateway remains pending until the manufacturer claims credentials and an authorized TF officer activates it. Suspension revokes active credentials and requires reissue; revocation is terminal. Factory suspension or rejection also suspends linked integrations.
 
 ## Event contract
 

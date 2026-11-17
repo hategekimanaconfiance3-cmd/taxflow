@@ -2,10 +2,15 @@
 
 import { z } from 'zod';
 import { requireRRAPermission, requireTraderSession } from '@/lib/auth-guard';
+import type { GatewayRequestSecurity } from '@/lib/industrial-security';
 import {
   activateGateway as activateGatewayRecord,
   acknowledgeIndustrialEvents as acknowledgeIndustrialEventsRecord,
   getGatewayDiagnostics as getGatewayDiagnosticsRecord,
+  getIndustrialIntegrationAudit,
+  getIndustrialIntegrationPackage,
+  getIndustrialIntegrationByIdForOfficer,
+  getManufacturerIntegration,
   ingestIndustrialEvent,
   listIndustrialAlertsForManufacturer,
   getIndustrialMonitoringSummary,
@@ -15,12 +20,21 @@ import {
   listIndustrialEventsForManufacturer,
   listManufacturerEquipment,
   listManufacturerGateways,
+  listManufacturerIntegrationRequests,
+  listManufacturerIntegrations,
+  listIndustrialIntegrationEvents,
+  listIndustrialIntegrationRequestsForOfficer,
   recordCalibration,
   updateEquipment as updateEquipmentRecord,
   recordGatewayHeartbeat,
   registerEquipment as registerEquipmentRecord,
   registerGateway as registerGatewayRecord,
-  revokeGateway as revokeGatewayRecord,
+  revokeIndustrialIntegration as revokeIndustrialIntegrationRecord,
+  requestIndustrialIntegration as requestIndustrialIntegrationRecord,
+  reviewIndustrialIntegrationRequest as reviewIndustrialIntegrationRequestRecord,
+  claimIndustrialIntegrationCredentials as claimIndustrialIntegrationCredentialsRecord,
+  rotateIndustrialIntegrationCredential as rotateIndustrialIntegrationCredentialRecord,
+  suspendIndustrialIntegration as suspendIndustrialIntegrationRecord,
   rotateGatewayCredential as rotateGatewayCredentialRecord,
 } from '@/lib/industrial-integration-service';
 
@@ -64,14 +78,14 @@ export async function rotateIndustrialGatewayCredential(gatewayId: string) {
 }
 
 export async function revokeIndustrialGateway(gatewayId: string) {
-  const session = await requireTraderSession(['manufacturer']);
+  await requireTraderSession(['manufacturer']);
   const parsed = idSchema.safeParse(gatewayId);
   if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? 'Gateway identifier is invalid.');
-  return revokeGatewayRecord(session.user.id, parsed.data);
+  throw new Error('Gateway revocation is controlled by TF. Use the integration support workflow.');
 }
 
 export async function activateIndustrialGateway(gatewayId: string) {
-  const session = await requireRRAPermission('industrial.factory.review');
+  const session = await requireRRAPermission('industrial.integration.activate');
   const parsed = idSchema.safeParse(gatewayId);
   if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? 'Gateway identifier is invalid.');
   return activateGatewayRecord(session.user.id, parsed.data);
@@ -100,7 +114,7 @@ export async function getIndustrialMonitoringSummaryForOfficer() {
 }
 
 export async function configureIndustrialIntegrationPolicy(rawInput: unknown) {
-  const session = await requireRRAPermission('industrial.factory.review');
+  const session = await requireRRAPermission('industrial.integration.policy.manage');
   return setIndustrialIntegrationPolicy(session.user.id, rawInput);
 }
 
@@ -111,18 +125,108 @@ export async function evaluateIndustrialIntegrationCompliance(factoryId: string)
   return evaluateFactoryIntegrationCompliance(parsed.data);
 }
 
-export async function receiveIndustrialHeartbeat(gatewayId: string, clientSecret: string, rawInput: unknown) {
-  return recordGatewayHeartbeat(gatewayId, clientSecret, rawInput);
+export async function receiveIndustrialHeartbeat(gatewayId: string, clientSecret: string, rawInput: unknown, security?: GatewayRequestSecurity) {
+  return recordGatewayHeartbeat(gatewayId, clientSecret, rawInput, security);
 }
 
-export async function receiveIndustrialAcknowledgements(gatewayId: string, clientSecret: string, eventIds: string[]) {
-  return acknowledgeIndustrialEventsRecord(gatewayId, clientSecret, eventIds);
+export async function receiveIndustrialAcknowledgements(gatewayId: string, clientSecret: string, eventIds: string[], security?: GatewayRequestSecurity) {
+  return acknowledgeIndustrialEventsRecord(gatewayId, clientSecret, eventIds, security);
 }
 
-export async function receiveIndustrialDiagnostics(gatewayId: string, clientSecret: string) {
-  return getGatewayDiagnosticsRecord(gatewayId, clientSecret);
+export async function receiveIndustrialDiagnostics(gatewayId: string, clientSecret: string, security?: GatewayRequestSecurity) {
+  return getGatewayDiagnosticsRecord(gatewayId, clientSecret, security);
 }
 
-export async function receiveIndustrialEvent(rawInput: unknown, clientSecret: string) {
-  return ingestIndustrialEvent(rawInput, clientSecret);
+export async function receiveIndustrialEvent(rawInput: unknown, clientSecret: string, security?: GatewayRequestSecurity) {
+  return ingestIndustrialEvent(rawInput, clientSecret, security);
+}
+
+export async function requestIndustrialIntegration(rawInput: unknown) {
+  const session = await requireTraderSession(['manufacturer']);
+  return requestIndustrialIntegrationRecord(session.user.id, rawInput);
+}
+
+export async function getMyIndustrialIntegrationRequests() {
+  const session = await requireTraderSession(['manufacturer']);
+  return listManufacturerIntegrationRequests(session.user.id);
+}
+
+export async function getMyIndustrialIntegrations() {
+  const session = await requireTraderSession(['manufacturer']);
+  return listManufacturerIntegrations(session.user.id);
+}
+
+export async function getMyIndustrialIntegration(integrationId: string) {
+  const session = await requireTraderSession(['manufacturer']);
+  const parsed = idSchema.safeParse(integrationId);
+  if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? 'Integration identifier is invalid.');
+  return getManufacturerIntegration(session.user.id, parsed.data);
+}
+
+export async function claimMyIndustrialIntegrationCredentials(integrationId: string) {
+  const session = await requireTraderSession(['manufacturer']);
+  const parsed = idSchema.safeParse(integrationId);
+  if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? 'Integration identifier is invalid.');
+  return claimIndustrialIntegrationCredentialsRecord(session.user.id, parsed.data);
+}
+
+export async function getMyIndustrialIntegrationPackage(integrationId: string) {
+  const session = await requireTraderSession(['manufacturer']);
+  const parsed = idSchema.safeParse(integrationId);
+  if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? 'Integration identifier is invalid.');
+  return getIndustrialIntegrationPackage(session.user.id, parsed.data);
+}
+
+export async function rotateMyIndustrialIntegrationCredential(integrationId: string) {
+  const session = await requireTraderSession(['manufacturer']);
+  const parsed = idSchema.safeParse(integrationId);
+  if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? 'Integration identifier is invalid.');
+  return rotateIndustrialIntegrationCredentialRecord(session.user.id, parsed.data);
+}
+
+export async function getMyIndustrialIntegrationEvents(integrationId: string, limit?: number) {
+  const session = await requireTraderSession(['manufacturer']);
+  const parsed = idSchema.safeParse(integrationId);
+  if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? 'Integration identifier is invalid.');
+  return listIndustrialIntegrationEvents(session.user.id, parsed.data, limit);
+}
+
+export async function getIndustrialIntegrationRequestsForOfficer() {
+  await requireRRAPermission('industrial.integration.read');
+  return listIndustrialIntegrationRequestsForOfficer();
+}
+
+export async function reviewIndustrialIntegrationRequest(rawInput: unknown) {
+  const session = await requireRRAPermission('industrial.integration.review');
+  return reviewIndustrialIntegrationRequestRecord(session.user.id, rawInput);
+}
+
+export async function activateIndustrialIntegration(integrationId: string) {
+  const session = await requireRRAPermission('industrial.integration.activate');
+  const parsed = idSchema.safeParse(integrationId);
+  if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? 'Integration identifier is invalid.');
+  const integration = await getIndustrialIntegrationForOfficer(parsed.data);
+  if (!integration.gateway) throw new Error('Integration gateway not found.');
+  return activateGatewayRecord(session.user.id, integration.gateway.id);
+}
+
+export async function suspendIndustrialIntegration(rawInput: unknown) {
+  const session = await requireRRAPermission('industrial.integration.suspend');
+  return suspendIndustrialIntegrationRecord(session.user.id, rawInput);
+}
+
+export async function revokeIndustrialIntegration(rawInput: unknown) {
+  const session = await requireRRAPermission('industrial.integration.revoke');
+  return revokeIndustrialIntegrationRecord(session.user.id, rawInput);
+}
+
+export async function getIndustrialIntegrationAuditForOfficer(integrationId: string) {
+  await requireRRAPermission('industrial.integration.audit.read');
+  const parsed = idSchema.safeParse(integrationId);
+  if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? 'Integration identifier is invalid.');
+  return getIndustrialIntegrationAudit(parsed.data);
+}
+
+async function getIndustrialIntegrationForOfficer(integrationId: string) {
+  return getIndustrialIntegrationByIdForOfficer(integrationId);
 }

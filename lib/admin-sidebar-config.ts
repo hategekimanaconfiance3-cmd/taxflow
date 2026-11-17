@@ -213,6 +213,12 @@ export const ADMIN_SIDEBAR_GROUPS: AdminSidebarGroup[] = [
                 allowedRoles: ALL.filter((role) => hasRRAPermission(role, "industrial.factory.read")),
             },
             {
+                label: "Integration Approvals",
+                href: "/admin/industrial/integrations",
+                icon: ShieldAlert,
+                allowedRoles: ALL.filter((role) => hasRRAPermission(role, "industrial.integration.read")),
+            },
+            {
                 label: "Taxpayer Corrections",
                 href: "/admin/corrections",
                 icon: UserCheck,

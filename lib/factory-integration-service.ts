@@ -2,7 +2,7 @@ import 'server-only';
 
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import db from '@/db/drizzle';
-import { auditLog, factory, factoryProductionLine, factoryProductionStage } from '@/db/schema';
+import { auditLog, factory, factoryProductionLine, factoryProductionStage, industrialGateway, industrialGatewayCredential, industrialIntegration } from '@/db/schema';
 import type {
   FactoryRegistrationInput,
   FactoryReviewInput,
@@ -206,12 +206,23 @@ export async function reviewFactory(actorUserId: string, input: FactoryReviewInp
     const [updated] = await tx.update(factory).set({
       onboardingStatus: input.decision,
       verificationStatus: statusUpdate.verificationStatus,
+      integrationStatus: input.decision === 'suspended' ? 'non_compliant' : input.decision === 'rejected' ? 'not_started' : undefined,
       approvedAt: statusUpdate.approvedAt,
       reviewedByUserId: actorUserId,
       reviewedAt: new Date(),
       reviewNote: input.note,
     }).where(eq(factory.id, input.factoryId)).returning();
     if (!updated) throw new Error('Factory review could not be saved.');
+
+    if (input.decision === 'suspended' || input.decision === 'rejected') {
+      const integrations = await tx.select({ id: industrialIntegration.id }).from(industrialIntegration).where(eq(industrialIntegration.factoryId, input.factoryId)).for('update');
+      for (const integration of integrations) {
+        await tx.update(industrialGateway).set({ status: 'suspended' }).where(and(eq(industrialGateway.integrationId, integration.id), sql`${industrialGateway.status} <> 'revoked'`));
+        await tx.update(industrialGatewayCredential).set({ revokedAt: new Date() }).where(and(inArray(industrialGatewayCredential.gatewayId, tx.select({ id: industrialGateway.id }).from(industrialGateway).where(eq(industrialGateway.integrationId, integration.id))), sql`${industrialGatewayCredential.revokedAt} IS NULL`));
+        await tx.update(industrialIntegration).set({ status: 'suspended', suspendedAt: new Date(), requiresCredentialReissue: true }).where(eq(industrialIntegration.id, integration.id));
+        await tx.insert(auditLog).values({ userId: actorUserId, action: 'INDUSTRIAL_INTEGRATION_SUSPENDED_BY_FACTORY_REVIEW', targetType: 'industrial_integration', targetId: integration.id, metadata: JSON.stringify({ factoryDecision: input.decision, reason: input.note }) });
+      }
+    }
 
     await tx.insert(auditLog).values({
       userId: actorUserId,
