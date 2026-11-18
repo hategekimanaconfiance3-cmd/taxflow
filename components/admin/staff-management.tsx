@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { CircleCheck, CircleX, Loader2, Power, Shield, Settings2 } from "lucide-react";
 import { updateStaffRoles, toggleStaffStatus } from "@/lib/actions/admin-staff.action";
+import { removeStaffPriceJurisdiction, setStaffPriceJurisdiction } from "@/lib/actions/price-jurisdiction.action";
 import { ASSIGNABLE_STAFF_ROLE_OPTIONS, STAFF_ROLE_OPTIONS } from "@/lib/validation/staff.schema";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,6 +22,7 @@ export type StaffManagementMember = {
     clearanceLevel: string;
     roles: string[];
     isActive: boolean;
+    jurisdictions: { id: string; scopeType: string; province: string | null; district: string | null }[];
 };
 
 type Notice = { message: string; kind: "success" | "error" };
@@ -118,12 +120,16 @@ function StaffMemberRow({
                     <p className="text-muted-foreground mt-0.5 text-sm">{member.staffId} · {member.email}</p>
                     <p className="text-muted-foreground text-xs">{member.department || "No department assigned"}</p>
                     <div className="mt-2 flex flex-wrap gap-1">{member.roles.map((role) => <Badge key={role} variant="outline">{STAFF_ROLE_OPTIONS.find((option) => option.value === role)?.label ?? role}</Badge>)}</div>
+                    <div className="mt-2 flex flex-wrap items-center gap-1">
+                        {member.jurisdictions.map((scope) => <Badge key={scope.id} variant="secondary">{scope.scopeType}{scope.district ? ` · ${scope.district}` : scope.province ? ` · ${scope.province}` : ""}</Badge>)}
+                    </div>
                 </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-2 lg:justify-end">
                 <div className="flex items-center gap-2">
                     <StaffRolesDialog member={member} disabled={isPending} onNotice={onNotice} onChanged={onChanged} />
+                    <StaffJurisdictionDialog member={member} disabled={isPending} onNotice={onNotice} onChanged={onChanged} />
                 </div>
                 <Button variant={member.isActive ? "outline" : "default"} size="sm" className="gap-1.5" onClick={handleToggle} disabled={isPending}>
                     {isPending ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Power data-icon="inline-start" />}
@@ -133,6 +139,45 @@ function StaffMemberRow({
             </div>
         </div>
     );
+}
+
+function StaffJurisdictionDialog({ member, disabled, onNotice, onChanged }: { member: StaffManagementMember; disabled: boolean; onNotice: (message: string, kind: Notice["kind"]) => void; onChanged: () => void }) {
+    const [open, setOpen] = useState(false);
+    const [pending, startTransition] = useTransition();
+    const [scopeType, setScopeType] = useState("district");
+    const [province, setProvince] = useState("");
+    const [district, setDistrict] = useState("");
+    const [reason, setReason] = useState("");
+    function assign() {
+        startTransition(async () => {
+            const result = await setStaffPriceJurisdiction(member.id, { scopeType, province: scopeType === "national" ? undefined : province, district: scopeType === "district" ? district : undefined, reason });
+            if (!result.success) { onNotice(result.error, "error"); return; }
+            setOpen(false); setReason(""); onChanged(); onNotice("Price-monitoring jurisdiction assigned.", "success");
+        });
+    }
+    function remove(id: string) {
+        const removalReason = window.prompt("Reason for removing this jurisdiction:", "Assignment updated") ?? "";
+        if (removalReason.trim().length < 5) return;
+        startTransition(async () => {
+            const result = await removeStaffPriceJurisdiction(id, removalReason);
+            if (!result.success) { onNotice(result.error, "error"); return; }
+            onChanged(); onNotice("Price-monitoring jurisdiction removed.", "success");
+        });
+    }
+    return <Dialog open={open} onOpenChange={setOpen}>
+        <DialogTrigger asChild><Button variant="outline" size="sm" disabled={disabled}>Jurisdiction</Button></DialogTrigger>
+        <DialogContent>
+            <DialogHeader><DialogTitle>Price-monitoring jurisdiction</DialogTitle></DialogHeader>
+            <div className="space-y-3">
+                <div className="space-y-1"><label className="text-sm font-medium">Current assignments</label><div className="flex flex-wrap gap-2">{member.jurisdictions.length ? member.jurisdictions.map((scope) => <Badge key={scope.id} variant="secondary">{scope.scopeType}{scope.district ? ` · ${scope.district}` : scope.province ? ` · ${scope.province}` : ""}<button type="button" className="ml-1" onClick={() => remove(scope.id)} aria-label="Remove jurisdiction">×</button></Badge>) : <span className="text-sm text-muted-foreground">Unassigned</span>}</div></div>
+                <div className="space-y-1"><label className="text-sm font-medium">Add scope</label><select value={scopeType} onChange={(event) => setScopeType(event.target.value)} className="h-9 w-full rounded-md border bg-background px-3 text-sm"><option value="national">National</option><option value="province">Province</option><option value="district">District</option></select></div>
+                {scopeType !== "national" ? <input value={province} onChange={(event) => setProvince(event.target.value)} placeholder="Province" className="h-9 w-full rounded-md border bg-background px-3 text-sm" /> : null}
+                {scopeType === "district" ? <input value={district} onChange={(event) => setDistrict(event.target.value)} placeholder="District" className="h-9 w-full rounded-md border bg-background px-3 text-sm" /> : null}
+                <input value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Reason (minimum 5 characters)" className="h-9 w-full rounded-md border bg-background px-3 text-sm" />
+            </div>
+            <DialogFooter><Button type="button" disabled={pending || reason.trim().length < 5} onClick={assign}>{pending ? <Loader2 className="animate-spin" /> : "Assign scope"}</Button></DialogFooter>
+        </DialogContent>
+    </Dialog>;
 }
 
 function StaffRolesDialog({

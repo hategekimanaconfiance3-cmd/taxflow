@@ -911,6 +911,121 @@ export const notification = pgTable(
 );
 
 // ---------------------------------------------------------------------------
+// Merchant price monitoring
+// ---------------------------------------------------------------------------
+
+export const rraStaffJurisdiction = pgTable(
+  'rra_staff_jurisdiction',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    staffRecordId: text('staff_record_id').notNull().references(() => rraStaff.id, { onDelete: 'cascade' }),
+    scopeType: text('scope_type').notNull(), // national | province | district
+    province: text('province'),
+    district: text('district'),
+    assignedByUserId: text('assigned_by_user_id').notNull().references(() => user.id),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+      uniqueIndex('rra_staff_jurisdiction_scope_uniq').on(
+        table.staffRecordId,
+        table.scopeType,
+        sql`coalesce(${table.province}, '')`,
+        sql`coalesce(${table.district}, '')`,
+      ),
+    index('rra_staff_jurisdiction_lookup_idx').on(table.scopeType, table.province, table.district),
+    check('rra_staff_jurisdiction_scope_check', sql`${table.scopeType} IN ('national', 'province', 'district')`),
+    check('rra_staff_jurisdiction_values_check', sql`(
+      (${table.scopeType} = 'national' AND ${table.province} IS NULL AND ${table.district} IS NULL)
+      OR (${table.scopeType} = 'province' AND ${table.province} IS NOT NULL AND ${table.district} IS NULL)
+      OR (${table.scopeType} = 'district' AND ${table.province} IS NOT NULL AND ${table.district} IS NOT NULL)
+    )`),
+  ],
+);
+
+export const merchantPriceHistory = pgTable(
+  'merchant_price_history',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    businessId: text('business_id').notNull().references(() => user.id),
+    productId: text('product_id').notNull().references(() => product.id),
+    previousPrice: integer('previous_price'),
+    newPrice: integer('new_price').notNull(),
+    differenceRwf: integer('difference_rwf').notNull().default(0),
+    percentageChange: real('percentage_change').notNull().default(0),
+    currency: text('currency').notNull().default('RWF'),
+    unit: text('unit').notNull(),
+    pricingContext: text('pricing_context').notNull().default('selling'),
+    changeKind: text('change_kind').notNull(), // initial | merchant_update | authorized_correction | system_sync
+    sourceType: text('source_type').notNull(),
+      sourceId: text('source_id').notNull(),
+    actorUserId: text('actor_user_id').notNull().references(() => user.id),
+    reason: text('reason'),
+    changedAt: timestamp('changed_at').defaultNow().notNull(),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('merchant_price_history_source_uniq').on(table.sourceType, table.sourceId),
+    index('merchant_price_history_business_product_changed_idx').on(table.businessId, table.productId, table.changedAt),
+    index('merchant_price_history_changed_idx').on(table.changedAt),
+    check('merchant_price_history_previous_price_check', sql`${table.previousPrice} IS NULL OR ${table.previousPrice} > 0`),
+    check('merchant_price_history_new_price_check', sql`${table.newPrice} > 0`),
+    check('merchant_price_history_change_kind_check', sql`${table.changeKind} IN ('initial', 'merchant_update', 'authorized_correction', 'system_sync')`),
+  ],
+);
+
+export const priceChangeAlert = pgTable(
+  'price_change_alert',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    priceHistoryId: text('price_history_id').notNull().unique().references(() => merchantPriceHistory.id),
+    businessId: text('business_id').notNull().references(() => user.id),
+    productId: text('product_id').notNull().references(() => product.id),
+    merchantProvince: text('merchant_province'),
+    merchantDistrict: text('merchant_district'),
+    direction: text('direction').notNull(), // increase | decrease
+    previousPrice: integer('previous_price').notNull(),
+    newPrice: integer('new_price').notNull(),
+    differenceRwf: integer('difference_rwf').notNull(),
+    percentageChange: real('percentage_change').notNull(),
+    status: text('status').notNull().default('pending'), // pending | reviewed | escalated
+    assignmentStatus: text('assignment_status').notNull().default('unassigned'), // assigned | unassigned
+    assignedStaffId: text('assigned_staff_id').references(() => rraStaff.id, { onDelete: 'set null' }),
+    reviewNote: text('review_note'),
+    reviewedByUserId: text('reviewed_by_user_id').references(() => user.id, { onDelete: 'set null' }),
+    reviewedAt: timestamp('reviewed_at'),
+    escalatedAt: timestamp('escalated_at'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().$onUpdate(() => new Date()).notNull(),
+  },
+  (table) => [
+    index('price_change_alert_status_created_idx').on(table.status, table.createdAt),
+    index('price_change_alert_assignment_idx').on(table.assignmentStatus, table.assignedStaffId),
+    index('price_change_alert_business_created_idx').on(table.businessId, table.createdAt),
+    index('price_change_alert_product_created_idx').on(table.productId, table.createdAt),
+    check('price_change_alert_direction_check', sql`${table.direction} IN ('increase', 'decrease')`),
+    check('price_change_alert_status_check', sql`${table.status} IN ('pending', 'reviewed', 'escalated')`),
+    check('price_change_alert_assignment_check', sql`${table.assignmentStatus} IN ('assigned', 'unassigned')`),
+  ],
+);
+
+export const priceChangeAlertRecipient = pgTable(
+  'price_change_alert_recipient',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    alertId: text('alert_id').notNull().references(() => priceChangeAlert.id, { onDelete: 'cascade' }),
+    recipientUserId: text('recipient_user_id').notNull().references(() => user.id),
+    scopeType: text('scope_type').notNull(),
+    notificationId: text('notification_id').notNull().references(() => notification.id),
+    notifiedAt: timestamp('notified_at').defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('price_change_alert_recipient_uniq').on(table.alertId, table.recipientUserId),
+    uniqueIndex('price_change_alert_notification_uniq').on(table.notificationId),
+    index('price_change_alert_recipient_user_idx').on(table.recipientUserId, table.notifiedAt),
+  ],
+);
+
+// ---------------------------------------------------------------------------
 // Import Declarations — for imported goods management (§9)
 // ---------------------------------------------------------------------------
 

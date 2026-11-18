@@ -302,6 +302,13 @@
       "when": 1794700000009,
       "tag": "0042_industrial_integration_provisioning",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1794700000010,
+      "tag": "0043_price_change_monitoring",
+      "breakpoints": true
     }
   ]
 }

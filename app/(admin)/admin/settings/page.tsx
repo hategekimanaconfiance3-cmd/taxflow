@@ -1,7 +1,7 @@
 import { hasRRARole, requireRRASession } from '@/lib/auth-guard';
 import { asc, eq } from 'drizzle-orm';
 import db from '@/db/drizzle';
-import { rraStaff, rraStaffRole, user } from '@/db/schema';
+import { rraStaff, rraStaffJurisdiction, rraStaffRole, user } from '@/db/schema';
 import { getSystemConfig, getActiveSellThroughThreshold } from '@/lib/actions/system-config.action';
 import { SystemConfigEditor } from '@/components/admin/system-config-editor';
 import { StaffManagement, type StaffManagementMember } from '@/components/admin/staff-management';
@@ -18,7 +18,7 @@ export default async function AdminSettingsPage() {
   let staffMembers: StaffManagementMember[] = [];
   const isSuperAdmin = hasRRARole(staff, 'super_admin');
   if (isSuperAdmin) {
-    const [members, roles] = await Promise.all([db
+    const [members, roles, jurisdictions] = await Promise.all([db
       .select({
         id: rraStaff.id,
         staffId: rraStaff.staffId,
@@ -32,12 +32,20 @@ export default async function AdminSettingsPage() {
       .innerJoin(user, eq(rraStaff.userId, user.id))
       .orderBy(asc(rraStaff.staffId)), db
       .select({ staffRecordId: rraStaffRole.staffRecordId, role: rraStaffRole.role })
-      .from(rraStaffRole)]);
+      .from(rraStaffRole), db
+      .select({ id: rraStaffJurisdiction.id, staffRecordId: rraStaffJurisdiction.staffRecordId, scopeType: rraStaffJurisdiction.scopeType, province: rraStaffJurisdiction.province, district: rraStaffJurisdiction.district })
+      .from(rraStaffJurisdiction)]);
     const rolesByStaff = new Map<string, string[]>();
+    const jurisdictionsByStaff = new Map<string, typeof jurisdictions>();
     for (const assignment of roles) {
       const assigned = rolesByStaff.get(assignment.staffRecordId) ?? [];
       assigned.push(assignment.role);
       rolesByStaff.set(assignment.staffRecordId, assigned);
+    }
+    for (const assignment of jurisdictions) {
+      const assigned = jurisdictionsByStaff.get(assignment.staffRecordId) ?? [];
+      assigned.push(assignment);
+      jurisdictionsByStaff.set(assignment.staffRecordId, assigned);
     }
     staffMembers = members.map((member) => ({
       ...member,
@@ -47,6 +55,7 @@ export default async function AdminSettingsPage() {
           ? [member.clearanceLevel, ...assigned.filter((role) => role !== member.clearanceLevel)]
           : assigned;
       })(),
+      jurisdictions: jurisdictionsByStaff.get(member.id) ?? [],
     }));
   }
 

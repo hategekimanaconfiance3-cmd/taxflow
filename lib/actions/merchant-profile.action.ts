@@ -22,6 +22,7 @@ import { requireRRAPermission } from "@/lib/auth-guard";
 import { logAudit } from "@/lib/audit";
 import { hasRRAPermission, type RRARole } from "@/lib/rra-rbac";
 import { randomUUID } from "node:crypto";
+import { listMerchantPriceHistory } from "@/lib/price-monitoring-service";
 
 // ---------------------------------------------------------------------------
 // Permission helpers
@@ -55,6 +56,7 @@ export interface MerchantPermissions {
   canManageCases: boolean;
   canViewAuditTrail: boolean;
   canManageSupport: boolean;
+  canViewPriceHistory: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -188,6 +190,20 @@ export type MerchantAuditEntry = {
   createdAt: string;
 };
 
+export type MerchantPriceHistoryEntry = {
+  id: string;
+  productId: string;
+  productName: string;
+  previousPrice: number | null;
+  newPrice: number;
+  differenceRwf: number;
+  percentageChange: number;
+  unit: string;
+  changeKind: string;
+  reason: string | null;
+  changedAt: string;
+};
+
 export interface MerchantProfileData {
   profile: MerchantProfile;
   permissions: MerchantPermissions;
@@ -204,6 +220,7 @@ export interface MerchantProfileData {
   cases?: MerchantCase[];
   supportTickets?: MerchantSupportTicket[];
   auditHistory?: MerchantAuditEntry[];
+  priceHistory?: MerchantPriceHistoryEntry[];
 }
 
 // ---------------------------------------------------------------------------
@@ -286,6 +303,9 @@ export async function getMerchantProfileById(
     canManageCases: roleHasPermission(staffRoles, "investigation.case.manage"),
     canViewAuditTrail: roleHasPermission(staffRoles, "audit.trail.read"),
     canManageSupport: roleHasPermission(staffRoles, "support.manage"),
+    canViewPriceHistory:
+      staffRoles.includes("super_admin") ||
+      roleHasPermission(staffRoles, "price.history.read"),
   };
 
   const canSeeContact =
@@ -307,6 +327,10 @@ export async function getMerchantProfileById(
   };
 
   const result: MerchantProfileData = { profile, permissions: perm, staffRoles };
+
+  if (perm.canViewPriceHistory) {
+    result.priceHistory = await listMerchantPriceHistory(staff, trader.id);
+  }
 
   // ── Tax & VAT ──
   if (perm.canViewTax) {

@@ -64,6 +64,7 @@ import type {
   MerchantCase,
   MerchantSupportTicket,
   MerchantAuditEntry,
+  MerchantPriceHistoryEntry,
 } from "@/lib/actions/merchant-profile.action";
 
 // ---------------------------------------------------------------------------
@@ -859,6 +860,31 @@ function StockTab({
   );
 }
 
+function PriceHistoryTab({ history }: { history?: MerchantPriceHistoryEntry[] }) {
+  if (!history?.length) return <EmptyState message="No price changes recorded for this merchant." />;
+  return (
+    <Card>
+      <CardHeader className="pb-3"><CardTitle className="text-sm">Selling price history ({history.length})</CardTitle></CardHeader>
+      <CardContent className="p-0">
+        <Table>
+          <TableHeader><TableRow><TableHead>Product</TableHead><TableHead>Previous</TableHead><TableHead>New</TableHead><TableHead>Change</TableHead><TableHead>Type</TableHead><TableHead>Reason</TableHead><TableHead>Date</TableHead></TableRow></TableHeader>
+          <TableBody>{history.map((row) => (
+            <TableRow key={row.id}>
+              <TableCell className="font-medium text-sm">{row.productName}</TableCell>
+              <TableCell className="font-mono text-xs">{row.previousPrice == null ? "First price" : money(row.previousPrice)}</TableCell>
+              <TableCell className="font-mono text-xs">{money(row.newPrice)}</TableCell>
+              <TableCell className={`font-mono text-xs ${row.differenceRwf >= 0 ? "text-amber-700" : "text-blue-700"}`}>{row.differenceRwf > 0 ? "+" : ""}{money(row.differenceRwf)} ({row.percentageChange > 0 ? "+" : ""}{row.percentageChange.toFixed(2)}%)</TableCell>
+              <TableCell><StatusBadge status={row.changeKind} /></TableCell>
+              <TableCell className="max-w-[220px] truncate text-xs text-muted-foreground">{row.reason ?? "—"}</TableCell>
+              <TableCell className="whitespace-nowrap text-xs text-muted-foreground">{fmtDateTime(row.changedAt)}</TableCell>
+            </TableRow>
+          ))}</TableBody>
+        </Table>
+      </CardContent>
+    </Card>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Production tab
 // ---------------------------------------------------------------------------
@@ -1189,12 +1215,13 @@ function AuditTrailTab({ auditHistory }: { auditHistory?: MerchantAuditEntry[] }
 export function MerchantProfileTabs({ data }: { data: MerchantProfileData }) {
   const { profile, permissions, financial, vatRecords, transactions, payments,
     stock, stockMovements, production, imports, disputes, cases,
-    supportTickets, auditHistory } = data;
+    supportTickets, auditHistory, priceHistory } = data;
 
   const [editOpen, setEditOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
 
   const hasStock = permissions.canViewStock && (stock?.length || stockMovements?.length || production?.length);
+  const hasPriceHistory = permissions.canViewPriceHistory;
   const hasTax = permissions.canViewTax && (financial || vatRecords?.length);
   const hasImports = permissions.canViewImports && imports?.length;
   const hasEnforcement =
@@ -1240,6 +1267,12 @@ export function MerchantProfileTabs({ data }: { data: MerchantProfileData }) {
             <TabsTrigger value="stock" className="min-h-9 flex-none">
               <Package className="h-3.5 w-3.5 mr-1.5" />
               Stock
+            </TabsTrigger>
+          )}
+          {hasPriceHistory && (
+            <TabsTrigger value="price-history" className="min-h-9 flex-none">
+              <TrendingUp className="h-3.5 w-3.5 mr-1.5" />
+              Price History
             </TabsTrigger>
           )}
           {permissions.canViewStock && production?.length ? (
@@ -1304,6 +1337,12 @@ export function MerchantProfileTabs({ data }: { data: MerchantProfileData }) {
         {permissions.canViewStock && (
           <TabsContent value="stock">
             <StockTab stock={stock} stockMovements={stockMovements} />
+          </TabsContent>
+        )}
+
+        {hasPriceHistory && (
+          <TabsContent value="price-history">
+            <PriceHistoryTab history={priceHistory} />
           </TabsContent>
         )}
 

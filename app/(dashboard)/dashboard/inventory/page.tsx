@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/table';
 import { Package } from 'lucide-react';
 import { formatRWF } from '@/components/dashboard/stat-card/stat-card';
+import { InventoryPriceEditor } from '@/components/dashboard/inventory/inventory-price-editor';
 
 export default async function InventoryPage() {
   await requireTraderSession();
@@ -66,13 +67,14 @@ export default async function InventoryPage() {
                 <TableHead>Unit</TableHead>
                 <TableHead className="text-right">Quantity</TableHead>
                 <TableHead className="text-right">Last Price</TableHead>
+                <TableHead className="text-right">Selling Price</TableHead>
                 <TableHead>Last Updated</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {inventory.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center py-8 text-muted-foreground text-sm">
+                  <TableCell colSpan={6} className="text-center py-8 text-muted-foreground text-sm">
                     No inventory recorded yet. Add stock via Production or accept an incoming purchase.
                   </TableCell>
                 </TableRow>
@@ -86,6 +88,9 @@ export default async function InventoryPage() {
                   </TableCell>
                   <TableCell className="text-right font-mono text-xs text-muted-foreground">
                     {item.latestUnitPrice ? formatRWF(item.latestUnitPrice) : '—'}
+                  </TableCell>
+                  <TableCell className="text-right font-mono text-xs">
+                    <InventoryPriceEditor productId={item.productId} currentPrice={item.unitPrice} />
                   </TableCell>
                   <TableCell className="text-xs text-muted-foreground">
                     {item.updatedAt ? new Date(item.updatedAt).toLocaleDateString() : '—'}

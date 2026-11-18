@@ -6,6 +6,7 @@ import {
   auditLog,
   b2bOrderAcceptance,
   importDeclaration,
+  merchantPriceHistory,
   productionBatch,
   productionBatchMaterialUsage,
   productionMaterial,
@@ -27,6 +28,7 @@ import {
   user,
 } from '@/db/schema';
 import { createNotification } from '@/lib/notifications';
+import { calculatePercentageChange } from '@/lib/price-monitoring-domain';
 import {
   decimalToMicros,
   microsToDecimal,
@@ -970,6 +972,9 @@ export async function reviewProductionBatch(actorUserId: string, input: BatchRev
     }
 
     const goodOutputQuantity = Number(microsToDecimal(goodOutputMicros));
+    const [priceBeforeOutput] = await tx.select({ price: stock.price }).from(stock)
+      .where(and(eq(stock.businessId, batch.manufacturerId), eq(stock.productId, batch.productId)))
+      .for('update').limit(1);
     const updatedStock = goodOutputQuantity > 0 ? (await tx.insert(stock).values({ businessId: batch.manufacturerId, productId: batch.productId, quantity: goodOutputQuantity, source: 'manufactured', price: batch.unitPrice })
       .onConflictDoUpdate({ target: [stock.businessId, stock.productId], set: { quantity: sql`${stock.quantity} + ${goodOutputQuantity}`, price: batch.unitPrice, source: 'manufactured', updatedAt: now } })
       .returning({ quantity: stock.quantity }))[0] : undefined;
@@ -977,6 +982,26 @@ export async function reviewProductionBatch(actorUserId: string, input: BatchRev
       .where(and(eq(stock.businessId, batch.manufacturerId), eq(stock.productId, batch.productId))).for('update').limit(1);
     const quantityAfter = updatedStock?.quantity ?? previousStock[0]?.quantity ?? 0;
     const quantityBefore = quantityAfter - goodOutputQuantity;
+    if (goodOutputQuantity > 0 && priceBeforeOutput?.price !== batch.unitPrice && batch.unitPrice > 0) {
+      const [outputProduct] = await tx.select({ unit: product.unit }).from(product).where(eq(product.id, batch.productId)).limit(1);
+      const percentageChange = priceBeforeOutput?.price && priceBeforeOutput.price > 0
+        ? calculatePercentageChange(priceBeforeOutput.price, batch.unitPrice)
+        : 0;
+      await tx.insert(merchantPriceHistory).values({
+        businessId: batch.manufacturerId,
+        productId: batch.productId,
+        previousPrice: priceBeforeOutput?.price ?? null,
+        newPrice: batch.unitPrice,
+        differenceRwf: priceBeforeOutput?.price == null ? 0 : batch.unitPrice - priceBeforeOutput.price,
+        percentageChange,
+        unit: outputProduct?.unit ?? 'unit',
+        changeKind: 'system_sync',
+        sourceType: 'production_batch_sync',
+        sourceId: batch.id,
+        actorUserId,
+        reason: `Verified production batch ${batch.batchReference} synchronized the catalog price`,
+      });
+    }
     if (goodOutputQuantity > 0) {
       if (!updatedStock) throw new Error('Finished-product inventory update returned no row.');
       await tx.insert(stockMovement).values({ businessId: batch.manufacturerId, productId: batch.productId, quantityDelta: goodOutputQuantity, quantityBefore, quantityAfter, movementType: 'production', sourceType: 'production_batch', sourceId: batch.id, actorUserId, reason: 'Independently verified good output released from held production batch' });

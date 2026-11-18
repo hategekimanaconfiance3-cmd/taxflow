@@ -1,11 +1,13 @@
 "use server";
 
 import { eq } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 import db from "@/db/drizzle";
-import { stock, stockMovement, product, user, auditLog } from "@/db/schema";
+import { merchantPriceHistory, stock, stockMovement, product, user, auditLog } from "@/db/schema";
 import { requireRRASession } from "@/lib/auth-guard";
 import { logAudit } from "@/lib/audit";
 import { desc } from "drizzle-orm";
+import { calculatePercentageChange } from "@/lib/price-monitoring-domain";
 
 // ---------------------------------------------------------------------------
 // Edit a stock record (correction officer + super admin only)
@@ -39,6 +41,7 @@ export async function editStockRecord(
             businessId: stock.businessId,
             productId: stock.productId,
             productName: product.name,
+            productUnit: product.unit,
             traderTin: user.tinNumber,
             traderName: user.businessName,
         })
@@ -54,8 +57,15 @@ export async function editStockRecord(
     const updates: Record<string, unknown> = {};
     if (data.quantity !== undefined && data.quantity !== current.quantity)
         updates.quantity = data.quantity;
-    if (data.price !== undefined && data.price !== current.price)
+    if (data.price === null && current.price !== null) {
+        throw new Error("A selling price correction must be a positive RWF price; use a valid price instead of clearing it.");
+    }
+    if (data.price !== undefined && data.price !== current.price) {
+        if (data.price !== null && (!Number.isSafeInteger(data.price) || data.price <= 0)) {
+            throw new Error("Selling price must be a positive whole-number RWF amount.");
+        }
         updates.price = data.price;
+    }
     if (data.source !== undefined && data.source !== current.source)
         updates.source = data.source;
 
@@ -65,7 +75,7 @@ export async function editStockRecord(
 
     // Quantity corrections, their ledger event, and their audit record commit together.
     await db.transaction(async (tx) => {
-      const [locked] = await tx.select({ quantity: stock.quantity }).from(stock).where(eq(stock.id, stockId)).for("update").limit(1);
+      const [locked] = await tx.select({ quantity: stock.quantity, price: stock.price }).from(stock).where(eq(stock.id, stockId)).for("update").limit(1);
       if (!locked) throw new Error("Stock record not found.");
       const nextQuantity = typeof updates.quantity === "number" ? updates.quantity : locked.quantity;
       if (nextQuantity !== locked.quantity) {
@@ -73,6 +83,23 @@ export async function editStockRecord(
           quantityDelta: nextQuantity - locked.quantity, quantityBefore: locked.quantity, quantityAfter: nextQuantity,
           movementType: "correction", sourceType: "stock_correction", sourceId: stockId,
           actorUserId: session.user.id, reason: reason.trim() });
+      }
+      if (typeof updates.price === "number" && updates.price !== locked.price) {
+        const percentageChange = locked.price === null ? 0 : calculatePercentageChange(locked.price, updates.price);
+        await tx.insert(merchantPriceHistory).values({
+          businessId: current.businessId,
+          productId: current.productId,
+          previousPrice: locked.price,
+          newPrice: updates.price,
+          differenceRwf: locked.price === null ? 0 : updates.price - locked.price,
+          percentageChange,
+          unit: current.productUnit,
+          changeKind: "authorized_correction",
+          sourceType: "admin_stock_correction",
+          sourceId: randomUUID(),
+          actorUserId: session.user.id,
+          reason: reason.trim(),
+        });
       }
       await tx.update(stock).set(updates).where(eq(stock.id, stockId));
       await logAudit({
