@@ -37,8 +37,8 @@ export default async function FactoriesPage() {
   const factories = factoriesRes.success ? factoriesRes.data : [];
   const gateways = gatewaysRes.success ? gatewaysRes.data : [];
 
-  const pendingFactories = factories.filter(f => f.status === 'pending').length;
-  const approvedFactories = factories.filter(f => f.status === 'approved').length;
+  const pendingFactories = factories.filter(f => f.onboardingStatus === 'pending').length;
+  const approvedFactories = factories.filter(f => f.onboardingStatus === 'approved').length;
   const activeGateways = gateways.filter(g => g.status === 'active').length;
 
   return (
@@ -127,17 +127,15 @@ export default async function FactoriesPage() {
                   <TableRow key={f.id}>
                     <TableCell>
                       <div className="flex items-center gap-2">
-                        <StatusIcon status={f.status} />
+                        <StatusIcon status={f.onboardingStatus} />
                         <span className="font-medium text-sm">{f.name}</span>
                       </div>
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
-                      {f.location}
-                      {f.district ? `, ${f.district}` : ''}
-                      {f.province ? `, ${f.province}` : ''}
+                      {f.address}
                     </TableCell>
-                    <TableCell className="text-xs font-mono">{f.registrationNumber ?? '—'}</TableCell>
-                    <TableCell>{statusBadge(f.status)}</TableCell>
+                    <TableCell className="text-xs font-mono">{f.registrationReference ?? '—'}</TableCell>
+                    <TableCell>{statusBadge(f.onboardingStatus)}</TableCell>
                     <TableCell className="text-xs text-muted-foreground">
                       {new Date(f.createdAt).toLocaleDateString()}
                     </TableCell>
@@ -162,7 +160,7 @@ export default async function FactoriesPage() {
                 <TableRow>
                   <TableHead>Gateway Name</TableHead>
                   <TableHead>Factory</TableHead>
-                  <TableHead>Protocol</TableHead>
+                  <TableHead>Gateway Code</TableHead>
                   <TableHead>Gateway ID</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Last Seen</TableHead>
@@ -173,11 +171,11 @@ export default async function FactoriesPage() {
                   <TableRow key={g.id}>
                     <TableCell className="font-medium text-sm">{g.name}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">{g.factoryName ?? '—'}</TableCell>
-                    <TableCell className="text-xs uppercase font-mono">{g.protocol}</TableCell>
-                    <TableCell className="text-xs font-mono text-muted-foreground">{g.gatewayId}</TableCell>
+                    <TableCell className="text-xs uppercase font-mono">{g.gatewayCode}</TableCell>
+                    <TableCell className="text-xs font-mono text-muted-foreground">{g.gatewayCode}</TableCell>
                     <TableCell>{statusBadge(g.status)}</TableCell>
                     <TableCell className="text-xs text-muted-foreground">
-                      {g.lastSeenAt ? new Date(g.lastSeenAt).toLocaleString() : 'Never connected'}
+                      {g.lastHeartbeatAt ? new Date(g.lastHeartbeatAt).toLocaleString() : 'Never connected'}
                     </TableCell>
                   </TableRow>
                 ))}

@@ -25,27 +25,25 @@ function InlineMessage({ msg }: { msg: Msg | null }) {
 export function RegisterFactoryDialog({ onSuccess }: { onSuccess?: () => void }) {
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
-  const [form, setForm] = useState({ name: '', location: '', province: '', district: '', registrationNumber: '', notes: '' });
+  const [form, setForm] = useState({ name: '', address: '', industryType: '', registrationReference: '' });
   const [msg, setMsg] = useState<Msg | null>(null);
 
   function handleSubmit() {
-    if (!form.name.trim() || !form.location.trim()) {
-      setMsg({ type: 'error', text: 'Factory name and location are required' });
+    if (!form.name.trim() || !form.address.trim()) {
+      setMsg({ type: 'error', text: 'Factory name and address are required' });
       return;
     }
     setMsg(null);
     startTransition(async () => {
       const result = await registerFactory({
         name: form.name.trim(),
-        location: form.location.trim(),
-        province: form.province.trim() || undefined,
-        district: form.district.trim() || undefined,
-        registrationNumber: form.registrationNumber.trim() || undefined,
-        notes: form.notes.trim() || undefined,
+        address: form.address.trim(),
+        industryType: form.industryType.trim() || undefined,
+        registrationReference: form.registrationReference.trim() || undefined,
       });
       if (result.success) {
         setMsg({ type: 'success', text: 'Factory registered — pending admin approval' });
-        setForm({ name: '', location: '', province: '', district: '', registrationNumber: '', notes: '' });
+        setForm({ name: '', address: '', industryType: '', registrationReference: '' });
         onSuccess?.();
         setTimeout(() => { setOpen(false); setMsg(null); }, 1500);
       } else {
@@ -66,26 +64,16 @@ export function RegisterFactoryDialog({ onSuccess }: { onSuccess?: () => void })
               <Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Kigali Production Plant A" />
             </div>
             <div className="space-y-1">
-              <Label>Location / Address *</Label>
-              <Input value={form.location} onChange={e => setForm(f => ({ ...f, location: e.target.value }))} placeholder="KG 123 St, Kigali" />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <Label>Province</Label>
-                <Input value={form.province} onChange={e => setForm(f => ({ ...f, province: e.target.value }))} placeholder="Kigali" />
-              </div>
-              <div className="space-y-1">
-                <Label>District</Label>
-                <Input value={form.district} onChange={e => setForm(f => ({ ...f, district: e.target.value }))} placeholder="Gasabo" />
-              </div>
+              <Label>Address *</Label>
+              <Input value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} placeholder="KG 123 St, Kigali" />
             </div>
             <div className="space-y-1">
-              <Label>Registration Number</Label>
-              <Input value={form.registrationNumber} onChange={e => setForm(f => ({ ...f, registrationNumber: e.target.value }))} placeholder="Optional factory reg. number" />
+              <Label>Industry Type</Label>
+              <Input value={form.industryType} onChange={e => setForm(f => ({ ...f, industryType: e.target.value }))} placeholder="e.g. beverage, food, textile" />
             </div>
             <div className="space-y-1">
-              <Label>Notes</Label>
-              <Input value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Optional notes" />
+              <Label>Registration Reference</Label>
+              <Input value={form.registrationReference} onChange={e => setForm(f => ({ ...f, registrationReference: e.target.value }))} placeholder="Optional factory reg. reference" />
             </div>
             <InlineMessage msg={msg} />
           </div>
@@ -102,14 +90,14 @@ export function RegisterFactoryDialog({ onSuccess }: { onSuccess?: () => void })
 // ---------------------------------------------------------------------------
 // Register Gateway Dialog
 // ---------------------------------------------------------------------------
-export function RegisterGatewayDialog({ factories }: { factories: Array<{ id: string; name: string; status: string }> }) {
+export function RegisterGatewayDialog({ factories }: { factories: Array<{ id: string; name: string; onboardingStatus: string }> }) {
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
-  const [form, setForm] = useState({ factoryId: '', name: '', protocol: 'https' as 'https' | 'mqtt' | 'opc_ua' });
+  const [form, setForm] = useState({ factoryId: '', name: '', gatewayCode: '' });
   const [apiKey, setApiKey] = useState<string | null>(null);
   const [msg, setMsg] = useState<Msg | null>(null);
 
-  const approvedFactories = factories.filter(f => f.status === 'approved');
+  const approvedFactories = factories.filter(f => f.onboardingStatus === 'approved');
 
   function handleSubmit() {
     if (!form.factoryId || !form.name.trim()) {
@@ -118,9 +106,9 @@ export function RegisterGatewayDialog({ factories }: { factories: Array<{ id: st
     }
     setMsg(null);
     startTransition(async () => {
-      const result = await registerGateway({ factoryId: form.factoryId, name: form.name.trim(), protocol: form.protocol });
+      const result = await registerGateway({ factoryId: form.factoryId, name: form.name.trim(), gatewayCode: form.gatewayCode.trim() || `GW-${Date.now().toString(36).toUpperCase()}` });
       if (result.success) {
-        setApiKey(result.data.apiKey);
+        setMsg({ type: 'success', text: 'Gateway registered. Pending admin approval.' }); setTimeout(() => { setOpen(false); setMsg(null); }, 2000);
       } else {
         setMsg({ type: 'error', text: result.error ?? 'Failed to register gateway' });
       }
@@ -131,7 +119,7 @@ export function RegisterGatewayDialog({ factories }: { factories: Array<{ id: st
     setOpen(false);
     setApiKey(null);
     setMsg(null);
-    setForm({ factoryId: '', name: '', protocol: 'https' });
+    setForm({ factoryId: '', name: '', gatewayCode: '' });
   }
 
   return (
@@ -174,15 +162,7 @@ export function RegisterGatewayDialog({ factories }: { factories: Array<{ id: st
                   <Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Line A Gateway" />
                 </div>
                 <div className="space-y-1">
-                  <Label>Protocol</Label>
-                  <Select value={form.protocol} onValueChange={v => setForm(f => ({ ...f, protocol: v as typeof form.protocol }))}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="https">HTTPS</SelectItem>
-                      <SelectItem value="mqtt">MQTT</SelectItem>
-                      <SelectItem value="opc_ua">OPC-UA</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <Label>Gateway Code (optional)</Label><Input value={form.gatewayCode} onChange={e => setForm(f => ({ ...f, gatewayCode: e.target.value }))} placeholder="auto-generated if blank" />
                 </div>
                 <InlineMessage msg={msg} />
               </div>
@@ -201,13 +181,13 @@ export function RegisterGatewayDialog({ factories }: { factories: Array<{ id: st
 // ---------------------------------------------------------------------------
 // Register Production Line Dialog
 // ---------------------------------------------------------------------------
-export function RegisterProductionLineDialog({ factories }: { factories: Array<{ id: string; name: string; status: string }> }) {
+export function RegisterProductionLineDialog({ factories }: { factories: Array<{ id: string; name: string; onboardingStatus: string }> }) {
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
-  const [form, setForm] = useState({ factoryId: '', name: '', lineCode: '', description: '', capacity: '', capacityUnit: '' });
+  const [form, setForm] = useState({ factoryId: '', name: '', lineCode: '', productionCapacity: '', productionCapacityUnit: '', productionCategory: '' });
   const [msg, setMsg] = useState<Msg | null>(null);
 
-  const approvedFactories = factories.filter(f => f.status === 'approved');
+  const approvedFactories = factories.filter(f => f.onboardingStatus === 'approved');
 
   function handleSubmit() {
     if (!form.factoryId || !form.name.trim() || !form.lineCode.trim()) {
@@ -224,13 +204,13 @@ export function RegisterProductionLineDialog({ factories }: { factories: Array<{
         factoryId: form.factoryId,
         name: form.name.trim(),
         lineCode: form.lineCode.trim(),
-        description: form.description.trim() || undefined,
-        capacity: form.capacity ? parseFloat(form.capacity) : undefined,
-        capacityUnit: form.capacityUnit.trim() || undefined,
+        productionCategory: form.productionCategory.trim() || undefined,
+        productionCapacity: form.productionCapacity ? parseFloat(form.productionCapacity) : undefined,
+        productionCapacityUnit: form.productionCapacityUnit.trim() || undefined,
       });
       if (result.success) {
         setMsg({ type: 'success', text: 'Production line registered' });
-        setForm({ factoryId: '', name: '', lineCode: '', description: '', capacity: '', capacityUnit: '' });
+        setForm({ factoryId: '', name: '', lineCode: '', productionCapacity: '', productionCapacityUnit: '', productionCategory: '' });
         setTimeout(() => { setOpen(false); setMsg(null); }, 1500);
       } else {
         setMsg({ type: 'error', text: result.error ?? 'Failed to register production line' });
@@ -267,11 +247,11 @@ export function RegisterProductionLineDialog({ factories }: { factories: Array<{
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
                 <Label>Capacity</Label>
-                <Input type="number" value={form.capacity} onChange={e => setForm(f => ({ ...f, capacity: e.target.value }))} placeholder="e.g. 1000" />
+                <Input type="number" value={form.productionCapacity} onChange={e => setForm(f => ({ ...f, productionCapacity: e.target.value }))} placeholder="e.g. 1000" />
               </div>
               <div className="space-y-1">
                 <Label>Capacity Unit</Label>
-                <Input value={form.capacityUnit} onChange={e => setForm(f => ({ ...f, capacityUnit: e.target.value }))} placeholder="units/hr" />
+                <Input value={form.productionCapacityUnit} onChange={e => setForm(f => ({ ...f, productionCapacityUnit: e.target.value }))} placeholder="units/hr" />
               </div>
             </div>
             <InlineMessage msg={msg} />

@@ -4,11 +4,13 @@
 // IMPORTANT: All jobs must be fully self-contained and never throw to the
 //            top-level (the caller). Errors are logged and swallowed.
 
-import { eq, and, gte, sql, inArray } from 'drizzle-orm';
+import { createHash } from 'node:crypto';
+import { eq, and, gte, sql, inArray, lt, isNull, or, not } from 'drizzle-orm';
 import db from '@/db/drizzle';
 import {
   user, transaction, productionBatch, stock, stockAdjustment,
   aiFinding, importDeclaration, stockMovement,
+  industrialGateway, industrialAlert, factory,
 } from '@/db/schema';
 import { saveAndRouteFinding } from '@/lib/ai/manufacturer-signals';
 
@@ -271,6 +273,97 @@ async function runDailyScan(): Promise<boolean> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Job 5 — Gateway Health Scan (every 5 minutes via Vercel cron)
+// Detects stale gateways (no heartbeat > 1h), updates factory connectivity,
+// raises deduplicated offline alerts, resolves them on recovery.
+// Note: gateway status CHECK only allows pending/active/suspended/revoked —
+// we detect "offline" via lastHeartbeatAt staleness without changing status.
+// ---------------------------------------------------------------------------
+
+async function runGatewayHealthScan(): Promise<boolean> {
+  try {
+    const now = new Date();
+    const offlineCutoff = new Date(now.getTime() - 60 * 60 * 1000);  // 1 hour
+    const onlineCutoff  = new Date(now.getTime() - 10 * 60 * 1000);  // 10 min
+
+    // Find active gateways with stale / absent heartbeat
+    const staleGateways = await db
+      .select({ id: industrialGateway.id, factoryId: industrialGateway.factoryId, manufacturerId: industrialGateway.manufacturerId })
+      .from(industrialGateway)
+      .where(and(
+        eq(industrialGateway.status, 'active'),
+        or(isNull(industrialGateway.lastHeartbeatAt), lt(industrialGateway.lastHeartbeatAt, offlineCutoff)),
+      ));
+
+    // Find previously-stale active gateways that have recovered
+    const recoveredGateways = await db
+      .select({ id: industrialGateway.id, factoryId: industrialGateway.factoryId })
+      .from(industrialGateway)
+      .where(and(
+        eq(industrialGateway.status, 'active'),
+        gte(industrialGateway.lastHeartbeatAt, onlineCutoff),
+      ));
+
+    // Collect all affected factory IDs
+    const affectedFactoryIds = [...new Set([
+      ...staleGateways.map(g => g.factoryId),
+      ...recoveredGateways.map(g => g.factoryId),
+    ].filter(Boolean))] as string[];
+
+    // Update factory connectivityStatus — online if at least one active fresh gateway exists
+    for (const factoryId of affectedFactoryIds) {
+      const [freshGateway] = await db
+        .select({ id: industrialGateway.id })
+        .from(industrialGateway)
+        .where(and(
+          eq(industrialGateway.factoryId, factoryId),
+          eq(industrialGateway.status, 'active'),
+          gte(industrialGateway.lastHeartbeatAt, onlineCutoff),
+        ))
+        .limit(1);
+      await db.update(factory)
+        .set({ connectivityStatus: freshGateway ? 'online' : 'offline', updatedAt: now })
+        .where(eq(factory.id, factoryId));
+    }
+
+    // Raise deduplicated GATEWAY_OFFLINE alert for each stale gateway
+    for (const gw of staleGateways) {
+      const dedupeKey = createHash('sha256').update(`GATEWAY_OFFLINE:${gw.id}`).digest('hex');
+      await db.insert(industrialAlert).values({
+        manufacturerId: gw.manufacturerId,
+        factoryId: gw.factoryId,
+        gatewayId: gw.id,
+        alertType: 'GATEWAY_OFFLINE',
+        severity: 'high',
+        status: 'open',
+        summary: 'Industrial gateway has not sent a heartbeat in over 1 hour.',
+        details: { gatewayId: gw.id, offlineCutoffIso: offlineCutoff.toISOString() },
+        dedupeKey,
+      }).onConflictDoNothing({ target: industrialAlert.dedupeKey });
+    }
+
+    // Resolve open GATEWAY_OFFLINE alerts for recovered gateways
+    for (const gw of recoveredGateways) {
+      const dedupeKey = createHash('sha256').update(`GATEWAY_OFFLINE:${gw.id}`).digest('hex');
+      await db.update(industrialAlert)
+        .set({ status: 'resolved', resolvedAt: now })
+        .where(and(
+          eq(industrialAlert.dedupeKey, dedupeKey),
+          eq(industrialAlert.status, 'open'),
+        ));
+    }
+
+    console.log('[Scheduler:GatewayHealth] stale:', staleGateways.length, 'recovered:', recoveredGateways.length, 'factories updated:', affectedFactoryIds.length);
+    return true;
+  } catch (err) {
+    console.error('[Scheduler:GatewayHealth] Error:', err);
+    return false;
+  }
+}
+
+export { runGatewayHealthScan };
+
 /** Execute each bounded monitoring scan once for serverless scheduled runs. */
 export async function runMonitoringScansOnce(): Promise<{ failedScans: number }> {
   const results = await Promise.all([
@@ -278,6 +371,7 @@ export async function runMonitoringScansOnce(): Promise<{ failedScans: number }>
     runHourlyScan(),
     runSixHourScan(),
     runDailyScan(),
+    runGatewayHealthScan(),
   ]);
   return { failedScans: results.filter((result) => !result).length };
 }

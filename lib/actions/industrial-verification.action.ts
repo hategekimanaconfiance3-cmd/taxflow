@@ -1,13 +1,13 @@
 "use server";
 
-import { and, desc, eq, sql, sum } from "drizzle-orm";
-import { randomUUID } from "node:crypto";
+import { and, desc, eq, sql } from "drizzle-orm";
 import db from "@/db/drizzle";
 import {
   industrialAlert,
+  industrialBatchEvidence,
   industrialEvent,
+  industrialVerificationResult,
   productionBatch,
-  productionVerification,
 } from "@/db/schema";
 import { requireRRAPermission } from "@/lib/auth-guard";
 
@@ -16,7 +16,7 @@ import { requireRRAPermission } from "@/lib/auth-guard";
 //
 // Evidence pillars:
 //   A. Declared quantity   → productionBatch.declaredQuantity (manufacturer pre-run plan)
-//   B. Industrial quantity → sum of industrialEvent production_count events for the batch
+//   B. Industrial quantity → industrialBatchEvidence.machineReportedQuantity
 //   C. Reported quantity   → productionBatch.reportedGoodOutputQuantity + reportedRejectedOutputQuantity
 //
 // A discrepancy > threshold between any two pillars raises an industrialAlert.
@@ -26,7 +26,7 @@ const DEFAULT_THRESHOLD_BP = 500; // 5% = 500 basis points
 
 function basisPointsDiff(a: number, b: number): number {
   if (a === 0 && b === 0) return 0;
-  if (a === 0) return 10000; // infinite discrepancy
+  if (a === 0) return 10000;
   return Math.round(Math.abs((b - a) / a) * 10000);
 }
 
@@ -37,170 +37,39 @@ function pctDiff(a: number, b: number): number {
 }
 
 // ---------------------------------------------------------------------------
-// Run reconciliation for a single batch
+// Run reconciliation for a single batch (delegates to the service)
 // ---------------------------------------------------------------------------
 
-export async function reconcileBatch(batchId: string) {
-  // Load batch
-  const [batch] = await db
-    .select()
-    .from(productionBatch)
-    .where(eq(productionBatch.id, batchId))
-    .limit(1);
-  if (!batch) return { success: false as const, error: "Batch not found" };
-
-  const declaredQty = batch.declaredQuantity ?? 0;
-
-  // Sum machine production_count events
-  const [eventSum] = await db
-    .select({ total: sql<string>`coalesce(sum((payload->>'count')::numeric), 0)` })
-    .from(industrialEvent)
-    .where(
-      and(
-        eq(industrialEvent.productionBatchId, batchId),
-        eq(industrialEvent.eventType, "production_count"),
-      ),
-    );
-  const industrialQty = parseFloat(eventSum?.total ?? "0");
-
-  // Reported = good + rejected (what manufacturer submitted post-run)
-  const reportedGood = parseFloat(batch.reportedGoodOutputQuantity ?? "0");
-  const reportedRejected = parseFloat(batch.reportedRejectedOutputQuantity ?? "0");
-  const reportedQty = reportedGood + reportedRejected;
-
-  // Discrepancy between declared and industrial (primary three-way check)
-  const declaredVsIndustrialBP = industrialQty > 0
-    ? basisPointsDiff(declaredQty, industrialQty)
-    : null;
-  const declaredVsIndustrialPct = industrialQty > 0
-    ? pctDiff(declaredQty, industrialQty)
-    : null;
-
-  const discrepancyPercent = declaredVsIndustrialPct;
-  const alertRaised = declaredVsIndustrialBP !== null && declaredVsIndustrialBP > DEFAULT_THRESHOLD_BP;
-
-  // Upsert production_verification record
-  const existing = await db
-    .select({ id: productionVerification.id })
-    .from(productionVerification)
-    .where(eq(productionVerification.productionBatchId, batchId))
-    .limit(1);
-
-  let verificationId: string;
-
-  if (existing.length > 0) {
-    verificationId = existing[0].id;
-    await db
-      .update(productionVerification)
-      .set({
-        declaredQuantity: declaredQty,
-        industrialQuantity: industrialQty > 0 ? industrialQty : null,
-        reportedQuantity: reportedQty > 0 ? reportedQty : null,
-        discrepancyPercent,
-        verificationStatus:
-          alertRaised ? "discrepancy_flagged" :
-          industrialQty > 0 ? "verified" : "pending",
-        alertRaised,
-        alertRaisedAt: alertRaised ? new Date() : null,
-      })
-      .where(eq(productionVerification.id, verificationId));
-  } else {
-    verificationId = randomUUID();
-    await db.insert(productionVerification).values({
-      id: verificationId,
-      productionBatchId: batchId,
-      manufacturerId: batch.manufacturerId,
-      declaredQuantity: declaredQty,
-      industrialQuantity: industrialQty > 0 ? industrialQty : null,
-      reportedQuantity: reportedQty > 0 ? reportedQty : null,
-      discrepancyPercent,
-      discrepancyThresholdBasisPoints: DEFAULT_THRESHOLD_BP,
-      verificationStatus:
-        alertRaised ? "discrepancy_flagged" :
-        industrialQty > 0 ? "verified" : "pending",
-      alertRaised,
-      alertRaisedAt: alertRaised ? new Date() : null,
-    });
-  }
-
-  // Raise alert if discrepancy detected and no open alert already exists
-  if (alertRaised) {
-    const existingAlert = await db
-      .select({ id: industrialAlert.id })
-      .from(industrialAlert)
-      .where(
-        and(
-          eq(industrialAlert.productionVerificationId, verificationId),
-          eq(industrialAlert.status, "open"),
-        ),
-      )
-      .limit(1);
-
-    if (existingAlert.length === 0) {
-      await db.insert(industrialAlert).values({
-        id: randomUUID(),
-        manufacturerId: batch.manufacturerId,
-        alertType: "production_discrepancy",
-        severity: declaredVsIndustrialBP! > 2000 ? "high" : "medium",
-        title: `Production discrepancy: ${discrepancyPercent?.toFixed(1)}% variance on batch ${batch.batchReference}`,
-        description:
-          `Batch ${batch.batchReference}: declared ${declaredQty}, industrial machines recorded ${industrialQty.toFixed(2)}, ` +
-          `manufacturer reported ${reportedQty.toFixed(2)}. ` +
-          `Declared vs industrial variance: ${discrepancyPercent?.toFixed(2)}% (threshold: ${(DEFAULT_THRESHOLD_BP / 100).toFixed(1)}%).`,
-        relatedEntityType: "production_batch",
-        relatedEntityId: batchId,
-        productionVerificationId: verificationId,
-        status: "open",
-      });
-    }
-  }
-
-  return {
-    success: true as const,
-    data: {
-      batchId,
-      batchReference: batch.batchReference,
-      declaredQty,
-      industrialQty,
-      reportedQty,
-      discrepancyPercent,
-      discrepancyBasisPoints: declaredVsIndustrialBP,
-      alertRaised,
-      verificationId,
-      verdict:
-        alertRaised ? "DISCREPANCY_FLAGGED" :
-        industrialQty > 0 ? "VERIFIED" : "PENDING_MACHINE_DATA",
-    },
-  };
+export async function reconcileBatch(batchId: string, tolerancePercent = 5) {
+  const { verifyIndustrialBatch } = await import('@/lib/industrial-integration-service');
+  const result = await verifyIndustrialBatch(batchId, tolerancePercent);
+  return { success: true as const, data: result };
 }
 
 // ---------------------------------------------------------------------------
-// Admin: Trigger reconciliation for all unverified batches
+// Admin: Trigger reconciliation for all batches that have batch evidence
 // ---------------------------------------------------------------------------
 
 export async function runBulkReconciliation() {
   await requireRRAPermission("taxpayer.activity.read");
 
-  // Find batches with industrial events that haven't been verified yet
-  const batchesWithEvents = await db
-    .selectDistinct({ batchId: industrialEvent.productionBatchId })
-    .from(industrialEvent)
-    .where(
-      and(
-        sql`${industrialEvent.productionBatchId} IS NOT NULL`,
-        eq(industrialEvent.eventType, "production_count"),
-      ),
-    );
+  const batchesWithEvidence = await db
+    .selectDistinct({ batchId: industrialBatchEvidence.batchId })
+    .from(industrialBatchEvidence);
 
   const results = [];
-  for (const { batchId } of batchesWithEvents) {
+  for (const { batchId } of batchesWithEvidence) {
     if (!batchId) continue;
-    const result = await reconcileBatch(batchId);
-    results.push(result);
+    try {
+      const result = await reconcileBatch(batchId);
+      results.push({ batchId, ...result });
+    } catch (err) {
+      results.push({ batchId, success: false, error: String(err) });
+    }
   }
 
-  const flagged = results.filter(r => r.success && r.data.alertRaised).length;
-  const verified = results.filter(r => r.success && !r.data.alertRaised && r.data.verdict === "VERIFIED").length;
+  const flagged = results.filter(r => r.success && 'data' in r && r.data?.worstOutcome === 'discrepant').length;
+  const verified = results.filter(r => r.success && 'data' in r && r.data?.worstOutcome === 'matched').length;
 
   return {
     success: true as const,
@@ -220,45 +89,62 @@ export async function runBulkReconciliation() {
 export async function getBatchVerification(batchId: string) {
   await requireRRAPermission("taxpayer.activity.read");
 
-  const [verification] = await db
+  const evidence = await db
     .select()
-    .from(productionVerification)
-    .where(eq(productionVerification.productionBatchId, batchId))
+    .from(industrialBatchEvidence)
+    .where(eq(industrialBatchEvidence.batchId, batchId))
     .limit(1);
 
-  if (!verification) {
-    // Run it on demand
+  const verificationResults = await db
+    .select()
+    .from(industrialVerificationResult)
+    .where(eq(industrialVerificationResult.batchId, batchId))
+    .orderBy(desc(industrialVerificationResult.checkedAt));
+
+  if (evidence.length === 0 && verificationResults.length === 0) {
+    // Trigger on-demand
     return reconcileBatch(batchId);
   }
 
-  return { success: true as const, data: verification };
+  return { success: true as const, data: { evidence: evidence[0] ?? null, verificationResults } };
 }
 
 // ---------------------------------------------------------------------------
-// Admin: List all verifications (most recent first)
+// Admin: List all verification results (most recent first)
 // ---------------------------------------------------------------------------
 
-export async function listProductionVerifications(opts?: { status?: string; limit?: number }) {
+export async function listProductionVerifications(opts?: { outcome?: string; limit?: number }) {
   await requireRRAPermission("taxpayer.activity.read");
 
   const rows = await db
     .select({
-      id: productionVerification.id,
-      productionBatchId: productionVerification.productionBatchId,
-      manufacturerId: productionVerification.manufacturerId,
-      verificationStatus: productionVerification.verificationStatus,
-      declaredQuantity: productionVerification.declaredQuantity,
-      industrialQuantity: productionVerification.industrialQuantity,
-      reportedQuantity: productionVerification.reportedQuantity,
-      discrepancyPercent: productionVerification.discrepancyPercent,
-      alertRaised: productionVerification.alertRaised,
-      alertRaisedAt: productionVerification.alertRaisedAt,
-      verifiedAt: productionVerification.verifiedAt,
-      createdAt: productionVerification.createdAt,
+      id: industrialVerificationResult.id,
+      batchId: industrialVerificationResult.batchId,
+      batchReference: productionBatch.batchReference,
+      comparisonKey: industrialVerificationResult.comparisonKey,
+      outcome: industrialVerificationResult.outcome,
+      machineQuantity: industrialVerificationResult.machineQuantity,
+      declaredQuantity: industrialVerificationResult.declaredQuantity,
+      varianceQuantity: industrialVerificationResult.varianceQuantity,
+      tolerancePercent: industrialVerificationResult.tolerancePercent,
+      reasonCodes: industrialVerificationResult.reasonCodes,
+      checkedAt: industrialVerificationResult.checkedAt,
+      createdAt: industrialVerificationResult.createdAt,
     })
-    .from(productionVerification)
-    .orderBy(desc(productionVerification.createdAt))
+    .from(industrialVerificationResult)
+    .leftJoin(productionBatch, eq(productionBatch.id, industrialVerificationResult.batchId))
+    .orderBy(desc(industrialVerificationResult.checkedAt))
     .limit(opts?.limit ?? 100);
 
   return { success: true as const, data: rows };
+}
+
+// ---------------------------------------------------------------------------
+// Admin: Trigger manual reconciliation (server action wrapper)
+// ---------------------------------------------------------------------------
+
+export async function triggerBatchReconciliation(batchId: string) {
+  await requireRRAPermission("taxpayer.activity.read");
+  if (!batchId?.trim()) throw new Error('Batch ID is required.');
+  return reconcileBatch(batchId, 2);
 }

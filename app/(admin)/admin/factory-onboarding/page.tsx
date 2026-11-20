@@ -90,20 +90,20 @@ export default async function FactoryOnboardingPage() {
                     </TableCell>
                     <TableCell className="text-sm">{factory.name}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">
-                      {factory.location}
+                      {factory.address}
                     </TableCell>
                     <TableCell className="font-mono text-xs text-muted-foreground">
-                      {factory.registrationNumber ?? '—'}
+                      {factory.registrationReference ?? '—'}
                     </TableCell>
                     <TableCell>
-                      <Badge variant={statusVariant(factory.status)} className="text-xs capitalize">
-                        {statusLabel(factory.status)}
+                      <Badge variant={statusVariant(factory.onboardingStatus)} className="text-xs capitalize">
+                        {statusLabel(factory.onboardingStatus)}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right">
                       <FactoryActions
                         factoryId={factory.id}
-                        currentStatus={factory.status}
+                        currentStatus={factory.onboardingStatus}
                       />
                     </TableCell>
                   </TableRow>
@@ -145,10 +145,10 @@ export default async function FactoryOnboardingPage() {
               <TableBody>
                 {gateways.map((gateway) => (
                   <TableRow key={gateway.id}>
-                    <TableCell className="font-mono text-xs">{gateway.gatewayId}</TableCell>
+                    <TableCell className="font-mono text-xs">{gateway.gatewayCode}</TableCell>
                     <TableCell className="text-sm">{gateway.factoryName ?? '—'}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">
-                      {gateway.protocol}
+                      {gateway.gatewayCode}
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">
                       {new Date(gateway.createdAt).toLocaleDateString()}
