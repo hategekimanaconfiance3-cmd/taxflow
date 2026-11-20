@@ -121,9 +121,12 @@ export async function requireRRASession(...allowedRoles: RRARole[]) {
     redirect('/admin/dashboard');
   }
 
-  // If specific roles are required, check access
+  // If specific roles are required, check access.
+  // super_admin always passes role-based guards — permission-based guards (requireRRAPermission)
+  // remain the enforcement boundary for fine-grained operations.
   if (allowedRoles.length > 0) {
-    const hasAccess = clearanceRoles.some((role) => isRRARoleAllowed(role, allowedRoles));
+    const isSuperAdmin = clearanceRoles.includes('super_admin');
+    const hasAccess = isSuperAdmin || clearanceRoles.some((role) => isRRARoleAllowed(role, allowedRoles));
 
     if (!hasAccess) {
       // Log the denial — role is valid but insufficient for this resource.

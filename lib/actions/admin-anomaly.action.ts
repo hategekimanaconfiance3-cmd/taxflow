@@ -194,10 +194,18 @@ export async function detectAnomalies(): Promise<Anomaly[]> {
     }
 
     // ── 5. AI Risk Scores: merchants with high/critical risk ──────────
-    // Dynamic import to avoid crashing the page if TIN_DATABASE_URL is not configured
+    // Wrapped in a hard 7-second timeout to prevent 504 on pages with many merchants.
+    // If the TIN database is unavailable or slow, deterministic anomalies still render.
     try {
         const { computeAllRiskScores } = await import("@/lib/ai/risk-scoring");
-        const riskScores = await computeAllRiskScores();
+
+        const riskScores = await Promise.race([
+            computeAllRiskScores(),
+            new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error("Risk score timeout")), 7000)
+            ),
+        ]);
+
         const flaggedMerchants = riskScores.filter(
             (s) => s.level === "critical" || s.level === "high",
         );
@@ -217,7 +225,13 @@ export async function detectAnomalies(): Promise<Anomaly[]> {
             });
         }
     } catch (error) {
-        console.error("AI risk score computation in anomaly detection failed:", error);
+        const isTimeout = error instanceof Error && error.message === "Risk score timeout";
+        console.error(
+            isTimeout
+                ? "[anomaly-detection] AI risk score timed out — skipping risk signal"
+                : "AI risk score computation in anomaly detection failed:",
+            isTimeout ? undefined : error,
+        );
         // Continue without risk scores — the deterministic anomalies still render
     }
 

@@ -5,6 +5,11 @@ import { Badge } from '@/components/ui/badge';
 import { AlertTriangle, AlertCircle, ShieldAlert } from 'lucide-react';
 import { formatRWF } from '@/components/dashboard/stat-card/stat-card';
 
+// Cache for 5 minutes — anomaly detection is expensive; avoid per-request recomputation.
+export const revalidate = 300;
+// Give the function up to 60 s on Vercel (Pro) or 10 s on Hobby.
+export const maxDuration = 60;
+
 export default async function AdminAnomaliesPage() {
   await requireRRAPermission("transaction.read");
 

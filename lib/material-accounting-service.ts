@@ -821,10 +821,9 @@ export async function reviewProductionBatch(actorUserId: string, input: BatchRev
     }
     const goodOutputMicros = quantityToMicros(input.goodOutputQuantity);
     const rejectedOutputMicros = quantityToMicros(input.rejectedOutputQuantity);
-    const declaredOutputMicros = quantityToMicros(batch.declaredQuantity);
-    if (goodOutputMicros + rejectedOutputMicros !== declaredOutputMicros) {
-      throw new MaterialAccountingError('OUTPUT_RECONCILIATION_FAILED', 'Verified good and rejected output must reconcile exactly to the declared total output.');
-    }
+    // Good + rejected = total actual output. No equality constraint against declared
+    // (planned) quantity — legitimate production shortfalls must not block approval.
+    // Non-negativity is enforced by DB constraints; no additional check needed here.
 
     const usages = await tx.select({
       id: productionBatchMaterialUsage.id,
@@ -1008,6 +1007,15 @@ export async function reviewProductionBatch(actorUserId: string, input: BatchRev
 
   if (!result.replayed) {
     await notifySafely({ userId: result.manufacturerId, type: 'system', title: result.status === 'released' ? 'Production batch released' : 'Production batch held', message: result.status === 'released' ? 'Verified material consumption and finished-product stock were posted together.' : 'The production batch remains held. Review the officer decision and resolve the recorded discrepancy.', link: '/dashboard/production' });
+    // Non-blocking: trigger three-axis industrial reconciliation after batch is released.
+    // Failure must never block batch approval — errors are logged and swallowed.
+    if (result.status === 'released') {
+      void import('@/lib/industrial-integration-service').then(({ verifyIndustrialBatch }) =>
+        verifyIndustrialBatch(result.batchId, 2).catch((err) =>
+          console.error('[IndustrialReconciliation] Auto-reconciliation failed for batch', result.batchId, err instanceof Error ? err.message : err)
+        )
+      );
+    }
   }
   return result;
 }

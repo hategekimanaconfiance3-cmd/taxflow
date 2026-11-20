@@ -55,6 +55,11 @@ export default async function AdminTraderDetailPage({
                   TIN: {profile.tinNumber}
                 </span>
               )}
+              {profile.nationalId && (
+                <span className="font-mono text-xs text-muted-foreground">
+                  NID: {profile.nationalId}
+                </span>
+              )}
               {profile.role && (
                 <Badge variant="outline" className="capitalize text-[10px]">
                   {profile.role}

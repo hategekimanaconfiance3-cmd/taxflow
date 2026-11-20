@@ -66,6 +66,7 @@ export type MerchantProfile = {
   name: string;
   businessName: string | null;
   tinNumber: string | null;
+  nationalId?: string | null;
   role: string | null;
   clearanceStatus: string | null;
   phoneNumber?: string | null;
@@ -239,6 +240,7 @@ export async function getMerchantProfileById(
       clearanceStatus: user.clearanceStatus,
       phoneNumber: user.phoneNumber,
       email: user.email,
+      nationalId: user.nationalId,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     })
@@ -302,7 +304,7 @@ export async function getMerchantProfileById(
     registeredAt: trader.createdAt.toISOString(),
     updatedAt: trader.updatedAt.toISOString(),
     ...(canSeeContact
-      ? { phoneNumber: trader.phoneNumber, email: trader.email }
+      ? { phoneNumber: trader.phoneNumber, email: trader.email, nationalId: trader.nationalId }
       : {}),
   };
 

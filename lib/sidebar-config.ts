@@ -116,6 +116,12 @@ export const SIDEBAR_GROUPS: SidebarGroup[] = [
                 roles: ["manufacturer"],
             },
             {
+                label: "My Factories",
+                href: "/dashboard/factories",
+                icon: Factory,
+                roles: ["manufacturer"],
+            },
+            {
                 label: "Sell to Buyer",
                 href: "/dashboard/sell",
                 icon: ShoppingCart,

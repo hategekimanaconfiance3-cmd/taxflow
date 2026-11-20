@@ -348,7 +348,9 @@ export async function confirmImportArrival(
         } else {
             // Ordinary imported products continue to update only product stock.
             failureStage = "add inspected quantity to stock";
-            await assertPurchasedStockReceiptEligible(tx, declaration.businessId, declaration.productId, quantityToActivate, session.user.id, "import_declaration", declaration.id);
+            // attestBaseline=true: the Customs officer's physical inspection IS the
+            // baseline attestation, so we clear the needs_review gate automatically.
+            await assertPurchasedStockReceiptEligible(tx, declaration.businessId, declaration.productId, quantityToActivate, session.user.id, "import_declaration", declaration.id, new Date(), true);
             await tx.insert(stock)
                 .values({ businessId: declaration.businessId, productId: declaration.productId, quantity: quantityToActivate })
                 .onConflictDoUpdate({

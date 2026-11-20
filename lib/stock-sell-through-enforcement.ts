@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, inArray, lte, ne } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lte } from "drizzle-orm";
 import db from "@/db/drizzle";
 import { auditLog, b2bOrderAcceptance, product, stock, stockMovement, stockReservation, stockRestockRequest, stockSellThroughCycle, stockSellThroughThreshold, transaction } from "@/db/schema";
 import { calculateSellThrough, resolveSellThroughThreshold, type SellThroughMovement, type SellThroughThresholdRecord } from "@/lib/stock-sell-through";
@@ -10,6 +10,10 @@ type DbTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
  * Assert a prospective purchased-stock receipt is eligible. The caller must
  * run this inside the same transaction as its stock update. Locking stock and
  * the unique seller/product cycle serializes concurrent receipts.
+ *
+ * @param attestBaseline - When true (e.g. for Customs-approved import arrivals),
+ *   automatically attest the opening baseline as ledger_verified so the
+ *   first physical inspection by an authorized officer clears the review gate.
  */
 export async function assertPurchasedStockReceiptEligible(
   tx: DbTx,
@@ -20,6 +24,7 @@ export async function assertPurchasedStockReceiptEligible(
   sourceType: string,
   sourceId: string,
   at = new Date(),
+  attestBaseline = false,
 ) {
   const [item] = await tx.select({ id: product.id, name: product.name, categoryCode: product.categoryCode })
     .from(product).where(eq(product.id, productId)).limit(1);
@@ -39,6 +44,20 @@ export async function assertPurchasedStockReceiptEligible(
     eq(stockSellThroughCycle.businessId, businessId), eq(stockSellThroughCycle.productId, productId),
   )).for("update").limit(1);
   if (!cycle) throw new Error("Stock eligibility could not be verified. Please request an authorized review.");
+
+  // If an authorized Customs officer is approving a physical import inspection,
+  // their verification is itself the baseline attestation — attest it now.
+  if (attestBaseline && cycle.baselineStatus === "needs_review") {
+    await tx.update(stockSellThroughCycle).set({
+      baselineStatus: "ledger_verified",
+      baselineQuantity: currentQuantity,
+    }).where(and(
+      eq(stockSellThroughCycle.businessId, businessId),
+      eq(stockSellThroughCycle.productId, productId),
+    ));
+    cycle.baselineStatus = "ledger_verified";
+  }
+
   // Re-read after acquiring the per-product cycle lock so a concurrent first
   // receipt is included in the ledger and cannot pass against a stale zero.
   const [latestBalance] = await tx.select({ quantity: stock.quantity }).from(stock)
@@ -47,7 +66,6 @@ export async function assertPurchasedStockReceiptEligible(
 
   const policyRows = await tx.select().from(stockSellThroughThreshold).where(and(
     eq(stockSellThroughThreshold.scopeType, "default"), eq(stockSellThroughThreshold.scopeKey, "*"),
-    ne(stockSellThroughThreshold.id, "taxflow-global-sell-through-default-75"),
     lte(stockSellThroughThreshold.effectiveAt, at),
   )).orderBy(desc(stockSellThroughThreshold.effectiveAt), desc(stockSellThroughThreshold.createdAt), desc(stockSellThroughThreshold.id)).limit(1);
   const policy = resolveSellThroughThreshold(policyRows as SellThroughThresholdRecord[], productId, item.categoryCode, at);

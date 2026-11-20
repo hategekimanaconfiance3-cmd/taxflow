@@ -14,18 +14,46 @@ import { z } from "zod";
 // OTP send/verify is now handled by better-auth's phoneNumber plugin
 // ---------------------------------------------------------------------------
 
+// Error codes so the UI can branch on failure reason
+export type IdLookupErrorCode =
+    | "invalid_format"
+    | "rate_limited"
+    | "not_found"      // NID not in citizen registry
+    | "no_tin"         // Citizen found but no TIN registered
+    | "service_unavailable"; // DB / network error
+
 export type IdLookupResult =
-    | { success: true; name: string; tin: string; businessName: string; phone: string }
-    | { success: false; error: string };
+    | {
+          success: true;
+          // Core identity (from citizen table)
+          firstName: string;
+          lastName: string;
+          name: string;
+          dateOfBirth: string | null;
+          gender: string | null;
+          province: string | null;
+          district: string | null;
+          // Business / TIN (from tinRecord table — null when no_tin)
+          tin: string | null;
+          businessName: string | null;
+          businessType: string | null;
+          phone: string;
+          email: string | null;
+          address: string | null;
+          tinDistrict: string | null;
+          hasTin: boolean;
+      }
+    | { success: false; error: string; code: IdLookupErrorCode };
 
 /**
- * Validate a National ID and return linked TIN, name, business + phone.
- * Queries the tin_db for real records.
+ * Validate a National ID and return all available verified identity fields.
+ * Queries the tin_db (government registry mirror) — read-only.
+ * Returns typed error codes so the UI can present the right fallback.
  */
 export async function validateId(nationalId: string): Promise<IdLookupResult> {
     const parsedId = z.string().regex(/^\d{16}$/).safeParse(nationalId);
     if (!parsedId.success) {
-        return { success: false, error: "ID must be exactly 16 digits." };
+        return { success: false, error: "ID must be exactly 16 digits.", code: "invalid_format" };
     }
 
     try {
@@ -37,45 +65,95 @@ export async function validateId(nationalId: string): Promise<IdLookupResult> {
             60,
         );
         if (!limit.allowed) {
-            return { success: false, error: "Too many verification attempts. Please try again shortly." };
+            return {
+                success: false,
+                error: "Too many verification attempts. Please try again in a minute.",
+                code: "rate_limited",
+            };
         }
 
         // Look up citizen by national ID
-        const citizenResult = await tinDb
-            .select()
-            .from(citizen)
-            .where(eq(citizen.nationalId, nationalId))
-            .limit(1);
+        let citizenResult: (typeof citizen.$inferSelect)[];
+        try {
+            citizenResult = await tinDb
+                .select()
+                .from(citizen)
+                .where(eq(citizen.nationalId, nationalId))
+                .limit(1);
+        } catch {
+            return {
+                success: false,
+                error: "The identity verification service is temporarily unavailable.",
+                code: "service_unavailable",
+            };
+        }
 
         if (citizenResult.length === 0) {
-            return { success: false, error: "National ID not found in the registry." };
+            return {
+                success: false,
+                error: "National ID not found in the registry. Verify the number and try again.",
+                code: "not_found",
+            };
         }
 
         const foundCitizen = citizenResult[0];
 
-        // Look up TIN record linked to national ID
+        // Look up TIN record linked to national ID (may not exist)
         const tinResult = await tinDb
             .select()
             .from(tinRecord)
             .where(eq(tinRecord.nationalId, nationalId))
             .limit(1);
 
-        if (tinResult.length === 0) {
-            return { success: false, error: "No TIN record linked to this National ID." };
-        }
+        const foundTin = tinResult.length > 0 ? tinResult[0] : null;
 
-        const foundTin = tinResult[0];
+        if (!foundTin) {
+            // Citizen exists but no TIN — identity verified, but no business record
+            return {
+                success: true,
+                firstName: foundCitizen.firstName,
+                lastName: foundCitizen.lastName,
+                name: `${foundCitizen.firstName} ${foundCitizen.lastName}`,
+                dateOfBirth: foundCitizen.dateOfBirth ?? null,
+                gender: foundCitizen.gender ?? null,
+                province: foundCitizen.province ?? null,
+                district: foundCitizen.district ?? null,
+                tin: null,
+                businessName: null,
+                businessType: null,
+                phone: "",
+                email: null,
+                address: null,
+                tinDistrict: null,
+                hasTin: false,
+            };
+        }
 
         return {
             success: true,
+            firstName: foundCitizen.firstName,
+            lastName: foundCitizen.lastName,
             name: `${foundCitizen.firstName} ${foundCitizen.lastName}`,
+            dateOfBirth: foundCitizen.dateOfBirth ?? null,
+            gender: foundCitizen.gender ?? null,
+            province: foundCitizen.province ?? null,
+            district: foundCitizen.district ?? null,
             tin: foundTin.tinNumber,
             businessName: foundTin.businessName,
+            businessType: foundTin.businessType ?? null,
             phone: foundTin.phone,
+            email: foundTin.email ?? null,
+            address: foundTin.address ?? null,
+            tinDistrict: foundTin.district ?? null,
+            hasTin: true,
         };
     } catch (error) {
         console.error("TIN lookup failed:", error);
-        return { success: false, error: "Failed to verify National ID. Please try again." };
+        return {
+            success: false,
+            error: "The identity verification service is temporarily unavailable.",
+            code: "service_unavailable",
+        };
     }
 }
 
