@@ -278,15 +278,15 @@ export default async function AuditExplorerPage({ searchParams }: AuditExplorerP
             </div>
           ) : (
             <>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+              <div role="region" aria-label="Audit events, horizontally scrollable" tabIndex={0} className="overflow-x-auto overscroll-x-contain focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                <table className="w-full min-w-[760px] text-sm">
                   <thead>
                     <tr className="border-b">
                       <th className="text-left py-2.5 px-2 font-medium text-muted-foreground text-xs">Action</th>
                       <th className="text-left py-2.5 px-2 font-medium text-muted-foreground text-xs w-20">Severity</th>
-                      <th className="text-left py-2.5 px-2 font-medium text-muted-foreground text-xs hidden md:table-cell">Actor</th>
-                      <th className="text-left py-2.5 px-2 font-medium text-muted-foreground text-xs hidden md:table-cell">Target</th>
-                      <th className="text-left py-2.5 px-2 font-medium text-muted-foreground text-xs hidden lg:table-cell">IP</th>
+                      <th className="text-left py-2.5 px-2 font-medium text-muted-foreground text-xs">Actor</th>
+                      <th className="text-left py-2.5 px-2 font-medium text-muted-foreground text-xs">Target</th>
+                      <th className="text-left py-2.5 px-2 font-medium text-muted-foreground text-xs">IP</th>
                       <th className="text-left py-2.5 px-2 font-medium text-muted-foreground text-xs">Time</th>
                     </tr>
                   </thead>
@@ -325,12 +325,12 @@ export default async function AuditExplorerPage({ searchParams }: AuditExplorerP
                               {sev}
                             </Badge>
                           </td>
-                          <td className="py-2.5 px-2 hidden md:table-cell">
+                          <td className="py-2.5 px-2">
                             <span className="text-xs text-muted-foreground font-mono">
                               {ev.userId ? ev.userId.slice(0, 8) + '…' : '—'}
                             </span>
                           </td>
-                          <td className="py-2.5 px-2 hidden md:table-cell">
+                          <td className="py-2.5 px-2">
                             <span className="text-xs text-muted-foreground">
                               {ev.targetType ?? '—'}
                               {ev.targetId && (
@@ -340,7 +340,7 @@ export default async function AuditExplorerPage({ searchParams }: AuditExplorerP
                               )}
                             </span>
                           </td>
-                          <td className="py-2.5 px-2 hidden lg:table-cell">
+                          <td className="py-2.5 px-2">
                             <span className="text-xs text-muted-foreground font-mono">
                               {ev.ipAddress ?? '—'}
                             </span>

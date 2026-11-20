@@ -137,7 +137,7 @@ export function VATReturnDialog({ traders }: { traders: Trader[] }) {
                         </div>
 
                         {/* Trader Info */}
-                        <div className="grid grid-cols-2 gap-2 text-sm">
+                        <div className="grid gap-2 text-sm sm:grid-cols-2">
                             <div>
                                 <span className="text-muted-foreground text-xs">
                                     Business Name
@@ -237,7 +237,7 @@ export function VATReturnDialog({ traders }: { traders: Trader[] }) {
                         </div>
 
                         {/* Summary */}
-                        <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+                        <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
                             <div>
                                 Transactions: {report.transactions.count} (
                                 {formatRWF(report.transactions.totalValue)})

@@ -1337,7 +1337,7 @@ export function ProductionReportForm({
                       <span className="text-sm font-semibold">{row.name}</span>
                       <StatusBadge status={row.status} />
                     </div>
-                    <div className="grid grid-cols-3 gap-2 text-xs text-muted-foreground">
+                    <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-3">
                       <div>
                         <p>Unit</p>
                         <p className="font-medium text-foreground">{row.unit}</p>

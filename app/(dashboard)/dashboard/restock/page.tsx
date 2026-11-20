@@ -58,7 +58,7 @@ export default async function RestockRequestsPage({ searchParams }: { searchPara
   ]);
 
   return (
-    <main className="mx-auto w-full max-w-6xl space-y-6 p-4 sm:p-6">
+    <div className="mx-auto w-full max-w-6xl space-y-6">
       <header>
         <h1 className="text-2xl font-bold tracking-tight">Restock Requests</h1>
         <p className="mt-1 text-sm text-muted-foreground">Check recorded sell-through eligibility and record a restock request.</p>
@@ -118,6 +118,6 @@ export default async function RestockRequestsPage({ searchParams }: { searchPara
           </div>
         )}
       </section>
-    </main>
+    </div>
   );
 }

@@ -64,7 +64,7 @@ export function KpiCardSparkline({
         {icon && <div className="text-muted-foreground/50 shrink-0">{icon}</div>}
       </CardHeader>
       <CardContent className="pt-0 pb-0 px-3">
-        <div className="text-[17px] font-bold truncate leading-tight" title={String(value)}>
+        <div className="break-words text-[17px] font-bold leading-tight [overflow-wrap:anywhere]" title={String(value)}>
           {value}
         </div>
         {description && (

@@ -244,7 +244,7 @@ export function RegisterProductionLineDialog({ factories }: { factories: Array<{
               <Label>Line Code * <span className="text-xs text-muted-foreground">(uppercase, e.g. LINE-A)</span></Label>
               <Input value={form.lineCode} onChange={e => setForm(f => ({ ...f, lineCode: e.target.value.toUpperCase() }))} placeholder="LINE-A" />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-1">
                 <Label>Capacity</Label>
                 <Input type="number" value={form.productionCapacity} onChange={e => setForm(f => ({ ...f, productionCapacity: e.target.value }))} placeholder="e.g. 1000" />

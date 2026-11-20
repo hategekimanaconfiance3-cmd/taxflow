@@ -209,19 +209,19 @@ export default async function TopTaxpayersPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+          <div role="region" aria-label="Taxpayer VAT rankings, horizontally scrollable" tabIndex={0} className="overflow-x-auto overscroll-x-contain focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            <table className="w-full min-w-[900px] text-sm">
               <thead>
                 <tr className="border-b">
                   <th className="text-left py-2.5 px-2 font-medium text-muted-foreground text-xs w-8">#</th>
                   <th className="text-left py-2.5 px-2 font-medium text-muted-foreground text-xs">Business</th>
-                  <th className="text-left py-2.5 px-2 font-medium text-muted-foreground text-xs hidden md:table-cell">Type</th>
+                  <th className="text-left py-2.5 px-2 font-medium text-muted-foreground text-xs">Type</th>
                   <th className="text-right py-2.5 px-2 font-medium text-muted-foreground text-xs">Output VAT</th>
-                  <th className="text-right py-2.5 px-2 font-medium text-muted-foreground text-xs hidden lg:table-cell">Net Due</th>
-                  <th className="text-right py-2.5 px-2 font-medium text-muted-foreground text-xs hidden lg:table-cell">Paid</th>
+                  <th className="text-right py-2.5 px-2 font-medium text-muted-foreground text-xs">Net Due</th>
+                  <th className="text-right py-2.5 px-2 font-medium text-muted-foreground text-xs">Paid</th>
                   <th className="text-right py-2.5 px-2 font-medium text-muted-foreground text-xs">Outstanding</th>
                   <th className="text-right py-2.5 px-2 font-medium text-muted-foreground text-xs">Coverage</th>
-                  <th className="text-left py-2.5 px-2 font-medium text-muted-foreground text-xs hidden xl:table-cell">Status</th>
+                  <th className="text-left py-2.5 px-2 font-medium text-muted-foreground text-xs">Status</th>
                 </tr>
               </thead>
               <tbody>
@@ -252,7 +252,7 @@ export default async function TopTaxpayersPage() {
                     </td>
 
                     {/* Type badge */}
-                    <td className="py-3 px-2 hidden md:table-cell">
+                    <td className="py-3 px-2">
                       <Badge
                         variant="outline"
                         className={`text-[10px] h-5 px-1.5 ${roleColor(r.role)}`}
@@ -267,12 +267,12 @@ export default async function TopTaxpayersPage() {
                     </td>
 
                     {/* Net Due */}
-                    <td className="py-3 px-2 text-right text-xs text-muted-foreground font-mono hidden lg:table-cell">
+                    <td className="py-3 px-2 text-right text-xs text-muted-foreground font-mono">
                       {fmt(r.netVatDue)}
                     </td>
 
                     {/* Paid */}
-                    <td className="py-3 px-2 text-right text-xs text-emerald-600 font-mono hidden lg:table-cell">
+                    <td className="py-3 px-2 text-right text-xs text-emerald-600 font-mono">
                       {r.paid > 0 ? fmt(r.paid) : '—'}
                     </td>
 
@@ -317,7 +317,7 @@ export default async function TopTaxpayersPage() {
                     </td>
 
                     {/* Clearance status */}
-                    <td className="py-3 px-2 hidden xl:table-cell">
+                    <td className="py-3 px-2">
                       <Badge
                         variant="outline"
                         className={`text-[10px] h-5 px-1.5 ${statusClass(r.clearanceStatus ?? '')}`}

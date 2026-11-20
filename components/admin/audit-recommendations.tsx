@@ -170,7 +170,7 @@ export function AuditRecommendations() {
         </div>
 
         {/* Summary strip */}
-        <div className="grid grid-cols-3 gap-2 mt-1">
+        <div className="mt-1 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
           {impactGroups.map(g => (
             <div key={g.tier} className={`rounded-lg border ${g.borderColor} px-2.5 py-2 text-center`}>
               <p className={`text-[10px] font-semibold uppercase tracking-wide ${g.color}`}>{g.label}</p>

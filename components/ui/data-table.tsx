@@ -264,6 +264,7 @@ export function DataTable<TData, TValue>({
           </TableBody>
         </Table>
       </div>
+      <p className="mt-2 text-xs text-muted-foreground sm:hidden">Swipe horizontally to view all columns.</p>
 
       {/* ---- Pagination ---- */}
       {showPagination && (

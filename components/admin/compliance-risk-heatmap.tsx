@@ -59,7 +59,7 @@ export function ComplianceRiskHeatmap() {
             </CardHeader>
             <CardContent className="space-y-4">
                 {/* Risk tier blocks */}
-                <div className="grid grid-cols-4 gap-2">
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                     {TIERS.map((tier) => {
                         const count = data[tier.key];
                         const pct = data.total > 0 ? Math.round((count / data.total) * 100) : 0;

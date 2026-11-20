@@ -32,7 +32,7 @@ export function StatCard({
                 )}
             </CardHeader>
             <CardContent className="pt-0 mt-auto">
-                <div className="text-lg font-bold truncate" title={String(value)}>
+                <div className="break-words text-lg font-bold [overflow-wrap:anywhere]" title={String(value)}>
                     {value}
                 </div>
                 {description && (

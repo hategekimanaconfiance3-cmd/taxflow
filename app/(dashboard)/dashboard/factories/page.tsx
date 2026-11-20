@@ -42,10 +42,10 @@ export default async function FactoriesPage() {
   const activeGateways = gateways.filter(g => g.status === 'active').length;
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="min-w-0 space-y-6">
       {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
           <h1 className="text-2xl font-semibold">My Factories</h1>
           <p className="text-muted-foreground text-sm mt-1">
             Register and manage your factories, production lines, and industrial gateways
@@ -56,7 +56,7 @@ export default async function FactoriesPage() {
 
       {/* Summary */}
       {factories.length > 0 && (
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           <Card>
             <CardContent className="pt-4 pb-4">
               <div className="flex items-center gap-3">

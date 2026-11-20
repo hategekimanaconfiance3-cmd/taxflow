@@ -60,7 +60,7 @@ export function TaxGapDashboard() {
             </CardHeader>
             <CardContent className="space-y-4">
                 {/* Summary row */}
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid gap-2 sm:grid-cols-3">
                     <div className="rounded-lg border p-2.5 text-center">
                         <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Expected</p>
                         <p className="text-sm font-bold font-mono mt-0.5">

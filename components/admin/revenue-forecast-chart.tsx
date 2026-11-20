@@ -140,7 +140,7 @@ export function RevenueForecastChart() {
         </div>
 
         {/* KPI strip */}
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid gap-3 sm:grid-cols-3">
           <div className="rounded-lg border p-3 text-center">
             <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Expected</p>
             <p className="text-sm font-bold font-mono mt-1">{formatCompact(forecast.expectedRevenue)}</p>

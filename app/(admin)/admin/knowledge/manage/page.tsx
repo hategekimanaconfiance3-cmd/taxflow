@@ -54,7 +54,7 @@ export default async function KnowledgeManagePage() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         <Card>
           <CardContent className="p-4 flex items-center gap-3">
             <div className="h-8 w-8 rounded-lg bg-green-100 dark:bg-green-900/30 flex items-center justify-center">

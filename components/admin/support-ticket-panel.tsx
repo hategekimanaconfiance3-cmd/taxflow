@@ -274,11 +274,11 @@ function TicketDetailPanel({
                         </div>
                         <div>
                             <span className="text-muted-foreground">TIN: </span>
-                            <span className="font-mono">{ticket.traderTin ?? "—"}</span>
+                        <span className="break-all font-mono">{ticket.traderTin ?? "—"}</span>
                         </div>
                         <div className="col-span-2">
                             <span className="text-muted-foreground">Email: </span>
-                            <span>{ticket.traderEmail}</span>
+                            <span className="break-all">{ticket.traderEmail}</span>
                         </div>
                     </div>
                 </div>

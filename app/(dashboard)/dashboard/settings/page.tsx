@@ -31,7 +31,7 @@ export default async function SettingsPage() {
               <Hash className="h-3.5 w-3.5" />
               <span>TIN Number</span>
             </div>
-            <span className="font-mono text-xs">{user.tinNumber ?? '—'}</span>
+            <span className="min-w-0 break-all font-mono text-xs">{user.tinNumber ?? '—'}</span>
 
             <div className="flex items-center gap-2 text-muted-foreground">
               <Building2 className="h-3.5 w-3.5" />
@@ -43,7 +43,7 @@ export default async function SettingsPage() {
               <Phone className="h-3.5 w-3.5" />
               <span>Phone</span>
             </div>
-            <span className="text-xs">{user.phoneNumber ?? '—'}</span>
+            <span className="min-w-0 break-all text-xs">{user.phoneNumber ?? '—'}</span>
           </div>
           <p className="text-[10px] text-muted-foreground/60">
             TIN, role, and phone number can only be updated by TF staff. Contact support if they need to change.

@@ -13,7 +13,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import {
-  LogOut, Menu, Shield, Bell, ChevronDown, ChevronRight, User, HelpCircle,
+  LogOut, Menu, Shield, Bell, ChevronDown, ChevronRight, User, HelpCircle, PanelLeftClose, PanelLeftOpen,
   Search, Brain, Send, Sparkles, RotateCcw, X, Check, Loader2, BookOpen,
 } from 'lucide-react';
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
@@ -338,6 +338,11 @@ export function AdminShell({ userId, userName, staffId, clearanceLevel, clearanc
     setIsSidebarCollapsed(false);
   };
 
+  const toggleSidebar = () => {
+    if (isAiOpen) setIsAiOpen(false);
+    setIsSidebarCollapsed((collapsed) => !collapsed);
+  };
+
   const handleSignOut = useCallback(async () => {
     if (isSigningOut) return;
     setIsSigningOut(true);
@@ -571,7 +576,7 @@ export function AdminShell({ userId, userName, staffId, clearanceLevel, clearanc
       <Separator className="opacity-60" />
 
       {/* Nav groups */}
-      <nav className="flex-1 overflow-y-auto py-2 scrollbar-thin">
+      <nav className="min-h-0 flex-1 overflow-y-auto overscroll-contain py-2 scrollbar-thin">
         {groups.map((group, gi) => (
           <div key={gi}>
             {group.label && (
@@ -800,6 +805,17 @@ export function AdminShell({ userId, userName, staffId, clearanceLevel, clearanc
         >
           {/* ── Topbar ──────────────────────────────────────── */}
           <header className="sticky top-0 z-20 flex h-14 items-center gap-1 border-b bg-background/95 px-2 backdrop-blur supports-[backdrop-filter]:bg-background/60 sm:gap-2 sm:px-4">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="hidden h-9 w-9 lg:inline-flex"
+              onClick={toggleSidebar}
+              aria-label={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+              title={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            >
+              {isSidebarCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+            </Button>
             {/* Mobile menu */}
             <Sheet open={isMobileNavigationOpen} onOpenChange={setIsMobileNavigationOpen}>
               <SheetTrigger asChild>
@@ -808,7 +824,7 @@ export function AdminShell({ userId, userName, staffId, clearanceLevel, clearanc
                   <span className="sr-only">Toggle menu</span>
                 </Button>
               </SheetTrigger>
-              <SheetContent side="left" className="w-[min(86vw,18rem)] max-w-[18rem] p-0">
+              <SheetContent side="left" className="flex min-h-0 max-h-dvh w-[min(86vw,18rem)] max-w-[18rem] flex-col overflow-hidden p-0">
                 <SheetTitle className="sr-only">Admin Navigation</SheetTitle>
                 {mobileSidebar}
               </SheetContent>

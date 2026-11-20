@@ -57,7 +57,7 @@ export function TaxOpsCompact({ tax, ops, insight }: TaxOpsCompactProps) {
               <p className="text-[9px] text-muted-foreground/70 mt-1">Collected vs net VAT due</p>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid gap-2 sm:grid-cols-2">
             <div className="rounded-md bg-emerald-50/50 border border-emerald-100 px-2.5 py-1.5">
               <p className="text-[9px] text-muted-foreground uppercase tracking-wide">Collected</p>
               <p className="text-xs font-mono font-semibold text-emerald-700">{formatRWF(tax.collected)}</p>
@@ -109,7 +109,7 @@ export function TaxOpsCompact({ tax, ops, insight }: TaxOpsCompactProps) {
             ))}
           </div>
           <Separator className="opacity-50" />
-          <div className="grid grid-cols-3 gap-1">
+          <div className="grid grid-cols-1 gap-1 sm:grid-cols-3">
             {[
               { icon: CheckCircle, label: 'Cleared', count: ops.cleared, color: 'text-emerald-600' },
               { icon: AlertTriangle, label: 'Flagged', count: ops.flagged, color: 'text-amber-600' },

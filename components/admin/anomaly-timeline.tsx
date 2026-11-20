@@ -111,7 +111,7 @@ export function AnomalyTimeline() {
       </CardHeader>
       <CardContent className="space-y-4">
         {/* KPIs */}
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid gap-2 sm:grid-cols-3">
           <div className="rounded-lg border px-3 py-2 text-center">
             <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Total anomalies</p>
             <p className={`text-xl font-bold font-mono mt-0.5 ${data.totalAnomalies > 0 ? "text-red-600" : "text-emerald-600"}`}>{data.totalAnomalies}</p>

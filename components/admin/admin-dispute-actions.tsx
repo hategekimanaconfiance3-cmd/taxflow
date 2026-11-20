@@ -190,7 +190,7 @@ export function AdminDisputeActions({
                     <div className="space-y-4 py-2">
                         {/* Case summary */}
                         <div className="rounded-lg border p-3 space-y-2 bg-muted/30">
-                            <div className="grid grid-cols-2 gap-2 text-sm">
+                            <div className="grid gap-2 text-sm sm:grid-cols-2">
                                 <div>
                                     <p className="text-xs text-muted-foreground font-medium">
                                         Filed by

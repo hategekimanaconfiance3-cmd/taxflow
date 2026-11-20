@@ -58,6 +58,7 @@ interface DashboardLayoutContextValue {
   openAI: () => void;
   closeAI: () => void;
   expandSidebar: () => void;
+  toggleSidebar: () => void;
   setLang: (l: LangCode) => void;
 }
 
@@ -325,6 +326,11 @@ export function DashboardLayoutClient({
     setIsSidebarCollapsed(false);
   }, [isAiOpen]);
 
+  const toggleSidebar = useCallback(() => {
+    if (isAiOpen) setIsAiOpen(false);
+    setIsSidebarCollapsed((collapsed) => !collapsed);
+  }, [isAiOpen]);
+
   // Ctrl+I shortcut
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -341,7 +347,7 @@ export function DashboardLayoutClient({
 
   return (
     <DashboardLayoutContext.Provider
-      value={{ isSidebarCollapsed, isAiOpen, lang, sidebarW, openAI, closeAI, expandSidebar, setLang }}
+      value={{ isSidebarCollapsed, isAiOpen, lang, sidebarW, openAI, closeAI, expandSidebar, toggleSidebar, setLang }}
     >
       <div className="print:hidden">
         <DashboardSidebar role={role} businessName={businessName} userName={userName} />

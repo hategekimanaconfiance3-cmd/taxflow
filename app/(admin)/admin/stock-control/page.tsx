@@ -225,7 +225,7 @@ export default async function AdminStockControlPage({
   };
 
   return (
-    <main className="mx-auto w-full max-w-7xl space-y-6 p-4 sm:p-6">
+    <div className="mx-auto w-full max-w-7xl space-y-6">
       <header>
         <h1 className="text-2xl font-bold tracking-tight">Stock Restock Control</h1>
         <p className="mt-1 text-sm text-muted-foreground">Review prospective sell-through eligibility. Exception decisions and balance attestations are audited; they do not create receipts or VAT postings.</p>
@@ -432,6 +432,6 @@ export default async function AdminStockControlPage({
           })}</div>
         )}
       </section>
-    </main>
+    </div>
   );
 }

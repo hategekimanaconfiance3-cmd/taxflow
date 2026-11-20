@@ -88,7 +88,7 @@ export function EconomicIntelligence() {
                             {data.sectorActivity.map((sector) => (
                                 <div key={sector.role} className="rounded-lg border p-3 space-y-1.5">
                                     <p className="text-xs font-semibold">{sector.label}</p>
-                                    <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[10px]">
+                                    <div className="grid grid-cols-1 gap-x-3 gap-y-1 text-[10px] sm:grid-cols-2">
                                         <span className="text-muted-foreground">Traders</span>
                                         <span className="font-mono text-right">{sector.traderCount}</span>
                                         <span className="text-muted-foreground">Transactions</span>
@@ -162,7 +162,7 @@ export function EconomicIntelligence() {
 
                 {/* Stock Overview — only show if there is data */}
                 {(data.stockOverview.totalProducts > 0 || data.stockOverview.totalQuantity > 0) && (
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid gap-2 sm:grid-cols-3">
                         <div className="rounded-lg border p-2.5 text-center">
                             <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Products</p>
                             <p className="text-sm font-bold mt-0.5">{data.stockOverview.totalProducts}</p>

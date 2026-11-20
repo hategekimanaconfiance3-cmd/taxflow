@@ -61,14 +61,14 @@ export default async function IndustrialMonitoringPage() {
   const onlineGateways = gateways.filter(g => isOnline(g.lastHeartbeatAt));
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="min-w-0 space-y-6">
       <div>
         <h1 className="text-2xl font-semibold">Industrial Monitoring</h1>
         <p className="text-muted-foreground text-sm mt-1">Real-time factory floor, gateway activity, and production reconciliation</p>
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium flex items-center gap-2">
@@ -126,7 +126,7 @@ export default async function IndustrialMonitoringPage() {
 
       {/* Reconciliation Summary Cards */}
       {recon && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium flex items-center gap-2">
@@ -185,7 +185,7 @@ export default async function IndustrialMonitoringPage() {
             <CardDescription>Totals across all batches with machine evidence</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-5">
               <div>
                 <p className="text-xs text-muted-foreground">Declared (total)</p>
                 <p className="text-lg font-semibold">{fmtQty(recon.batchQuantityTotals.totalDeclared)}</p>

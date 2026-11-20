@@ -55,8 +55,8 @@ export default async function PaymentsPage() {
               not an official TF tax assessment.
             </p>
           </div>
-          <div className="grid grid-cols-3 gap-3">
-            <div className="rounded-lg border px-3 py-2.5">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="min-w-0 rounded-lg border px-3 py-2.5">
               <div className="flex items-center gap-1 text-xs text-muted-foreground">
                 <TrendingUp className="h-3 w-3" />
                 VAT Owed
@@ -65,7 +65,7 @@ export default async function PaymentsPage() {
                 {formatRWF(compliance.netOwed)}
               </p>
             </div>
-            <div className="rounded-lg border px-3 py-2.5">
+            <div className="min-w-0 rounded-lg border px-3 py-2.5">
               <div className="flex items-center gap-1 text-xs text-muted-foreground">
                 <TrendingDown className="h-3 w-3 text-emerald-600" />
                 Paid
@@ -74,7 +74,7 @@ export default async function PaymentsPage() {
                 {formatRWF(compliance.totalPaid)}
               </p>
             </div>
-            <div className="rounded-lg border px-3 py-2.5">
+            <div className="min-w-0 rounded-lg border px-3 py-2.5">
               <div className="flex items-center gap-1 text-xs text-muted-foreground">
                 <Minus className="h-3 w-3" />
                 Outstanding
