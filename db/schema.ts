@@ -395,6 +395,7 @@ export const transaction = pgTable(
     index('txn_buyer_idx').on(table.buyerId),
     index('txn_status_idx').on(table.status),
     index('txn_product_idx').on(table.productId),
+    index('txn_created_at_idx').on(table.createdAt),
   ],
 );
 

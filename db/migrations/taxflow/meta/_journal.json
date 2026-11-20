@@ -316,6 +316,13 @@
       "when": 1794700000011,
       "tag": "0044_price_monitoring_policies",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1794700000012,
+      "tag": "0045_anomaly_scan_indexes",
+      "breakpoints": true
     }
   ]
 }

@@ -29,6 +29,14 @@ export type Anomaly = {
     description: string;
 };
 
+// Keep this server-rendered dashboard bounded. The anomaly page is a review
+// surface, not a warehouse export; unbounded reads and one risk computation per
+// merchant can exceed serverless execution limits on a production database.
+const MAX_RECENT_TRANSACTIONS = 1000;
+const MAX_NEGATIVE_STOCK_ROWS = 500;
+const MAX_RISK_MERCHANTS = 8;
+const RISK_COMPUTATION_TIMEOUT_MS = 1500;
+
 // ---------------------------------------------------------------------------
 // Detect anomalies across recent transactions
 // ---------------------------------------------------------------------------
@@ -69,7 +77,8 @@ export async function detectAnomalies(): Promise<Anomaly[]> {
         .leftJoin(sellerSub, eq(transaction.sellerId, sql`seller.id`))
         .leftJoin(buyerSub, eq(transaction.buyerId, sql`buyer.id`))
         .where(gte(transaction.createdAt, thirtyDaysAgo))
-        .orderBy(desc(transaction.createdAt));
+        .orderBy(desc(transaction.createdAt))
+        .limit(MAX_RECENT_TRANSACTIONS);
 
     // ── 1. High Quantity: qty > 3× average for that product ────────────
     const avgByProduct = new Map<string, { avg: number; count: number; sum: number }>();
@@ -176,7 +185,8 @@ export async function detectAnomalies(): Promise<Anomaly[]> {
         .from(stock)
         .innerJoin(product, eq(stock.productId, product.id))
         .innerJoin(user, eq(stock.businessId, user.id))
-        .where(sql`${stock.quantity} < 0`);
+        .where(sql`${stock.quantity} < 0`)
+        .limit(MAX_NEGATIVE_STOCK_ROWS);
 
     for (const s of stockLevels) {
         anomalies.push({
@@ -194,10 +204,27 @@ export async function detectAnomalies(): Promise<Anomaly[]> {
     }
 
     // ── 5. AI Risk Scores: merchants with high/critical risk ──────────
-    // Dynamic import to avoid crashing the page if TIN_DATABASE_URL is not configured
+    // Dynamic import to avoid crashing the page if TIN_DATABASE_URL is not configured.
+    // Compute only for merchants represented in the bounded recent transaction
+    // window, and abandon slow risk calculations so deterministic anomalies can
+    // still render before the serverless function deadline.
     try {
-        const { computeAllRiskScores } = await import("@/lib/ai/risk-scoring");
-        const riskScores = await computeAllRiskScores();
+        const { computeRiskScore } = await import("@/lib/ai/risk-scoring");
+        const recentMerchantIds = [...new Set(recentTxns.map((transactionRow) => transactionRow.sellerId))].slice(0, MAX_RISK_MERCHANTS);
+        const riskScores = (await Promise.all(recentMerchantIds.map(async (merchantId) => {
+            try {
+                return await Promise.race([
+                    computeRiskScore(merchantId),
+                    new Promise<null>((resolve) => setTimeout(() => resolve(null), RISK_COMPUTATION_TIMEOUT_MS)),
+                ]);
+            } catch (error) {
+                console.error("Risk score computation for anomaly review failed:", {
+                    merchantId,
+                    errorName: error instanceof Error ? error.name : typeof error,
+                });
+                return null;
+            }
+        }))).filter((score): score is Awaited<ReturnType<typeof computeRiskScore>> => score !== null);
         const flaggedMerchants = riskScores.filter(
             (s) => s.level === "critical" || s.level === "high",
         );
