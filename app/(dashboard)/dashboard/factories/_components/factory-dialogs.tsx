@@ -7,7 +7,17 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { registerFactory, registerGateway, registerProductionLine } from '@/lib/actions/industrial-factory.action';
-import { toast } from 'sonner';
+
+type Msg = { type: 'success' | 'error'; text: string };
+
+function InlineMessage({ msg }: { msg: Msg | null }) {
+  if (!msg) return null;
+  return (
+    <p className={`text-xs px-1 ${msg.type === 'success' ? 'text-green-600' : 'text-destructive'}`}>
+      {msg.text}
+    </p>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Register Factory Dialog
@@ -16,12 +26,14 @@ export function RegisterFactoryDialog({ onSuccess }: { onSuccess?: () => void })
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [form, setForm] = useState({ name: '', location: '', province: '', district: '', registrationNumber: '', notes: '' });
+  const [msg, setMsg] = useState<Msg | null>(null);
 
   function handleSubmit() {
     if (!form.name.trim() || !form.location.trim()) {
-      toast.error('Factory name and location are required');
+      setMsg({ type: 'error', text: 'Factory name and location are required' });
       return;
     }
+    setMsg(null);
     startTransition(async () => {
       const result = await registerFactory({
         name: form.name.trim(),
@@ -32,12 +44,12 @@ export function RegisterFactoryDialog({ onSuccess }: { onSuccess?: () => void })
         notes: form.notes.trim() || undefined,
       });
       if (result.success) {
-        toast.success('Factory registered — pending admin approval');
-        setOpen(false);
+        setMsg({ type: 'success', text: 'Factory registered — pending admin approval' });
         setForm({ name: '', location: '', province: '', district: '', registrationNumber: '', notes: '' });
         onSuccess?.();
+        setTimeout(() => { setOpen(false); setMsg(null); }, 1500);
       } else {
-        toast.error(result.error);
+        setMsg({ type: 'error', text: result.error ?? 'Failed to register factory' });
       }
     });
   }
@@ -75,6 +87,7 @@ export function RegisterFactoryDialog({ onSuccess }: { onSuccess?: () => void })
               <Label>Notes</Label>
               <Input value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Optional notes" />
             </div>
+            <InlineMessage msg={msg} />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)} disabled={pending}>Cancel</Button>
@@ -94,20 +107,22 @@ export function RegisterGatewayDialog({ factories }: { factories: Array<{ id: st
   const [pending, startTransition] = useTransition();
   const [form, setForm] = useState({ factoryId: '', name: '', protocol: 'https' as 'https' | 'mqtt' | 'opc_ua' });
   const [apiKey, setApiKey] = useState<string | null>(null);
+  const [msg, setMsg] = useState<Msg | null>(null);
 
   const approvedFactories = factories.filter(f => f.status === 'approved');
 
   function handleSubmit() {
     if (!form.factoryId || !form.name.trim()) {
-      toast.error('Factory and gateway name are required');
+      setMsg({ type: 'error', text: 'Factory and gateway name are required' });
       return;
     }
+    setMsg(null);
     startTransition(async () => {
       const result = await registerGateway({ factoryId: form.factoryId, name: form.name.trim(), protocol: form.protocol });
       if (result.success) {
         setApiKey(result.data.apiKey);
       } else {
-        toast.error(result.error);
+        setMsg({ type: 'error', text: result.error ?? 'Failed to register gateway' });
       }
     });
   }
@@ -115,6 +130,7 @@ export function RegisterGatewayDialog({ factories }: { factories: Array<{ id: st
   function handleClose() {
     setOpen(false);
     setApiKey(null);
+    setMsg(null);
     setForm({ factoryId: '', name: '', protocol: 'https' });
   }
 
@@ -168,6 +184,7 @@ export function RegisterGatewayDialog({ factories }: { factories: Array<{ id: st
                     </SelectContent>
                   </Select>
                 </div>
+                <InlineMessage msg={msg} />
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={handleClose} disabled={pending}>Cancel</Button>
@@ -188,18 +205,20 @@ export function RegisterProductionLineDialog({ factories }: { factories: Array<{
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [form, setForm] = useState({ factoryId: '', name: '', lineCode: '', description: '', capacity: '', capacityUnit: '' });
+  const [msg, setMsg] = useState<Msg | null>(null);
 
   const approvedFactories = factories.filter(f => f.status === 'approved');
 
   function handleSubmit() {
     if (!form.factoryId || !form.name.trim() || !form.lineCode.trim()) {
-      toast.error('Factory, line name and line code are required');
+      setMsg({ type: 'error', text: 'Factory, line name and line code are required' });
       return;
     }
     if (!/^[A-Z0-9_-]+$/.test(form.lineCode.trim())) {
-      toast.error('Line code must be uppercase letters, digits, hyphens or underscores');
+      setMsg({ type: 'error', text: 'Line code must be uppercase letters, digits, hyphens or underscores' });
       return;
     }
+    setMsg(null);
     startTransition(async () => {
       const result = await registerProductionLine({
         factoryId: form.factoryId,
@@ -210,11 +229,11 @@ export function RegisterProductionLineDialog({ factories }: { factories: Array<{
         capacityUnit: form.capacityUnit.trim() || undefined,
       });
       if (result.success) {
-        toast.success('Production line registered');
-        setOpen(false);
+        setMsg({ type: 'success', text: 'Production line registered' });
         setForm({ factoryId: '', name: '', lineCode: '', description: '', capacity: '', capacityUnit: '' });
+        setTimeout(() => { setOpen(false); setMsg(null); }, 1500);
       } else {
-        toast.error(result.error);
+        setMsg({ type: 'error', text: result.error ?? 'Failed to register production line' });
       }
     });
   }
@@ -255,6 +274,7 @@ export function RegisterProductionLineDialog({ factories }: { factories: Array<{
                 <Input value={form.capacityUnit} onChange={e => setForm(f => ({ ...f, capacityUnit: e.target.value }))} placeholder="units/hr" />
               </div>
             </div>
+            <InlineMessage msg={msg} />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)} disabled={pending}>Cancel</Button>
