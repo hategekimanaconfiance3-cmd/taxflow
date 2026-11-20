@@ -1959,3 +1959,329 @@ export const knowledgeFaq = pgTable('knowledge_faq', {
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
 
+
+// ---------------------------------------------------------------------------
+// Industrial Machine Integration – Stage 1
+// ---------------------------------------------------------------------------
+
+export const factory = pgTable(
+  'factory',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    name: text('name').notNull(),
+    location: text('location').notNull(),
+    province: text('province'),
+    district: text('district'),
+    registrationNumber: text('registration_number').unique(),
+    status: text('status').notNull().default('pending'),
+    approvedByUserId: text('approved_by_user_id').references(() => user.id),
+    approvedAt: timestamp('approved_at'),
+    suspendedAt: timestamp('suspended_at'),
+    suspensionReason: text('suspension_reason'),
+    notes: text('notes'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().$onUpdate(() => new Date()).notNull(),
+  },
+  (table) => [
+    index('factory_manufacturer_idx').on(table.manufacturerId),
+    index('factory_status_idx').on(table.status),
+    check('factory_status_check', sql`${table.status} IN ('pending','approved','suspended','decommissioned')`),
+  ],
+);
+
+export const productionLine = pgTable(
+  'production_line',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    factoryId: text('factory_id').notNull().references(() => factory.id),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    name: text('name').notNull(),
+    lineCode: text('line_code').notNull(),
+    description: text('description'),
+    capacity: real('capacity'),
+    capacityUnit: text('capacity_unit'),
+    status: text('status').notNull().default('active'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().$onUpdate(() => new Date()).notNull(),
+  },
+  (table) => [
+    index('production_line_factory_idx').on(table.factoryId),
+    index('production_line_manufacturer_idx').on(table.manufacturerId),
+    uniqueIndex('production_line_factory_code_uniq').on(table.factoryId, table.lineCode),
+    check('production_line_status_check', sql`${table.status} IN ('active','maintenance','decommissioned')`),
+  ],
+);
+
+export const industrialEquipment = pgTable(
+  'industrial_equipment',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    productionLineId: text('production_line_id').notNull().references(() => productionLine.id),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    name: text('name').notNull(),
+    equipmentCode: text('equipment_code').notNull(),
+    equipmentType: text('equipment_type').notNull(),
+    serialNumber: text('serial_number'),
+    manufacturer: text('manufacturer'),
+    model: text('model'),
+    installedAt: timestamp('installed_at'),
+    status: text('status').notNull().default('active'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().$onUpdate(() => new Date()).notNull(),
+  },
+  (table) => [
+    index('industrial_equipment_line_idx').on(table.productionLineId),
+    index('industrial_equipment_manufacturer_idx').on(table.manufacturerId),
+    uniqueIndex('industrial_equipment_manufacturer_code_uniq').on(table.manufacturerId, table.equipmentCode),
+    check('industrial_equipment_type_check', sql`${table.equipmentType} IN ('mixer','filler','labeler','conveyor','sensor','scale','other')`),
+    check('industrial_equipment_status_check', sql`${table.status} IN ('active','maintenance','offline','decommissioned')`),
+  ],
+);
+
+export const industrialGateway = pgTable(
+  'industrial_gateway',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    factoryId: text('factory_id').notNull().references(() => factory.id),
+    name: text('name').notNull(),
+    gatewayId: text('gateway_id').notNull().unique(),
+    protocol: text('protocol').notNull().default('https'),
+    apiKeyHash: text('api_key_hash'),
+    lastSeenAt: timestamp('last_seen_at'),
+    status: text('status').notNull().default('pending'),
+    approvedByUserId: text('approved_by_user_id').references(() => user.id),
+    approvedAt: timestamp('approved_at'),
+    revokedAt: timestamp('revoked_at'),
+    revocationReason: text('revocation_reason'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().$onUpdate(() => new Date()).notNull(),
+  },
+  (table) => [
+    index('industrial_gateway_manufacturer_idx').on(table.manufacturerId),
+    index('industrial_gateway_factory_idx').on(table.factoryId),
+    index('industrial_gateway_status_idx').on(table.status),
+    uniqueIndex('industrial_gateway_gateway_id_uniq').on(table.gatewayId),
+    check('industrial_gateway_status_check', sql`${table.status} IN ('pending','active','revoked','offline')`),
+  ],
+);
+
+export const industrialEvent = pgTable(
+  'industrial_event',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    gatewayId: text('gateway_id').notNull().references(() => industrialGateway.id),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    factoryId: text('factory_id').notNull().references(() => factory.id),
+    productionLineId: text('production_line_id').references(() => productionLine.id),
+    equipmentId: text('equipment_id').references(() => industrialEquipment.id),
+    eventType: text('event_type').notNull(),
+    payload: jsonb('payload').notNull().default({}),
+    productionBatchId: text('production_batch_id').references(() => productionBatch.id),
+    eventTimestamp: timestamp('event_timestamp').notNull(),
+    receivedAt: timestamp('received_at').defaultNow().notNull(),
+    processedAt: timestamp('processed_at'),
+    processingStatus: text('processing_status').notNull().default('received'),
+    anomalyScore: real('anomaly_score'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('industrial_event_manufacturer_time_idx').on(table.manufacturerId, table.eventTimestamp),
+    index('industrial_event_batch_idx').on(table.productionBatchId),
+    index('industrial_event_gateway_time_idx').on(table.gatewayId, table.eventTimestamp),
+    index('industrial_event_processing_status_idx').on(table.processingStatus),
+    check('industrial_event_type_check', sql`${table.eventType} IN ('production_count','weight_reading','line_start','line_stop','reject_count','downtime','sensor_reading','batch_tag')`),
+    check('industrial_event_processing_status_check', sql`${table.processingStatus} IN ('received','processed','anomaly_flagged','ignored')`),
+  ],
+);
+
+export const productionVerification = pgTable(
+  'production_verification',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    productionBatchId: text('production_batch_id').notNull().unique().references(() => productionBatch.id),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    verificationStatus: text('verification_status').notNull().default('pending'),
+    declaredQuantity: real('declared_quantity').notNull(),
+    industrialQuantity: real('industrial_quantity'),
+    reportedQuantity: real('reported_quantity'),
+    discrepancyPercent: real('discrepancy_percent'),
+    discrepancyThresholdBasisPoints: integer('discrepancy_threshold_basis_points').notNull().default(500),
+    alertRaised: boolean('alert_raised').notNull().default(false),
+    alertRaisedAt: timestamp('alert_raised_at'),
+    verifiedByUserId: text('verified_by_user_id').references(() => user.id),
+    verifiedAt: timestamp('verified_at'),
+    verificationNote: text('verification_note'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().$onUpdate(() => new Date()).notNull(),
+  },
+  (table) => [
+    index('production_verification_manufacturer_status_idx').on(table.manufacturerId, table.verificationStatus),
+    index('production_verification_alert_idx').on(table.alertRaised),
+    uniqueIndex('production_verification_batch_uniq').on(table.productionBatchId),
+    check('production_verification_status_check', sql`${table.verificationStatus} IN ('pending','verified','discrepancy_flagged','investigation')`),
+  ],
+);
+
+export const industrialAlert = pgTable(
+  'industrial_alert',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    manufacturerId: text('manufacturer_id').notNull().references(() => user.id),
+    alertType: text('alert_type').notNull(),
+    severity: text('severity').notNull().default('medium'),
+    title: text('title').notNull(),
+    description: text('description').notNull(),
+    relatedEntityType: text('related_entity_type'),
+    relatedEntityId: text('related_entity_id'),
+    productionVerificationId: text('production_verification_id').references(() => productionVerification.id),
+    status: text('status').notNull().default('open'),
+    acknowledgedByUserId: text('acknowledged_by_user_id').references(() => user.id),
+    acknowledgedAt: timestamp('acknowledged_at'),
+    resolvedByUserId: text('resolved_by_user_id').references(() => user.id),
+    resolvedAt: timestamp('resolved_at'),
+    resolutionNote: text('resolution_note'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().$onUpdate(() => new Date()).notNull(),
+  },
+  (table) => [
+    index('industrial_alert_manufacturer_status_idx').on(table.manufacturerId, table.status),
+    index('industrial_alert_type_severity_idx').on(table.alertType, table.severity),
+    index('industrial_alert_status_idx').on(table.status),
+    check('industrial_alert_type_check', sql`${table.alertType} IN ('production_discrepancy','gateway_offline','equipment_fault','anomaly_detected','unreported_production')`),
+    check('industrial_alert_severity_check', sql`${table.severity} IN ('low','medium','high','critical')`),
+    check('industrial_alert_status_check', sql`${table.status} IN ('open','acknowledged','resolved','dismissed')`),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// Relations – Industrial Machine Integration
+// ---------------------------------------------------------------------------
+
+export const factoryRelations = relations(factory, ({ one, many }) => ({
+  manufacturer: one(user, {
+    fields: [factory.manufacturerId],
+    references: [user.id],
+    relationName: 'factoryManufacturer',
+  }),
+  approvedBy: one(user, {
+    fields: [factory.approvedByUserId],
+    references: [user.id],
+    relationName: 'factoryApprover',
+  }),
+  productionLines: many(productionLine),
+}));
+
+export const productionLineRelations = relations(productionLine, ({ one, many }) => ({
+  factory: one(factory, {
+    fields: [productionLine.factoryId],
+    references: [factory.id],
+  }),
+  manufacturer: one(user, {
+    fields: [productionLine.manufacturerId],
+    references: [user.id],
+    relationName: 'productionLineManufacturer',
+  }),
+  equipment: many(industrialEquipment),
+  events: many(industrialEvent),
+}));
+
+export const industrialEquipmentRelations = relations(industrialEquipment, ({ one, many }) => ({
+  productionLine: one(productionLine, {
+    fields: [industrialEquipment.productionLineId],
+    references: [productionLine.id],
+  }),
+  manufacturer: one(user, {
+    fields: [industrialEquipment.manufacturerId],
+    references: [user.id],
+    relationName: 'industrialEquipmentManufacturer',
+  }),
+  events: many(industrialEvent),
+}));
+
+export const industrialGatewayRelations = relations(industrialGateway, ({ one, many }) => ({
+  manufacturer: one(user, {
+    fields: [industrialGateway.manufacturerId],
+    references: [user.id],
+    relationName: 'industrialGatewayManufacturer',
+  }),
+  factory: one(factory, {
+    fields: [industrialGateway.factoryId],
+    references: [factory.id],
+  }),
+  approvedBy: one(user, {
+    fields: [industrialGateway.approvedByUserId],
+    references: [user.id],
+    relationName: 'industrialGatewayApprover',
+  }),
+  events: many(industrialEvent),
+}));
+
+export const industrialEventRelations = relations(industrialEvent, ({ one }) => ({
+  gateway: one(industrialGateway, {
+    fields: [industrialEvent.gatewayId],
+    references: [industrialGateway.id],
+  }),
+  manufacturer: one(user, {
+    fields: [industrialEvent.manufacturerId],
+    references: [user.id],
+    relationName: 'industrialEventManufacturer',
+  }),
+  factory: one(factory, {
+    fields: [industrialEvent.factoryId],
+    references: [factory.id],
+  }),
+  productionLine: one(productionLine, {
+    fields: [industrialEvent.productionLineId],
+    references: [productionLine.id],
+  }),
+  equipment: one(industrialEquipment, {
+    fields: [industrialEvent.equipmentId],
+    references: [industrialEquipment.id],
+  }),
+  productionBatch: one(productionBatch, {
+    fields: [industrialEvent.productionBatchId],
+    references: [productionBatch.id],
+  }),
+}));
+
+export const productionVerificationRelations = relations(productionVerification, ({ one, many }) => ({
+  productionBatch: one(productionBatch, {
+    fields: [productionVerification.productionBatchId],
+    references: [productionBatch.id],
+  }),
+  manufacturer: one(user, {
+    fields: [productionVerification.manufacturerId],
+    references: [user.id],
+    relationName: 'productionVerificationManufacturer',
+  }),
+  verifiedBy: one(user, {
+    fields: [productionVerification.verifiedByUserId],
+    references: [user.id],
+    relationName: 'productionVerificationVerifier',
+  }),
+  alerts: many(industrialAlert),
+}));
+
+export const industrialAlertRelations = relations(industrialAlert, ({ one }) => ({
+  manufacturer: one(user, {
+    fields: [industrialAlert.manufacturerId],
+    references: [user.id],
+    relationName: 'industrialAlertManufacturer',
+  }),
+  productionVerification: one(productionVerification, {
+    fields: [industrialAlert.productionVerificationId],
+    references: [productionVerification.id],
+  }),
+  acknowledgedBy: one(user, {
+    fields: [industrialAlert.acknowledgedByUserId],
+    references: [user.id],
+    relationName: 'industrialAlertAcknowledger',
+  }),
+  resolvedBy: one(user, {
+    fields: [industrialAlert.resolvedByUserId],
+    references: [user.id],
+    relationName: 'industrialAlertResolver',
+  }),
+}));

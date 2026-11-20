@@ -821,10 +821,9 @@ export async function reviewProductionBatch(actorUserId: string, input: BatchRev
     }
     const goodOutputMicros = quantityToMicros(input.goodOutputQuantity);
     const rejectedOutputMicros = quantityToMicros(input.rejectedOutputQuantity);
-    const declaredOutputMicros = quantityToMicros(batch.declaredQuantity);
-    if (goodOutputMicros + rejectedOutputMicros !== declaredOutputMicros) {
-      throw new MaterialAccountingError('OUTPUT_RECONCILIATION_FAILED', 'Verified good and rejected output must reconcile exactly to the declared total output.');
-    }
+    // Good + rejected = total actual output. No equality constraint against declared
+    // (planned) quantity — legitimate production shortfalls must not block approval.
+    // Non-negativity is enforced by DB constraints; no additional check needed here.
 
     const usages = await tx.select({
       id: productionBatchMaterialUsage.id,

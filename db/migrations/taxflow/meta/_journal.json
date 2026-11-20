@@ -260,6 +260,13 @@
       "when": 1794720000001,
       "tag": "0036_stock_quantity_real",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1794820000000,
+      "tag": "0037_industrial_integration",
+      "breakpoints": true
     }
   ]
 }
