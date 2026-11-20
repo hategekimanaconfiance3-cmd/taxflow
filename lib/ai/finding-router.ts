@@ -39,6 +39,8 @@ const FINDING_PERMISSION_MAP: Record<string, RRAPermission> = {
   data_quality:                  'data_quality.read',
   risk_score:                    'ai.findings.read',
   production_discrepancy:        'traceability.read',
+  // Gap 4 fix — dispatch mismatches routed to payments reconciliation officers
+  dispatch_mismatch:             'payments.reconcile',
 };
 
 export interface FindingRouterPayload {

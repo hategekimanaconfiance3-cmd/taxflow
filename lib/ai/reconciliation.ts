@@ -4,7 +4,7 @@
 
 import { eq, and, sql, gte, lte, inArray } from 'drizzle-orm';
 import db from '@/db/drizzle';
-import { transaction, stock, product, user, stockAdjustment, productionBatch, aiFinding, aiAuditLog } from '@/db/schema';
+import { transaction, stock, product, user, stockAdjustment, productionBatch, aiFinding, aiAuditLog, stockMovement } from '@/db/schema';
 import {
   calculateExpectedClosing,
   calculateDiscrepancy,
@@ -295,14 +295,30 @@ export async function reconcileAndCreateFindings(
 
 // ---------------------------------------------------------------------------
 // Dispatch/Receipt Mismatch Detection (§3.2)
+// Three mismatch types are detected:
+//   A. stale_pending     — transaction pending > 72 h with no buyer confirmation
+//   B. no_buyer_receipt  — confirmed/completed but buyer has no matching stock movement
+//   C. quantity_shortfall — buyer received < 90% of seller's dispatched quantity
 // ---------------------------------------------------------------------------
 
 export async function detectDispatchMismatches(
   days = 30,
-): Promise<Array<{ transactionId: string; sellerId: string; buyerId: string; productId: string; dispatched: number; confirmed: number; difference: number; differencePct: number }>> {
+): Promise<Array<{
+  transactionId: string;
+  sellerId: string;
+  buyerId: string;
+  productId: string;
+  dispatched: number;
+  confirmed: number;
+  difference: number;
+  differencePct: number;
+  mismatchType: 'stale_pending' | 'no_buyer_receipt' | 'quantity_shortfall';
+}>> {
   const since = new Date(Date.now() - days * 86_400_000);
+  // A pending transaction older than 72 hours without confirmation is suspicious.
+  const stalePendingCutoff = new Date(Date.now() - 72 * 60 * 60 * 1000);
 
-  // Get all transactions with a registered buyer (not retail consumer)
+  // Fetch all B2B transactions in the window (buyer is a registered business).
   const txns = await db
     .select({
       id: transaction.id,
@@ -311,6 +327,7 @@ export async function detectDispatchMismatches(
       productId: transaction.productId,
       sellerQty: transaction.quantity,
       status: transaction.status,
+      createdAt: transaction.createdAt,
     })
     .from(transaction)
     .where(and(
@@ -319,18 +336,60 @@ export async function detectDispatchMismatches(
       inArray(transaction.status, ['confirmed', 'completed', 'pending']),
     ));
 
-  const mismatches = [];
+  const mismatches: Array<{
+    transactionId: string;
+    sellerId: string;
+    buyerId: string;
+    productId: string;
+    dispatched: number;
+    confirmed: number;
+    difference: number;
+    differencePct: number;
+    mismatchType: 'stale_pending' | 'no_buyer_receipt' | 'quantity_shortfall';
+  }> = [];
 
   for (const txn of txns) {
     if (!txn.buyerId) continue;
-    // For a real mismatch: compare seller-recorded quantity vs buyer-confirmed quantity
-    // In TaxFlow's model, the single transaction record holds the agreed qty after confirmation.
-    // A mismatch occurs when seller's initial qty != confirmed qty (tracked via status transitions).
-    // Here we flag confirmed transactions where quantity rounds to a non-integer (data quality)
-    // and pending transactions older than 72h as dispatch mismatches.
-    if (txn.status === 'pending') {
-      const mismatch = calculateDispatchMismatch(txn.sellerQty, 0);
-      if (mismatch.hasMismatch) {
+
+    // Type A — Stale pending: seller dispatched but buyer never confirmed
+    if (txn.status === 'pending' && txn.createdAt < stalePendingCutoff) {
+      mismatches.push({
+        transactionId: txn.id,
+        sellerId: txn.sellerId,
+        buyerId: txn.buyerId,
+        productId: txn.productId,
+        dispatched: txn.sellerQty,
+        confirmed: 0,
+        difference: txn.sellerQty,
+        differencePct: 100,
+        mismatchType: 'stale_pending',
+      });
+      continue;
+    }
+
+    // Types B & C — Confirmed/completed but buyer stock shows no or partial receipt.
+    // We look for a 'purchase' stock movement on the buyer's account for this product
+    // within a 7-day window after the transaction date.
+    if (txn.status === 'confirmed' || txn.status === 'completed') {
+      const windowEnd = new Date(txn.createdAt.getTime() + 7 * 86_400_000);
+
+      const [buyerReceipt] = await db
+        .select({
+          total: sql<number>`COALESCE(SUM(ABS(${stockMovement.quantityDelta})), 0)::float8`,
+        })
+        .from(stockMovement)
+        .where(and(
+          eq(stockMovement.businessId, txn.buyerId),
+          eq(stockMovement.productId, txn.productId),
+          eq(stockMovement.movementType, 'purchase'),
+          gte(stockMovement.createdAt, txn.createdAt),
+          lte(stockMovement.createdAt, windowEnd),
+        ));
+
+      const receivedQty = buyerReceipt?.total ?? 0;
+
+      // Type B — No buyer receipt at all
+      if (receivedQty === 0) {
         mismatches.push({
           transactionId: txn.id,
           sellerId: txn.sellerId,
@@ -338,8 +397,26 @@ export async function detectDispatchMismatches(
           productId: txn.productId,
           dispatched: txn.sellerQty,
           confirmed: 0,
-          difference: mismatch.difference,
-          differencePct: mismatch.differencePct,
+          difference: txn.sellerQty,
+          differencePct: 100,
+          mismatchType: 'no_buyer_receipt',
+        });
+        continue;
+      }
+
+      // Type C — Buyer received less than 90% of dispatched quantity
+      const { hasMismatch, difference, differencePct } = calculateDispatchMismatch(txn.sellerQty, receivedQty);
+      if (hasMismatch) {
+        mismatches.push({
+          transactionId: txn.id,
+          sellerId: txn.sellerId,
+          buyerId: txn.buyerId,
+          productId: txn.productId,
+          dispatched: txn.sellerQty,
+          confirmed: receivedQty,
+          difference,
+          differencePct,
+          mismatchType: 'quantity_shortfall',
         });
       }
     }
