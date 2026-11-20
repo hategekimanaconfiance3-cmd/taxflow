@@ -7,6 +7,7 @@ import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { consumeRateLimit, getRequestIdentity } from "@/lib/rate-limit";
+import { requireRRAPermission } from "@/lib/auth-guard";
 import { z } from "zod";
 // ---------------------------------------------------------------------------
 // Auth Server Actions
@@ -51,6 +52,9 @@ export type IdLookupResult =
  * Returns typed error codes so the UI can present the right fallback.
  */
 export async function validateId(nationalId: string): Promise<IdLookupResult> {
+    // National IDs can resolve to protected government registry data. This lookup
+    // is restricted to staff with the taxpayer-intelligence permission.
+    await requireRRAPermission("taxpayer.intelligence.search");
     const parsedId = z.string().regex(/^\d{16}$/).safeParse(nationalId);
     if (!parsedId.success) {
         return { success: false, error: "ID must be exactly 16 digits.", code: "invalid_format" };

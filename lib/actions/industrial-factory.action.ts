@@ -248,27 +248,68 @@ export async function listIndustrialAlerts(opts?: { status?: string }) {
 }
 
 export async function acknowledgeIndustrialAlert(alertId: string) {
-  await requireRRAPermission("taxpayer.activity.read");
-  const [updated] = await db
-    .update(industrialAlert)
-    .set({ status: "acknowledged" })
-    .where(and(eq(industrialAlert.id, alertId), eq(industrialAlert.status, "open")))
-    .returning({ id: industrialAlert.id });
-  if (!updated) return fail("Alert not found or not open");
+  const { staff } = await requireRRAPermission("industrial.integration.monitor");
+  const result = await db.transaction(async (tx) => {
+    const [current] = await tx.select({ status: industrialAlert.status })
+      .from(industrialAlert)
+      .where(eq(industrialAlert.id, alertId))
+      .for("update");
+    if (!current || current.status !== "open") return null;
+    const [updated] = await tx
+      .update(industrialAlert)
+      .set({ status: "acknowledged" })
+      .where(and(eq(industrialAlert.id, alertId), eq(industrialAlert.status, "open")))
+      .returning({ id: industrialAlert.id, status: industrialAlert.status });
+    if (!updated) return null;
+    await tx.insert(auditLog).values({
+      userId: staff.userId,
+      action: "INDUSTRIAL_ALERT_ACKNOWLEDGED",
+      targetType: "industrial_alert",
+      targetId: updated.id,
+      beforeState: { status: current.status },
+      afterState: { status: updated.status },
+    });
+    return updated;
+  });
+  if (!result) return fail("Alert not found or not open");
   revalidatePath("/admin/industrial-monitoring");
-  return ok(updated);
+  return ok(result);
 }
 
 export async function resolveIndustrialAlert(alertId: string, note: string) {
-  const { staff } = await requireRRAPermission("taxpayer.account.manage");
-  const [updated] = await db
-    .update(industrialAlert)
-    .set({ status: "resolved", resolvedByUserId: staff.userId, resolvedAt: new Date() })
-    .where(eq(industrialAlert.id, alertId))
-    .returning({ id: industrialAlert.id });
-  if (!updated) return fail("Alert not found");
+  const parsedNote = z.string().trim().min(5).max(2000).safeParse(note);
+  if (!parsedNote.success) return fail("Resolution note must contain 5 to 2,000 characters");
+  const { staff } = await requireRRAPermission("industrial.integration.review");
+  const result = await db.transaction(async (tx) => {
+    const [current] = await tx.select({ status: industrialAlert.status })
+      .from(industrialAlert)
+      .where(eq(industrialAlert.id, alertId))
+      .for("update");
+    if (!current || (current.status !== "open" && current.status !== "acknowledged")) return null;
+    const [updated] = await tx
+      .update(industrialAlert)
+      .set({ status: "resolved", resolvedByUserId: staff.userId, resolvedAt: new Date() })
+      .where(and(
+        eq(industrialAlert.id, alertId),
+        // A resolved alert cannot be resolved again, preserving the first decision.
+        sql`${industrialAlert.status} IN ('open', 'acknowledged')`,
+      ))
+      .returning({ id: industrialAlert.id, status: industrialAlert.status });
+    if (!updated) return null;
+    await tx.insert(auditLog).values({
+      userId: staff.userId,
+      action: "INDUSTRIAL_ALERT_RESOLVED",
+      targetType: "industrial_alert",
+      targetId: updated.id,
+      beforeState: { status: current.status },
+      afterState: { status: updated.status, resolutionNote: parsedNote.data },
+      metadata: JSON.stringify({ resolutionNote: parsedNote.data }),
+    });
+    return updated;
+  });
+  if (!result) return fail("Alert not found or already resolved");
   revalidatePath("/admin/industrial-monitoring");
-  return ok(updated);
+  return ok(result);
 }
 
 // ---------------------------------------------------------------------------

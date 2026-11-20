@@ -43,13 +43,15 @@ Requirements: Node.js 24 or compatible, pnpm 10+, PostgreSQL/Neon databases for 
 
    Set `PAYMENT_DATA_ENCRYPTION_KEY` before using saved payment methods or registering TF bank accounts. Generate a random 32-byte key (for example, `node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"`) and store its base64 value only in the deployment secret manager. Keep the key stable and backed up; encrypted data cannot be recovered without it.
 
-3. Reconcile and migrate the TaxFlow database:
+   Set `INDUSTRIAL_CREDENTIAL_ENCRYPTION_KEY` before provisioning industrial integrations. It must be 32 random bytes encoded as 64 hexadecimal characters and must remain separate from the payment encryption key. Set `CRON_SECRET` to a random value of at least 32 characters if scheduled monitoring endpoints are enabled; send it as `Authorization: Bearer <secret>`.
+
+3. For a fresh or disposable development database, synchronize the TaxFlow schema:
 
    ```bash
-   pnpm db:migrate
+   pnpm db:push
    ```
 
-   The journal includes an idempotent repair migration for the saved-payment-method and RRA collection-account schema that had been omitted from earlier journal history.
+   The checked-in migration journal is incomplete after `0037_industrial_integration`: later SQL files are not journaled, and two different `0037` industrial migrations define incompatible table layouts. Do not use `pnpm db:migrate` against production or a database with important data until its applied schema and migration history have been reconciled and a forward-only repair plan has been reviewed. Never point `db:push` at production as a substitute for that review.
 
 4. Encrypt any existing payment identifiers and TF bank account numbers after setting the encryption key:
 
@@ -101,7 +103,8 @@ The GitHub Actions quality workflow is intended to run the same checks for pull 
 - The Tax Intelligence dashboard uses deterministic review rules. Alerts are not findings of fraud, legal advice, or official tax assessments.
 - Current-rate VAT checks may flag older transactions because applicable tax-rule versions are not yet persisted on each transaction.
 - The payment review screen is a manual authorized workflow, not a payment gateway or bank integration. An officer must independently verify settlement evidence before confirming a submission.
-- Stock movement evidence is written to the append-only audit log; this is not yet a separate normalized stock-ledger table, and historical events may not contain the newer movement details.
+- Current stock movements are stored in the normalized `stock_movement` table and are also audited in relevant workflows. Historical movements may not contain newer source and actor details.
+- Industrial event ingestion requires signed Ed25519 gateway authentication and verifies that each submitted line, equipment item, and optional production batch belongs to the authenticated gateway's manufacturer and factory. Existing bearer-only gateways must be upgraded before they can submit events.
 - Import invoice PDFs are stored outside `public/` and served only to the owning trader and active TF reviewers. Configure `TAXFLOW_PRIVATE_UPLOAD_DIR` to a persistent private volume when deploying; local filesystem storage must be shared by app instances that serve uploads.
 - VAT rounding, exemptions, refunds, credit notes, mixed-rate invoices, and official filing treatment require review by qualified tax/accounting specialists before production use.
 - Do not use seeded demo data for real tax decisions. Do not expose production taxpayer data to AI providers without an approved legal basis, privacy review, and retention policy.

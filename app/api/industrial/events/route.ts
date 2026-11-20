@@ -1,9 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
 import db from '@/db/drizzle';
-import { industrialGateway, industrialGatewayCredential, industrialEvent } from '@/db/schema';
+import { factory, factoryProductionLine, industrialEquipment, industrialGateway, industrialGatewayCredential, industrialEvent, productionBatch } from '@/db/schema';
 import { and, eq, lt } from 'drizzle-orm';
 import { createHash } from 'crypto';
 import { verifyGatewaySignature, isTimestampFresh } from '@/lib/industrial-security';
+import { z } from 'zod';
+
+const eventSchema = z.object({
+  eventId: z.string().min(1).max(200).optional(),
+  eventType: z.enum(['production_count', 'weight_reading', 'line_start', 'line_stop', 'reject_count', 'downtime', 'sensor_reading', 'batch_tag']),
+  eventTimestamp: z.string().datetime({ offset: true }),
+  productionLineId: z.string().min(1).max(200),
+  equipmentId: z.string().min(1).max(200),
+  batchId: z.string().min(1).max(200).optional().nullable(),
+  batchReference: z.string().max(200).optional().nullable(),
+  sequenceNumber: z.number().int().positive(),
+  stageCode: z.string().max(100).optional().nullable(),
+  schemaVersion: z.string().min(1).max(30).optional(),
+  unit: z.string().max(50).optional().nullable(),
+  measurements: z.record(z.string(), z.number().finite()).optional(),
+}).passthrough();
 
 // POST /api/industrial/events
 // Called by industrial gateways to submit production events.
@@ -64,6 +80,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Gateway not found or not active' }, { status: 403 });
     }
 
+    // Bearer-only gateways are retained in the database for migration visibility,
+    // but cannot submit production evidence. Provisioned gateways use signed Ed25519.
+    if (gateway.authMode !== 'signed_ed25519') {
+      return NextResponse.json({ error: 'Gateway must be upgraded to signed Ed25519 authentication' }, { status: 403 });
+    }
+
+    const [gatewayFactory] = await db.select({ id: factory.id })
+      .from(factory)
+      .where(and(eq(factory.id, gateway.factoryId), eq(factory.manufacturerId, gateway.manufacturerId)))
+      .limit(1);
+    if (!gatewayFactory) {
+      return NextResponse.json({ error: 'Gateway factory assignment is invalid' }, { status: 403 });
+    }
+
     // ── C1: Ed25519 signature verification (signed_ed25519 auth mode only) ───
     // Read raw body before .json() — required for signature verification
     let rawBody: string;
@@ -73,16 +103,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Failed to read request body' }, { status: 400 });
     }
 
-    if (gateway.authMode === 'signed_ed25519') {
-      if (!timestamp || !nonce || !signature) {
-        return NextResponse.json(
-          { error: 'Signed gateways must supply x-tfi-timestamp, x-tfi-nonce, and x-tfi-signature headers' },
-          { status: 401 }
-        );
-      }
-      if (!credential.publicSigningKey) {
-        return NextResponse.json({ error: 'Gateway credential has no signing key on record' }, { status: 500 });
-      }
+    if (!timestamp || !nonce || !signature) {
+      return NextResponse.json(
+        { error: 'Signed gateways must supply x-tfi-timestamp, x-tfi-nonce, and x-tfi-signature headers' },
+        { status: 401 }
+      );
+    }
+    if (!credential.publicSigningKey) {
+      return NextResponse.json({ error: 'Gateway credential has no signing key on record' }, { status: 500 });
+    }
 
       // ── Nonce uniqueness check (prevents replay of a previously valid request) ─
       const { industrialGatewayRequestNonce } = await import('@/db/schema');
@@ -118,23 +147,25 @@ export async function POST(req: NextRequest) {
 
       // Record nonce with 10-minute TTL (matches ±5 min timestamp window × 2)
       const nonceExpiry = new Date(Date.now() + 10 * 60 * 1000);
-      await db.insert(industrialGatewayRequestNonce).values({
+      const [recordedNonce] = await db.insert(industrialGatewayRequestNonce).values({
         id: crypto.randomUUID(),
         gatewayId: gateway.id,
         nonce,
         expiresAt: nonceExpiry,
-      });
+      }).onConflictDoNothing().returning({ id: industrialGatewayRequestNonce.id });
+      if (!recordedNonce) {
+        return NextResponse.json({ error: 'Nonce already used — replay detected' }, { status: 401 });
+      }
 
       // Purge expired nonces periodically (best-effort, non-blocking)
       void db.delete(industrialGatewayRequestNonce)
         .where(lt(industrialGatewayRequestNonce.expiresAt, now))
         .catch(() => { /* non-critical */ });
-    }
 
     // Parse body (already read as text above; re-parse as JSON)
     let body: unknown;
     try {
-      body = JSON.parse(rawBody!);
+      body = JSON.parse(rawBody);
     } catch {
       return NextResponse.json({ error: 'Request body must be valid JSON' }, { status: 400 });
     }
@@ -144,47 +175,69 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Batch must contain 1–100 events' }, { status: 400 });
     }
 
-    const VALID_TYPES = ['production_count','weight_reading','line_start','line_stop','reject_count','downtime','sensor_reading','batch_tag'];
-
     const inserted: string[] = [];
     const errors: { index: number; error: string }[] = [];
 
     for (let i = 0; i < events.length; i++) {
-      const ev = events[i] as Record<string, unknown>;
-      if (!ev || typeof ev !== 'object') {
-        errors.push({ index: i, error: 'Event must be an object' });
+      const parsed = eventSchema.safeParse(events[i]);
+      if (!parsed.success) {
+        errors.push({ index: i, error: 'Event has invalid or missing fields' });
         continue;
       }
-      if (!VALID_TYPES.includes(ev.eventType as string)) {
-        errors.push({ index: i, error: `Invalid eventType: ${ev.eventType}` });
-        continue;
-      }
-      if (!ev.eventTimestamp) {
-        errors.push({ index: i, error: 'eventTimestamp is required' });
-        continue;
-      }
-      const eventTimestamp = new Date(ev.eventTimestamp as string);
-      if (isNaN(eventTimestamp.getTime())) {
-        errors.push({ index: i, error: 'eventTimestamp must be a valid ISO date' });
-        continue;
-      }
+      const ev = parsed.data;
+      const eventTimestamp = new Date(ev.eventTimestamp);
       if (eventTimestamp.getTime() > Date.now() + 86400000) {
         errors.push({ index: i, error: 'eventTimestamp is too far in the future' });
         continue;
       }
-      if (!ev.productionLineId || !ev.equipmentId) {
-        errors.push({ index: i, error: 'productionLineId and equipmentId are required' });
+
+      const [line] = await db.select({ id: factoryProductionLine.id })
+        .from(factoryProductionLine)
+        .where(and(
+          eq(factoryProductionLine.id, ev.productionLineId),
+          eq(factoryProductionLine.factoryId, gateway.factoryId),
+          eq(factoryProductionLine.manufacturerId, gateway.manufacturerId),
+          eq(factoryProductionLine.operationalStatus, 'active'),
+        )).limit(1);
+      if (!line) {
+        errors.push({ index: i, error: 'Production line is not active or is not assigned to this gateway factory' });
         continue;
       }
-      if (!ev.sequenceNumber || typeof ev.sequenceNumber !== 'number') {
-        errors.push({ index: i, error: 'sequenceNumber (positive integer) is required' });
+
+      const [equipment] = await db.select({ id: industrialEquipment.id })
+        .from(industrialEquipment)
+        .where(and(
+          eq(industrialEquipment.id, ev.equipmentId),
+          eq(industrialEquipment.productionLineId, line.id),
+          eq(industrialEquipment.factoryId, gateway.factoryId),
+          eq(industrialEquipment.manufacturerId, gateway.manufacturerId),
+          eq(industrialEquipment.operationalStatus, 'active'),
+        )).limit(1);
+      if (!equipment) {
+        errors.push({ index: i, error: 'Equipment is not active or is not assigned to this production line' });
         continue;
+      }
+
+      if (ev.batchId) {
+        const [batch] = await db.select({ id: productionBatch.id })
+          .from(productionBatch)
+          .where(and(
+            eq(productionBatch.id, ev.batchId),
+            eq(productionBatch.manufacturerId, gateway.manufacturerId),
+            eq(productionBatch.factoryId, gateway.factoryId),
+            eq(productionBatch.productionLineId, line.id),
+            ...(ev.batchReference ? [eq(productionBatch.batchReference, ev.batchReference)] : []),
+          )).limit(1);
+        if (!batch) {
+          errors.push({ index: i, error: 'Batch is not assigned to this manufacturer, factory, and line' });
+          continue;
+        }
       }
 
       const originalPayload = { ...ev };
       const normalizedPayload = { eventType: ev.eventType, measurements: ev.measurements ?? {} };
       const payloadHash = createHash('sha256').update(JSON.stringify(originalPayload)).digest('hex');
-      const eventId = ev.eventId as string ?? `${gateway.id}-${ev.sequenceNumber}-${ev.eventType}`;
+      const eventId = ev.eventId ?? `${gateway.id}-${ev.sequenceNumber}-${ev.eventType}`;
 
       try {
         const [row] = await db.insert(industrialEvent).values({
@@ -192,17 +245,17 @@ export async function POST(req: NextRequest) {
           gatewayId: gateway.id,
           manufacturerId: gateway.manufacturerId,
           factoryId: gateway.factoryId,
-          productionLineId: ev.productionLineId as string,
-          equipmentId: ev.equipmentId as string,
-          batchId: (ev.batchId as string) ?? null,
-          batchReference: (ev.batchReference as string) ?? null,
-          eventType: ev.eventType as string,
-          stageCode: (ev.stageCode as string) ?? null,
-          sequenceNumber: ev.sequenceNumber as number,
+          productionLineId: ev.productionLineId,
+          equipmentId: ev.equipmentId,
+          batchId: ev.batchId ?? null,
+          batchReference: ev.batchReference ?? null,
+          eventType: ev.eventType,
+          stageCode: ev.stageCode ?? null,
+          sequenceNumber: ev.sequenceNumber,
           eventTimestamp,
-          measurements: (ev.measurements as Record<string, number>) ?? {},
-          unit: (ev.unit as string) ?? null,
-          schemaVersion: (ev.schemaVersion as string) ?? '1.0',
+          measurements: ev.measurements ?? {},
+          unit: ev.unit ?? null,
+          schemaVersion: ev.schemaVersion ?? '1.0',
           originalPayload,
           normalizedPayload,
           payloadHash,
@@ -211,7 +264,8 @@ export async function POST(req: NextRequest) {
         }).returning({ id: industrialEvent.id });
         inserted.push(row.id);
       } catch (err) {
-        errors.push({ index: i, error: String(err) });
+        console.error('[industrial-events] event insert failed:', err);
+        errors.push({ index: i, error: 'Event could not be recorded; check for a duplicate event ID and retry if appropriate' });
       }
     }
 
