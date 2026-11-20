@@ -105,7 +105,7 @@ Respond with ONLY valid JSON in this exact structure:
     const { text } = await generateText({
       model: google('gemini-1.5-flash'),
       prompt,
-      maxTokens: 1024,
+      maxOutputTokens: 1024,
       temperature: 0.1, // low temperature for consistent, factual output
     });
 
@@ -188,7 +188,7 @@ Respond with ONLY valid JSON:
     const { text } = await generateText({
       model: google('gemini-1.5-flash'),
       prompt,
-      maxTokens: 1024,
+      maxOutputTokens: 1024,
       temperature: 0.1,
     });
 
@@ -224,11 +224,13 @@ export async function explainAIFinding(findingId: string): Promise<LLMInsightRes
 
     if (!finding) return { ok: false, error: 'Finding not found' };
 
-    const [merchantRow] = await db
-      .select({ businessName: user.businessName, tinNumber: user.tinNumber, role: user.role })
-      .from(user)
-      .where(eq(user.id, finding.businessId))
-      .limit(1);
+    const [merchantRow] = finding.businessId
+      ? await db
+          .select({ businessName: user.businessName, tinNumber: user.tinNumber, role: user.role })
+          .from(user)
+          .where(eq(user.id, finding.businessId))
+          .limit(1)
+      : [undefined];
 
     const prompt = `You are TaxFlow Intelligence, explaining an AI-generated tax compliance finding to an RRA officer.
 
@@ -263,7 +265,7 @@ Respond with ONLY valid JSON:
     const { text } = await generateText({
       model: google('gemini-1.5-flash'),
       prompt,
-      maxTokens: 1024,
+      maxOutputTokens: 1024,
       temperature: 0.1,
     });
 
@@ -345,7 +347,7 @@ Respond with ONLY valid JSON:
     const { text } = await generateText({
       model: google('gemini-1.5-flash'),
       prompt,
-      maxTokens: 1024,
+      maxOutputTokens: 1024,
       temperature: 0.1,
     });
 
@@ -366,3 +368,4 @@ Respond with ONLY valid JSON:
     return { ok: false, error: error instanceof Error ? error.message : 'Failed' };
   }
 }
+

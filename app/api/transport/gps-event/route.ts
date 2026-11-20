@@ -28,7 +28,7 @@ const GPSEventSchema = z.object({
   timestamp: z.string().datetime().transform(s => new Date(s)).optional(),
   source: z.enum(['api', 'manual', 'gateway']).default('api'),
   eventType: z.enum(['position', 'stop', 'departure', 'arrival', 'alert']).default('position'),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
 function hasValidWebhookSecret(authorization: string | null): boolean {
