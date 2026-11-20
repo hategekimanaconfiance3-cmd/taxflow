@@ -20,6 +20,7 @@ export async function GET(request: Request): Promise<NextResponse> {
     const security: GatewayRequestSecurity = { method: request.method, path: `${new URL(request.url).pathname}${new URL(request.url).search}`, rawBody: '', timestamp: request.headers.get('x-tf-timestamp'), nonce: request.headers.get('x-tf-nonce'), keyVersion: request.headers.get('x-tf-key-version'), signatureVersion: request.headers.get('x-tf-signature-version'), signature: request.headers.get('x-tf-signature') };
     return NextResponse.json(await receiveIndustrialDiagnostics(gatewayId, secret, security));
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Diagnostics could not be loaded.' }, { status: 401 });
+    const message = error instanceof Error ? error.message : 'Diagnostics could not be loaded.';
+    return NextResponse.json({ error: message }, { status: message.includes('rate limit') ? 429 : 401 });
   }
 }

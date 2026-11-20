@@ -24,6 +24,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     const security: GatewayRequestSecurity = { method: request.method, path: new URL(request.url).pathname, rawBody, timestamp: request.headers.get('x-tf-timestamp'), nonce: request.headers.get('x-tf-nonce'), keyVersion: request.headers.get('x-tf-key-version'), signatureVersion: request.headers.get('x-tf-signature-version'), signature: request.headers.get('x-tf-signature') };
     return NextResponse.json(await receiveIndustrialHeartbeat(gatewayId, secret, body, security));
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Gateway heartbeat failed.' }, { status: 401 });
+    const message = error instanceof Error ? error.message : 'Gateway heartbeat failed.';
+    return NextResponse.json({ error: message }, { status: message.includes('rate limit') ? 429 : 401 });
   }
 }

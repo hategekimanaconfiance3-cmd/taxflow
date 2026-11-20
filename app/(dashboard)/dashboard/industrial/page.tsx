@@ -1,14 +1,13 @@
 import { IndustrialManagement } from "@/components/dashboard/industrial/industrial-management";
 import { getMyFactories, getMyFactoryLines } from "@/lib/actions/factory.action";
-import { getMyIndustrialEquipment, getMyIndustrialGateways, getMyIndustrialIntegrationRequests, getMyIndustrialIntegrations } from "@/lib/actions/industrial.action";
+import { getMyIndustrialEquipment, getMyIndustrialIntegrationRequests, getMyIndustrialIntegrations } from "@/lib/actions/industrial.action";
 import { requireTraderSession } from "@/lib/auth-guard";
 
 export default async function IndustrialManagementPage() {
   await requireTraderSession(['manufacturer']);
-  const [factories, equipment, gateways, integrationRequests, integrations] = await Promise.all([
+  const [factories, equipment, integrationRequests, integrations] = await Promise.all([
     getMyFactories(),
     getMyIndustrialEquipment(),
-    getMyIndustrialGateways(),
     getMyIndustrialIntegrationRequests(),
     getMyIndustrialIntegrations(),
   ]);
@@ -17,5 +16,5 @@ export default async function IndustrialManagementPage() {
     lines: await getMyFactoryLines(factory.id),
   })));
   const lines = lineGroups.flatMap((group) => group.lines.map((line) => ({ ...line, factoryId: group.factoryId })));
-  return <IndustrialManagement factories={factories} lines={lines} equipment={equipment} gateways={gateways} integrationRequests={integrationRequests} integrations={integrations} />;
+  return <IndustrialManagement factories={factories} lines={lines} equipment={equipment} integrationRequests={integrationRequests} integrations={integrations} />;
 }

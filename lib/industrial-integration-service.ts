@@ -3,6 +3,8 @@ import 'server-only';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import db from '@/db/drizzle';
+import { tinDb } from '@/db/tin-drizzle';
+import { tinRecord } from '@/db/tin-schema';
 import {
   auditLog,
   factory,
@@ -28,12 +30,15 @@ import {
   industrialVerificationResult,
   notification,
   productionBatch,
+  rraStaff,
+  rraStaffJurisdiction,
+  rraStaffRole,
+  user,
 } from '@/db/schema';
 import {
   calibrationRecordSchema,
   equipmentRegistrationSchema,
   equipmentUpdateSchema,
-  gatewayRegistrationSchema,
   industrialIntegrationActionSchema,
   industrialIntegrationRequestSchema,
   industrialIntegrationReviewSchema,
@@ -42,7 +47,6 @@ import {
   type CalibrationRecordInput,
   type EquipmentRegistrationInput,
   type EquipmentUpdateInput,
-  type GatewayRegistrationInput,
   type IndustrialIntegrationActionInput,
   type IndustrialIntegrationRequestInput,
   type IndustrialIntegrationReviewInput,
@@ -82,6 +86,33 @@ function readCounter(measurements: Record<string, number>): number | null {
     if (typeof value === 'number' && Number.isFinite(value)) return value;
   }
   return null;
+}
+
+type TaxflowTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+type DbExecutor = typeof db | TaxflowTransaction;
+
+async function assertOfficerFactoryJurisdiction(actorUserId: string, factoryId: string, executor: DbExecutor = db): Promise<void> {
+  const [staff] = await executor.select({ id: rraStaff.id, clearanceLevel: rraStaff.clearanceLevel }).from(rraStaff)
+    .where(and(eq(rraStaff.userId, actorUserId), eq(rraStaff.isActive, true))).limit(1);
+  if (!staff) throw new Error('Active TF officer record not found.');
+  const roles = await executor.select({ role: rraStaffRole.role }).from(rraStaffRole).where(eq(rraStaffRole.staffRecordId, staff.id));
+  if (staff.clearanceLevel === 'super_admin' || roles.some((row) => row.role === 'super_admin')) return;
+  const [targetFactory] = await executor.select({ manufacturerId: factory.manufacturerId }).from(factory).where(eq(factory.id, factoryId)).limit(1);
+  if (!targetFactory) throw new Error('Factory not found.');
+  const [manufacturer] = await executor.select({ tinNumber: user.tinNumber }).from(user).where(eq(user.id, targetFactory.manufacturerId)).limit(1);
+  if (!manufacturer?.tinNumber) throw new Error('Factory jurisdiction could not be resolved.');
+  const [location] = await tinDb.select({ province: tinRecord.province, district: tinRecord.district }).from(tinRecord).where(eq(tinRecord.tinNumber, manufacturer.tinNumber)).limit(1);
+  if (!location?.province) throw new Error('Factory jurisdiction could not be resolved.');
+  const scopes = await executor.select({ scopeType: rraStaffJurisdiction.scopeType, province: rraStaffJurisdiction.province, district: rraStaffJurisdiction.district })
+    .from(rraStaffJurisdiction).where(eq(rraStaffJurisdiction.staffRecordId, staff.id));
+  const allowed = scopes.some((scope) => scope.scopeType === 'national'
+    || (scope.scopeType === 'province' && scope.province === location.province)
+    || (scope.scopeType === 'district' && scope.province === location.province && scope.district === location.district));
+  if (!allowed) throw new Error('Officer is not assigned to this factory jurisdiction.');
+}
+
+async function notifyIntegrationUser(executor: DbExecutor, userId: string, type: string, title: string, message: string, link: string) {
+  await executor.insert(notification).values({ userId, type, title, message, link });
 }
 
 export async function registerEquipment(manufacturerId: string, rawInput: unknown) {
@@ -217,39 +248,9 @@ export async function recordCalibration(manufacturerId: string, rawInput: unknow
 }
 
 export async function registerGateway(manufacturerId: string, rawInput: unknown) {
-  const parsed = gatewayRegistrationSchema.safeParse(rawInput);
-  if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? 'Gateway details are invalid.');
-  const input: GatewayRegistrationInput = parsed.data;
-  const [ownedFactory] = await db.select({ id: factory.id }).from(factory)
-    .where(and(eq(factory.id, input.factoryId), eq(factory.manufacturerId, manufacturerId))).limit(1);
-  if (!ownedFactory) throw new Error('Factory not found.');
-
-  const clientSecret = randomBytes(32).toString('base64url');
-  return db.transaction(async (tx) => {
-    const [created] = await tx.insert(industrialGateway).values({
-      manufacturerId,
-      factoryId: input.factoryId,
-      gatewayCode: input.gatewayCode,
-      name: input.name,
-      softwareVersion: input.softwareVersion || null,
-    }).returning();
-    if (!created) throw new Error('Gateway registration returned no record.');
-    await tx.insert(industrialGatewayCredential).values({
-      gatewayId: created.id,
-      credentialType: 'api_secret',
-      credentialVersion: 1,
-      credentialHash: hashSecret(clientSecret),
-    });
-    await tx.insert(auditLog).values({
-      userId: manufacturerId,
-      action: 'INDUSTRIAL_GATEWAY_REGISTERED',
-      targetType: 'industrial_gateway',
-      targetId: created.id,
-      afterState: { factoryId: created.factoryId, status: created.status },
-      metadata: JSON.stringify({ gatewayCode: created.gatewayCode, credentialVersion: 1 }),
-    });
-    return { gateway: created, clientSecret };
-  });
+  void manufacturerId;
+  void rawInput;
+  throw new Error('Legacy gateway registration is disabled. Submit a TF-managed integration request instead.');
 }
 
 export async function listManufacturerGateways(manufacturerId: string) {
@@ -259,33 +260,9 @@ export async function listManufacturerGateways(manufacturerId: string) {
 }
 
 export async function rotateGatewayCredential(manufacturerId: string, gatewayId: string) {
-  const clientSecret = randomBytes(32).toString('base64url');
-  return db.transaction(async (tx) => {
-    const [gateway] = await tx.select().from(industrialGateway)
-      .where(and(eq(industrialGateway.id, gatewayId), eq(industrialGateway.manufacturerId, manufacturerId)))
-      .for('update')
-      .limit(1);
-    if (!gateway) throw new Error('Gateway not found.');
-    if (gateway.status === 'revoked') throw new Error('A revoked gateway cannot rotate credentials.');
-    if (gateway.integrationId) throw new Error('TF-managed integrations must use the integration credential-rotation workflow.');
-    const [latest] = await tx.select({ version: industrialGatewayCredential.credentialVersion })
-      .from(industrialGatewayCredential)
-      .where(eq(industrialGatewayCredential.gatewayId, gatewayId))
-      .orderBy(desc(industrialGatewayCredential.credentialVersion))
-      .limit(1);
-    const version = (latest?.version ?? 0) + 1;
-    await tx.update(industrialGatewayCredential).set({ revokedAt: new Date() })
-      .where(and(eq(industrialGatewayCredential.gatewayId, gatewayId), isNull(industrialGatewayCredential.revokedAt)));
-    await tx.insert(industrialGatewayCredential).values({ gatewayId, credentialType: 'api_secret', credentialVersion: version, credentialHash: hashSecret(clientSecret) });
-    await tx.insert(auditLog).values({
-      userId: manufacturerId,
-      action: 'INDUSTRIAL_GATEWAY_CREDENTIAL_ROTATED',
-      targetType: 'industrial_gateway',
-      targetId: gatewayId,
-      metadata: JSON.stringify({ credentialVersion: version }),
-    });
-    return { gatewayId, clientSecret, credentialVersion: version };
-  });
+  void manufacturerId;
+  void gatewayId;
+  throw new Error('Legacy gateway credential rotation is disabled. Request a TF-managed integration credential instead.');
 }
 
 export async function revokeGateway(manufacturerId: string, gatewayId: string) {
@@ -298,6 +275,7 @@ export async function activateGateway(actorUserId: string, gatewayId: string) {
   return db.transaction(async (tx) => {
     const [gateway] = await tx.select().from(industrialGateway).where(eq(industrialGateway.id, gatewayId)).for('update').limit(1);
     if (!gateway) throw new Error('Gateway not found.');
+    await assertOfficerFactoryJurisdiction(actorUserId, gateway.factoryId, tx);
     if (!['pending', 'suspended'].includes(gateway.status)) throw new Error(`Gateway cannot be activated from ${gateway.status}.`);
     if (!gateway.integrationId) throw new Error('Legacy gateways must be replaced by a TF-approved integration before activation.');
     const [integration] = await tx.select().from(industrialIntegration).where(eq(industrialIntegration.id, gateway.integrationId)).for('update').limit(1);
@@ -321,6 +299,7 @@ export async function activateGateway(actorUserId: string, gatewayId: string) {
     await tx.update(industrialIntegration).set({ status: 'active', activatedAt: new Date(), suspendedAt: null }).where(eq(industrialIntegration.id, integration.id));
     await tx.insert(auditLog).values({ userId: actorUserId, action: 'INDUSTRIAL_GATEWAY_ACTIVATED', targetType: 'industrial_gateway', targetId: gatewayId, afterState: { status: updated.status } });
     await tx.insert(auditLog).values({ userId: actorUserId, action: 'INDUSTRIAL_INTEGRATION_ACTIVATED', targetType: 'industrial_integration', targetId: integration.id, afterState: { status: 'active', gatewayId } });
+    await notifyIntegrationUser(tx, integration.manufacturerId, 'industrial_integration_activated', 'Industrial integration activated', 'Your TF-managed industrial integration is active and ready for authenticated gateway traffic.', '/dashboard/industrial');
     return updated;
   });
 }
@@ -341,14 +320,7 @@ export async function requestIndustrialIntegration(manufacturerId: string, rawIn
   if (equipment.length !== requestedEquipmentIds.length) throw new Error('Every requested equipment record must belong to the selected factory and manufacturer.');
 
   return db.transaction(async (tx) => {
-    if (input.clientRequestId) {
-      const [existing] = await tx.select().from(industrialIntegrationRequest).where(and(
-        eq(industrialIntegrationRequest.manufacturerId, manufacturerId),
-        eq(industrialIntegrationRequest.clientRequestId, input.clientRequestId),
-      )).limit(1);
-      if (existing) return existing;
-    }
-    const [created] = await tx.insert(industrialIntegrationRequest).values({
+    const values = {
       manufacturerId,
       factoryId: input.factoryId,
       environment: input.environment,
@@ -357,7 +329,15 @@ export async function requestIndustrialIntegration(manufacturerId: string, rawIn
       gatewayName: input.gatewayName ?? null,
       notes: input.notes ?? null,
       clientRequestId: input.clientRequestId ?? null,
-    }).returning();
+    };
+    const [created] = input.clientRequestId
+      ? await tx.insert(industrialIntegrationRequest).values(values)
+        .onConflictDoNothing({ target: [industrialIntegrationRequest.manufacturerId, industrialIntegrationRequest.clientRequestId] }).returning()
+      : await tx.insert(industrialIntegrationRequest).values(values).returning();
+    if (!created && input.clientRequestId) {
+      const [existing] = await tx.select().from(industrialIntegrationRequest).where(and(eq(industrialIntegrationRequest.manufacturerId, manufacturerId), eq(industrialIntegrationRequest.clientRequestId, input.clientRequestId))).limit(1);
+      if (existing) return existing;
+    }
     if (!created) throw new Error('Integration request could not be created.');
     await tx.insert(auditLog).values({
       userId: manufacturerId,
@@ -395,20 +375,64 @@ export async function getManufacturerIntegration(manufacturerId: string, integra
   return row;
 }
 
-export async function listIndustrialIntegrationRequestsForOfficer() {
+async function loadIntegrationMonitoring(row: Awaited<ReturnType<typeof getManufacturerIntegration>>, integrationId: string) {
+  if (!row.gateway) throw new Error('Integration gateway has not been provisioned.');
+  const [events, synchronizationErrors, connections, credentials, deliveries] = await Promise.all([
+    db.select({ event: industrialEvent }).from(industrialEvent).where(eq(industrialEvent.gatewayId, row.gateway.id)).orderBy(desc(industrialEvent.receivedTimestamp)).limit(100),
+    db.select({ sync: industrialEventSync, eventId: industrialEvent.eventId }).from(industrialEventSync).innerJoin(industrialEvent, eq(industrialEvent.id, industrialEventSync.eventId)).where(and(eq(industrialEventSync.gatewayId, row.gateway.id), eq(industrialEventSync.syncStatus, 'failed'))).orderBy(desc(industrialEventSync.createdAt)).limit(100),
+    db.select().from(industrialGatewayConnection).where(eq(industrialGatewayConnection.gatewayId, row.gateway.id)).orderBy(desc(industrialGatewayConnection.lastSeenAt)).limit(20),
+    db.select({ id: industrialGatewayCredential.id, credentialVersion: industrialGatewayCredential.credentialVersion, publicFingerprint: industrialGatewayCredential.publicFingerprint, issuanceReason: industrialGatewayCredential.issuanceReason, issuedAt: industrialGatewayCredential.issuedAt, expiresAt: industrialGatewayCredential.expiresAt, revokedAt: industrialGatewayCredential.revokedAt, lastUsedAt: industrialGatewayCredential.lastUsedAt }).from(industrialGatewayCredential).where(eq(industrialGatewayCredential.gatewayId, row.gateway.id)).orderBy(desc(industrialGatewayCredential.credentialVersion)),
+    db.select({ id: industrialCredentialDelivery.id, expiresAt: industrialCredentialDelivery.expiresAt, claimedAt: industrialCredentialDelivery.claimedAt, createdAt: industrialCredentialDelivery.createdAt }).from(industrialCredentialDelivery).where(eq(industrialCredentialDelivery.integrationId, integrationId)).orderBy(desc(industrialCredentialDelivery.createdAt)),
+  ]);
+  return { integration: row.integration, gateway: row.gateway, events, synchronizationErrors, connections, credentials, deliveries };
+}
+
+export async function getManufacturerIntegrationMonitoring(manufacturerId: string, integrationId: string) {
+  return loadIntegrationMonitoring(await getManufacturerIntegration(manufacturerId, integrationId), integrationId);
+}
+
+export async function testManufacturerIntegrationConnectivity(manufacturerId: string, integrationId: string) {
+  const row = await getManufacturerIntegration(manufacturerId, integrationId);
+  if (!row.gateway) throw new Error('Integration gateway has not been provisioned.');
+  if (row.integration.status === 'suspended' || row.integration.status === 'revoked') throw new Error('Connectivity testing is disabled for this integration lifecycle state.');
+  const checkedAt = new Date();
+  const fresh = row.gateway.lastHeartbeatAt !== null && checkedAt.getTime() - new Date(row.gateway.lastHeartbeatAt).getTime() <= 10 * 60 * 1_000;
+  return { integrationId, gatewayId: row.gateway.id, integrationStatus: row.integration.status, gatewayStatus: row.gateway.status, connected: row.gateway.status === 'active' && fresh, lastHeartbeatAt: row.gateway.lastHeartbeatAt, checkedAt: checkedAt.toISOString(), message: row.gateway.status !== 'active' ? 'Gateway is not active.' : fresh ? 'Recent authenticated gateway heartbeat received.' : 'No recent authenticated gateway heartbeat received.' };
+}
+
+export async function listIndustrialIntegrationsForOfficer(actorUserId: string) {
+  const rows = await db.select({ integration: industrialIntegration, gateway: industrialGateway, factory, manufacturerId: user.id, manufacturerName: user.name, manufacturerTin: user.tinNumber })
+    .from(industrialIntegration).innerJoin(factory, eq(factory.id, industrialIntegration.factoryId)).innerJoin(user, eq(user.id, industrialIntegration.manufacturerId)).leftJoin(industrialGateway, eq(industrialGateway.integrationId, industrialIntegration.id)).orderBy(desc(industrialIntegration.createdAt));
+  const visible = [] as typeof rows;
+  for (const row of rows) { try { await assertOfficerFactoryJurisdiction(actorUserId, row.factory.id); visible.push(row); } catch { /* hide outside jurisdiction */ } }
+  const ids = visible.map((row) => row.integration.id);
+  if (ids.length === 0) return [];
+  const equipment = await db.select({ integrationId: industrialIntegrationEquipment.integrationId, id: industrialEquipment.id, equipmentCode: industrialEquipment.equipmentCode, name: industrialEquipment.name, operationalStatus: industrialEquipment.operationalStatus, authorizationStatus: industrialIntegrationEquipment.authorizationStatus }).from(industrialIntegrationEquipment).innerJoin(industrialEquipment, eq(industrialEquipment.id, industrialIntegrationEquipment.equipmentId)).where(inArray(industrialIntegrationEquipment.integrationId, ids));
+  const byIntegration = new Map<string, typeof equipment>();
+  for (const item of equipment) byIntegration.set(item.integrationId, [...(byIntegration.get(item.integrationId) ?? []), item]);
+  return visible.map((row) => ({ ...row, authorizedEquipment: byIntegration.get(row.integration.id) ?? [] }));
+}
+
+export async function getIndustrialIntegrationMonitoringForOfficer(actorUserId: string, integrationId: string) {
+  return loadIntegrationMonitoring(await getIndustrialIntegrationByIdForOfficer(actorUserId, integrationId), integrationId);
+}
+
+export async function listIndustrialIntegrationRequestsForOfficer(actorUserId: string) {
   const rows = await db.select({ request: industrialIntegrationRequest, factory: factory })
     .from(industrialIntegrationRequest)
     .innerJoin(factory, eq(factory.id, industrialIntegrationRequest.factoryId))
     .orderBy(desc(industrialIntegrationRequest.createdAt));
-  const equipmentIds = [...new Set(rows.flatMap((row) => row.request.requestedEquipmentIds))];
-  if (equipmentIds.length === 0) return rows.map((row) => ({ ...row, equipment: [] as Array<{ id: string; equipmentCode: string; name: string; operationalStatus: string }> }));
+  const visibleRows = [] as typeof rows;
+  for (const row of rows) { try { await assertOfficerFactoryJurisdiction(actorUserId, row.factory.id); visibleRows.push(row); } catch { /* hide outside jurisdiction */ } }
+  const equipmentIds = [...new Set(visibleRows.flatMap((row) => row.request.requestedEquipmentIds))];
+  if (equipmentIds.length === 0) return visibleRows.map((row) => ({ ...row, equipment: [] as Array<{ id: string; equipmentCode: string; name: string; operationalStatus: string }> }));
   const equipment = await db.select({ id: industrialEquipment.id, equipmentCode: industrialEquipment.equipmentCode, name: industrialEquipment.name, operationalStatus: industrialEquipment.operationalStatus })
     .from(industrialEquipment).where(inArray(industrialEquipment.id, equipmentIds));
   const byId = new Map(equipment.map((item) => [item.id, item]));
-  return rows.map((row) => ({ ...row, equipment: row.request.requestedEquipmentIds.map((id) => byId.get(id)).filter((item): item is typeof equipment[number] => Boolean(item)) }));
+  return visibleRows.map((row) => ({ ...row, equipment: row.request.requestedEquipmentIds.map((id) => byId.get(id)).filter((item): item is typeof equipment[number] => Boolean(item)) }));
 }
 
-export async function getIndustrialIntegrationByIdForOfficer(integrationId: string) {
+export async function getIndustrialIntegrationByIdForOfficer(actorUserId: string, integrationId: string) {
   const [row] = await db.select({ integration: industrialIntegration, gateway: industrialGateway, factory })
     .from(industrialIntegration)
     .innerJoin(factory, eq(factory.id, industrialIntegration.factoryId))
@@ -416,6 +440,7 @@ export async function getIndustrialIntegrationByIdForOfficer(integrationId: stri
     .where(eq(industrialIntegration.id, integrationId))
     .limit(1);
   if (!row) throw new Error('Integration not found.');
+  await assertOfficerFactoryJurisdiction(actorUserId, row.factory.id);
   return row;
 }
 
@@ -441,11 +466,13 @@ export async function claimIndustrialIntegrationCredentials(manufacturerId: stri
   return db.transaction(async (tx) => {
     const [integration] = await tx.select().from(industrialIntegration).where(and(eq(industrialIntegration.id, integrationId), eq(industrialIntegration.manufacturerId, manufacturerId))).for('update').limit(1);
     if (!integration) throw new Error('Integration not found.');
+    if (integration.status === 'suspended' || integration.status === 'revoked') throw new Error('Configuration package access is disabled for this integration.');
+    if (!['provisioning', 'provisioned', 'active'].includes(integration.status)) throw new Error('Integration is not ready for configuration access.');
     const [delivery] = await tx.select().from(industrialCredentialDelivery).where(and(eq(industrialCredentialDelivery.integrationId, integrationId), isNull(industrialCredentialDelivery.claimedAt))).orderBy(desc(industrialCredentialDelivery.createdAt)).for('update').limit(1);
     if (!delivery) throw new Error('No unclaimed credentials are available.');
     if (delivery.expiresAt <= new Date()) throw new Error('Credential delivery has expired; request a credential rotation.');
     const payload = parseRequestedCredential(decryptCredentialEnvelope({ ciphertext: delivery.ciphertext, nonce: delivery.nonce, authTag: delivery.authTag, keyVersion: delivery.encryptionKeyVersion }));
-    const [claimed] = await tx.update(industrialCredentialDelivery).set({ claimedAt: new Date(), claimedByUserId: manufacturerId }).where(eq(industrialCredentialDelivery.id, delivery.id)).returning({ id: industrialCredentialDelivery.id });
+    const [claimed] = await tx.update(industrialCredentialDelivery).set({ claimedAt: new Date(), claimedByUserId: manufacturerId }).where(and(eq(industrialCredentialDelivery.id, delivery.id), isNull(industrialCredentialDelivery.claimedAt))).returning({ id: industrialCredentialDelivery.id });
     if (!claimed) throw new Error('Credential delivery could not be claimed.');
     await tx.update(industrialIntegration).set({ requiresCredentialReissue: false, status: integration.status === 'provisioning' ? 'provisioned' : integration.status }).where(eq(industrialIntegration.id, integrationId));
     await tx.insert(auditLog).values({ userId: manufacturerId, action: 'INDUSTRIAL_CREDENTIALS_CLAIMED', targetType: 'industrial_integration', targetId: integrationId, metadata: JSON.stringify({ credentialVersion: payload.credentialVersion }) });
@@ -455,11 +482,15 @@ export async function claimIndustrialIntegrationCredentials(manufacturerId: stri
 
 export async function getIndustrialIntegrationPackage(manufacturerId: string, integrationId: string) {
   const row = await getManufacturerIntegration(manufacturerId, integrationId);
+  if (row.integration.status === 'suspended' || row.integration.status === 'revoked') throw new Error('Configuration package access is disabled for this integration.');
+  if (!['provisioning', 'provisioned', 'active'].includes(row.integration.status)) throw new Error('Integration is not ready for configuration access.');
   if (!row.gateway) throw new Error('Integration gateway has not been provisioned.');
   const configuredBaseUrl = process.env.TAXFLOW_PUBLIC_BASE_URL || process.env.BETTER_AUTH_URL || process.env.NEXT_PUBLIC_APP_URL;
   if (!configuredBaseUrl) throw new Error('A public TaxFlow application URL is required to build the integration package.');
   const baseUrl = configuredBaseUrl.replace(/\/$/, '');
   return {
+    integrationId: row.integration.id,
+    factoryId: row.integration.factoryId,
     integrationCode: row.integration.integrationCode,
     gatewayId: row.gateway.id,
     gatewayCode: row.gateway.gatewayCode,
@@ -471,7 +502,10 @@ export async function getIndustrialIntegrationPackage(manufacturerId: string, in
       diagnostics: `${baseUrl}/api/v1/industrial/diagnostics`,
       acknowledgements: `${baseUrl}/api/v1/industrial/sync/acknowledge`,
     },
-    signing: { algorithm: 'Ed25519', signatureVersion: 'v1', timestampToleranceSeconds: 300 },
+    authentication: { scheme: 'Bearer secret plus Ed25519 request signature', secretDelivery: 'Secrets are delivered only through the one-time claim response and never in this package.', requiredHeaders: ['Authorization: Bearer <clientSecret>', 'X-TF-Timestamp', 'X-TF-Nonce', 'X-TF-Key-Version', 'X-TF-Signature-Version', 'X-TF-Signature'] },
+    signing: { algorithm: 'Ed25519', signatureVersion: 'v1', timestampToleranceSeconds: 300, canonicalRequest: 'METHOD\nPATH\nTIMESTAMP\nNONCE\nKEY_VERSION\nSHA256(RAW_BODY)' },
+    retry: { strategy: 'Exponential backoff with jitter for 429 and 5xx responses.', replayProtection: 'Use a fresh nonce and current Unix timestamp for every request.' },
+    configurationTemplate: { integrationCode: row.integration.integrationCode, environment: row.integration.environment, gatewayId: row.gateway.id, gatewayCode: row.gateway.gatewayCode, apiBaseUrl: baseUrl, clientSecret: '<one-time-claim-secret>', privateSigningKey: '<one-time-claim-private-key>', credentialVersion: '<one-time-claim-version>' },
   };
 }
 
@@ -492,6 +526,7 @@ export async function rotateIndustrialIntegrationCredential(manufacturerId: stri
     await tx.insert(industrialCredentialDelivery).values({ integrationId, credentialId: credential.id, ciphertext: delivery.ciphertext, nonce: delivery.nonce, authTag: delivery.authTag, encryptionKeyVersion: delivery.keyVersion, expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1_000) });
     await tx.update(industrialIntegration).set({ requiresCredentialReissue: true }).where(eq(industrialIntegration.id, integrationId));
     await tx.insert(auditLog).values({ userId: manufacturerId, action: 'INDUSTRIAL_INTEGRATION_CREDENTIAL_ROTATED', targetType: 'industrial_integration', targetId: integrationId, metadata: JSON.stringify({ credentialVersion: version }) });
+    await notifyIntegrationUser(tx, manufacturerId, 'industrial_integration_credentials_rotated', 'Industrial integration credentials rotated', 'A new one-time credential delivery is ready. Claim it before it expires, then update your gateway configuration.', '/dashboard/industrial');
     return { integrationId, credentialVersion: version, deliveryExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1_000).toISOString() };
   });
 }
@@ -503,6 +538,7 @@ export async function reviewIndustrialIntegrationRequest(actorUserId: string, ra
   return db.transaction(async (tx) => {
     const [request] = await tx.select().from(industrialIntegrationRequest).where(eq(industrialIntegrationRequest.id, input.requestId)).for('update').limit(1);
     if (!request) throw new Error('Integration request not found.');
+    await assertOfficerFactoryJurisdiction(actorUserId, request.factoryId, tx);
     const [existing] = await tx.select().from(industrialIntegration).where(eq(industrialIntegration.requestId, request.id)).limit(1);
     if (existing) return { request, integration: existing };
     if (input.decision === 'under_review' || input.decision === 'rejected') {
@@ -510,6 +546,7 @@ export async function reviewIndustrialIntegrationRequest(actorUserId: string, ra
       const [reviewed] = await tx.update(industrialIntegrationRequest).set({ status, reviewedByUserId: actorUserId, reviewedAt: new Date(), reviewNote: input.note }).where(eq(industrialIntegrationRequest.id, request.id)).returning();
       if (!reviewed) throw new Error('Integration review could not be saved.');
       await tx.insert(auditLog).values({ userId: actorUserId, action: input.decision === 'under_review' ? 'INDUSTRIAL_INTEGRATION_UNDER_REVIEW' : 'INDUSTRIAL_INTEGRATION_REJECTED', targetType: 'industrial_integration_request', targetId: request.id, beforeState: { status: request.status }, afterState: { status: reviewed.status }, metadata: JSON.stringify({ note: input.note }) });
+      await notifyIntegrationUser(tx, request.manufacturerId, input.decision === 'under_review' ? 'industrial_integration_under_review' : 'industrial_integration_rejected', input.decision === 'under_review' ? 'Industrial integration request under review' : 'Industrial integration request rejected', input.decision === 'under_review' ? `TF is reviewing the ${request.integrationName} integration request.` : `TF rejected the ${request.integrationName} integration request. Review the officer note for details.`, '/dashboard/industrial');
       return { request: reviewed, integration: null };
     }
     const [ownedFactory] = await tx.select().from(factory).where(and(eq(factory.id, request.factoryId), eq(factory.manufacturerId, request.manufacturerId))).for('update').limit(1);
@@ -538,6 +575,7 @@ export async function reviewIndustrialIntegrationRequest(actorUserId: string, ra
     const [updatedRequest] = await tx.update(industrialIntegrationRequest).set({ status: 'approved', reviewedByUserId: actorUserId, reviewedAt: new Date(), reviewNote: input.note }).where(eq(industrialIntegrationRequest.id, request.id)).returning();
     await tx.update(factory).set({ integrationStatus: 'pending' }).where(eq(factory.id, request.factoryId));
     await tx.insert(auditLog).values({ userId: actorUserId, action: 'INDUSTRIAL_INTEGRATION_APPROVED_AND_PROVISIONED', targetType: 'industrial_integration', targetId: createdIntegration.id, afterState: { status: createdIntegration.status, gatewayId: gateway.id, factoryId: request.factoryId, environment: request.environment }, metadata: JSON.stringify({ equipmentCount: equipment.length, credentialVersion: 1, deliveryExpiresAt: expiresAt.toISOString() }) });
+    await notifyIntegrationUser(tx, request.manufacturerId, 'industrial_integration_credentials_ready', 'Industrial integration approved', `TF approved ${request.integrationName}. Claim the one-time credentials before delivery expires.`, '/dashboard/industrial');
     return { request: updatedRequest, integration: createdIntegration, gateway: { id: gateway.id, gatewayCode: gateway.gatewayCode, status: gateway.status }, credentialVersion: 1, deliveryExpiresAt: expiresAt.toISOString() };
   });
 }
@@ -549,10 +587,12 @@ export async function suspendIndustrialIntegration(actorUserId: string, rawInput
   return db.transaction(async (tx) => {
     const [integration] = await tx.select().from(industrialIntegration).where(eq(industrialIntegration.id, input.integrationId)).for('update').limit(1);
     if (!integration || integration.status === 'revoked') throw new Error('Integration cannot be suspended.');
+    await assertOfficerFactoryJurisdiction(actorUserId, integration.factoryId, tx);
     await tx.update(industrialGateway).set({ status: 'suspended' }).where(and(eq(industrialGateway.integrationId, integration.id), sql`${industrialGateway.status} <> 'revoked'`));
     await tx.update(industrialGatewayCredential).set({ revokedAt: new Date() }).where(and(inArray(industrialGatewayCredential.gatewayId, db.select({ id: industrialGateway.id }).from(industrialGateway).where(eq(industrialGateway.integrationId, integration.id))), isNull(industrialGatewayCredential.revokedAt)));
     const [updated] = await tx.update(industrialIntegration).set({ status: 'suspended', suspendedAt: new Date(), requiresCredentialReissue: true }).where(eq(industrialIntegration.id, integration.id)).returning();
     await tx.insert(auditLog).values({ userId: actorUserId, action: 'INDUSTRIAL_INTEGRATION_SUSPENDED', targetType: 'industrial_integration', targetId: integration.id, beforeState: { status: integration.status }, afterState: { status: 'suspended' }, metadata: JSON.stringify({ reason: input.reason }) });
+    await notifyIntegrationUser(tx, integration.manufacturerId, 'industrial_integration_suspended', 'Industrial integration suspended', `TF suspended this integration. Gateway traffic is blocked. Reason: ${input.reason}`, '/dashboard/industrial');
     return updated;
   });
 }
@@ -564,15 +604,20 @@ export async function revokeIndustrialIntegration(actorUserId: string, rawInput:
   return db.transaction(async (tx) => {
     const [integration] = await tx.select().from(industrialIntegration).where(eq(industrialIntegration.id, input.integrationId)).for('update').limit(1);
     if (!integration || integration.status === 'revoked') throw new Error('Integration is already revoked or was not found.');
+    await assertOfficerFactoryJurisdiction(actorUserId, integration.factoryId, tx);
     await tx.update(industrialGateway).set({ status: 'revoked', revokedAt: new Date() }).where(and(eq(industrialGateway.integrationId, integration.id), sql`${industrialGateway.status} <> 'revoked'`));
     await tx.update(industrialGatewayCredential).set({ revokedAt: new Date() }).where(and(inArray(industrialGatewayCredential.gatewayId, db.select({ id: industrialGateway.id }).from(industrialGateway).where(eq(industrialGateway.integrationId, integration.id))), isNull(industrialGatewayCredential.revokedAt)));
     const [updated] = await tx.update(industrialIntegration).set({ status: 'revoked', revokedAt: new Date(), requiresCredentialReissue: false }).where(eq(industrialIntegration.id, integration.id)).returning();
     await tx.insert(auditLog).values({ userId: actorUserId, action: 'INDUSTRIAL_INTEGRATION_REVOKED', targetType: 'industrial_integration', targetId: integration.id, beforeState: { status: integration.status }, afterState: { status: 'revoked' }, metadata: JSON.stringify({ reason: input.reason }) });
+    await notifyIntegrationUser(tx, integration.manufacturerId, 'industrial_integration_revoked', 'Industrial integration revoked', `TF revoked this integration. Gateway traffic and configuration access are permanently blocked. Reason: ${input.reason}`, '/dashboard/industrial');
     return updated;
   });
 }
 
-export async function getIndustrialIntegrationAudit(integrationId: string) {
+export async function getIndustrialIntegrationAudit(actorUserId: string, integrationId: string) {
+  const [integration] = await db.select({ factoryId: industrialIntegration.factoryId }).from(industrialIntegration).where(eq(industrialIntegration.id, integrationId)).limit(1);
+  if (!integration) throw new Error('Integration not found.');
+  await assertOfficerFactoryJurisdiction(actorUserId, integration.factoryId);
   return db.select().from(auditLog).where(eq(auditLog.targetId, integrationId)).orderBy(desc(auditLog.createdAt));
 }
 
@@ -584,13 +629,15 @@ export async function listIndustrialIntegrationEvents(manufacturerId: string, in
 }
 
 async function authenticateGateway(gatewayId: string, clientSecret: string, security?: GatewayRequestSecurity) {
-  const rows = await db.select({ gateway: industrialGateway, credential: industrialGatewayCredential })
+  const rows = await db.select({ gateway: industrialGateway, credential: industrialGatewayCredential, integration: industrialIntegration })
     .from(industrialGateway)
     .innerJoin(industrialGatewayCredential, eq(industrialGatewayCredential.gatewayId, industrialGateway.id))
+    .leftJoin(industrialIntegration, eq(industrialIntegration.id, industrialGateway.integrationId))
     .where(and(eq(industrialGateway.id, gatewayId), isNull(industrialGatewayCredential.revokedAt)))
     .orderBy(desc(industrialGatewayCredential.credentialVersion));
   const gateway = rows[0]?.gateway;
-  if (!gateway || gateway.status !== 'active') throw new Error('Gateway authentication failed.');
+  const integration = rows[0]?.integration;
+  if (!gateway || gateway.status !== 'active' || !gateway.integrationId || !integration || integration.status !== 'active' || integration.requiresCredentialReissue || integration.factoryId !== gateway.factoryId || integration.manufacturerId !== gateway.manufacturerId || integration.environment !== gateway.environment) throw new Error('Gateway authentication failed.');
   if (security?.keyVersion) {
     const requestedVersion = Number(security.keyVersion);
     if (!Number.isInteger(requestedVersion) || requestedVersion < 1) throw new Error('Gateway authentication failed.');
@@ -609,8 +656,14 @@ async function authenticateGateway(gatewayId: string, clientSecret: string, secu
   return gateway;
 }
 
+async function enforceGatewayRateLimit(gatewayId: string, namespace: string, maxRequests: number) {
+  const rate = await consumeRateLimit(namespace, gatewayId, maxRequests, 60);
+  if (!rate.allowed) throw new Error(`${namespace} rate limit exceeded.`);
+}
+
 export async function recordGatewayHeartbeat(gatewayId: string, clientSecret: string, rawInput: unknown, security?: GatewayRequestSecurity) {
   const gateway = await authenticateGateway(gatewayId, clientSecret, security);
+  await enforceGatewayRateLimit(gateway.id, 'industrial-heartbeat-gateway', 120);
   const input = typeof rawInput === 'object' && rawInput !== null && !Array.isArray(rawInput) ? rawInput as Record<string, unknown> : {};
   const now = new Date();
   await db.transaction(async (tx) => {
@@ -631,6 +684,7 @@ export async function recordGatewayHeartbeat(gatewayId: string, clientSecret: st
 
 export async function acknowledgeIndustrialEvents(gatewayId: string, clientSecret: string, eventIds: string[], security?: GatewayRequestSecurity) {
   const gateway = await authenticateGateway(gatewayId, clientSecret, security);
+  await enforceGatewayRateLimit(gateway.id, 'industrial-acknowledgement-gateway', 600);
   const boundedIds = [...new Set(eventIds)].slice(0, 2_000);
   if (boundedIds.length === 0) return { gatewayId: gateway.id, acknowledged: 0 };
   const now = new Date();
@@ -643,6 +697,7 @@ export async function acknowledgeIndustrialEvents(gatewayId: string, clientSecre
 
 export async function getGatewayDiagnostics(gatewayId: string, clientSecret: string, security?: GatewayRequestSecurity) {
   const gateway = await authenticateGateway(gatewayId, clientSecret, security);
+  await enforceGatewayRateLimit(gateway.id, 'industrial-diagnostics-gateway', 60);
   const [eventCount] = await db.select({ count: sql<number>`COUNT(*)::int` }).from(industrialEvent).where(eq(industrialEvent.gatewayId, gateway.id));
   const [failedSyncCount] = await db.select({ count: sql<number>`COUNT(*)::int` }).from(industrialEventSync).where(and(eq(industrialEventSync.gatewayId, gateway.id), eq(industrialEventSync.syncStatus, 'failed')));
   const [latestConnection] = await db.select().from(industrialGatewayConnection).where(eq(industrialGatewayConnection.gatewayId, gateway.id)).orderBy(desc(industrialGatewayConnection.lastSeenAt)).limit(1);
@@ -670,11 +725,16 @@ export async function ingestIndustrialEvent(rawInput: unknown, clientSecret: str
 export async function ingestAuthenticatedIndustrialEvent(gateway: typeof industrialGateway.$inferSelect, input: IndustrialEventInput, originalPayload: Record<string, unknown>) {
   if (input.eventTimestamp && new Date(input.eventTimestamp).getTime() > Date.now() + 5 * 60 * 1000) throw new Error('Event timestamp cannot be materially in the future.');
   if (gateway.factoryId !== input.factoryId) throw new Error('Gateway is not authorized for this factory.');
+  if (!gateway.integrationId) throw new Error('Gateway must belong to a TF-managed integration.');
+  const [integration] = await db.select({ id: industrialIntegration.id, status: industrialIntegration.status, manufacturerId: industrialIntegration.manufacturerId, factoryId: industrialIntegration.factoryId })
+    .from(industrialIntegration).where(and(eq(industrialIntegration.id, gateway.integrationId), eq(industrialIntegration.manufacturerId, gateway.manufacturerId), eq(industrialIntegration.factoryId, gateway.factoryId))).limit(1);
+  if (!integration || integration.status !== 'active') throw new Error('Integration is not active.');
   const incomingPayloadHash = payloadHash(originalPayload);
 
-  const [equipment] = await db.select({ id: industrialEquipment.id, manufacturerId: industrialEquipment.manufacturerId, factoryId: industrialEquipment.factoryId, productionLineId: industrialEquipment.productionLineId })
+  const [equipment] = await db.select({ id: industrialEquipment.id, manufacturerId: industrialEquipment.manufacturerId, factoryId: industrialEquipment.factoryId, productionLineId: industrialEquipment.productionLineId, operationalStatus: industrialEquipment.operationalStatus })
     .from(industrialEquipment)
-    .where(and(eq(industrialEquipment.id, input.equipmentId), eq(industrialEquipment.manufacturerId, gateway.manufacturerId), eq(industrialEquipment.factoryId, input.factoryId), eq(industrialEquipment.productionLineId, input.lineId)))
+    .innerJoin(industrialIntegrationEquipment, and(eq(industrialIntegrationEquipment.equipmentId, industrialEquipment.id), eq(industrialIntegrationEquipment.integrationId, integration.id), eq(industrialIntegrationEquipment.manufacturerId, gateway.manufacturerId), eq(industrialIntegrationEquipment.factoryId, gateway.factoryId), eq(industrialIntegrationEquipment.authorizationStatus, 'authorized'), isNull(industrialIntegrationEquipment.revokedAt)))
+    .where(and(eq(industrialEquipment.id, input.equipmentId), eq(industrialEquipment.manufacturerId, gateway.manufacturerId), eq(industrialEquipment.factoryId, input.factoryId), eq(industrialEquipment.productionLineId, input.lineId), inArray(industrialEquipment.operationalStatus, ['registered', 'active', 'maintenance'])))
     .limit(1);
   if (!equipment) throw new Error('Equipment is not authorized for this factory and production line.');
 

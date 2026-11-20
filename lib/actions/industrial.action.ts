@@ -10,6 +10,9 @@ import {
   getIndustrialIntegrationAudit,
   getIndustrialIntegrationPackage,
   getIndustrialIntegrationByIdForOfficer,
+  getIndustrialIntegrationMonitoringForOfficer,
+  getManufacturerIntegrationMonitoring,
+  testManufacturerIntegrationConnectivity,
   getManufacturerIntegration,
   ingestIndustrialEvent,
   listIndustrialAlertsForManufacturer,
@@ -24,6 +27,7 @@ import {
   listManufacturerIntegrations,
   listIndustrialIntegrationEvents,
   listIndustrialIntegrationRequestsForOfficer,
+  listIndustrialIntegrationsForOfficer,
   recordCalibration,
   updateEquipment as updateEquipmentRecord,
   recordGatewayHeartbeat,
@@ -191,9 +195,35 @@ export async function getMyIndustrialIntegrationEvents(integrationId: string, li
   return listIndustrialIntegrationEvents(session.user.id, parsed.data, limit);
 }
 
+export async function getMyIndustrialIntegrationMonitoring(integrationId: string) {
+  const session = await requireTraderSession(['manufacturer']);
+  const parsed = idSchema.safeParse(integrationId);
+  if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? 'Integration identifier is invalid.');
+  return getManufacturerIntegrationMonitoring(session.user.id, parsed.data);
+}
+
+export async function testMyIndustrialIntegrationConnectivity(integrationId: string) {
+  const session = await requireTraderSession(['manufacturer']);
+  const parsed = idSchema.safeParse(integrationId);
+  if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? 'Integration identifier is invalid.');
+  return testManufacturerIntegrationConnectivity(session.user.id, parsed.data);
+}
+
 export async function getIndustrialIntegrationRequestsForOfficer() {
-  await requireRRAPermission('industrial.integration.read');
-  return listIndustrialIntegrationRequestsForOfficer();
+  const session = await requireRRAPermission('industrial.integration.read');
+  return listIndustrialIntegrationRequestsForOfficer(session.user.id);
+}
+
+export async function getIndustrialIntegrationsForOfficer() {
+  const session = await requireRRAPermission('industrial.integration.monitor');
+  return listIndustrialIntegrationsForOfficer(session.user.id);
+}
+
+export async function getIndustrialIntegrationMonitoringForOfficerAction(integrationId: string) {
+  const session = await requireRRAPermission('industrial.integration.monitor');
+  const parsed = idSchema.safeParse(integrationId);
+  if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? 'Integration identifier is invalid.');
+  return getIndustrialIntegrationMonitoringForOfficer(session.user.id, parsed.data);
 }
 
 export async function reviewIndustrialIntegrationRequest(rawInput: unknown) {
@@ -205,7 +235,7 @@ export async function activateIndustrialIntegration(integrationId: string) {
   const session = await requireRRAPermission('industrial.integration.activate');
   const parsed = idSchema.safeParse(integrationId);
   if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? 'Integration identifier is invalid.');
-  const integration = await getIndustrialIntegrationForOfficer(parsed.data);
+  const integration = await getIndustrialIntegrationForOfficer(session.user.id, parsed.data);
   if (!integration.gateway) throw new Error('Integration gateway not found.');
   return activateGatewayRecord(session.user.id, integration.gateway.id);
 }
@@ -221,12 +251,12 @@ export async function revokeIndustrialIntegration(rawInput: unknown) {
 }
 
 export async function getIndustrialIntegrationAuditForOfficer(integrationId: string) {
-  await requireRRAPermission('industrial.integration.audit.read');
+  const session = await requireRRAPermission('industrial.integration.audit.read');
   const parsed = idSchema.safeParse(integrationId);
   if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? 'Integration identifier is invalid.');
-  return getIndustrialIntegrationAudit(parsed.data);
+  return getIndustrialIntegrationAudit(session.user.id, parsed.data);
 }
 
-async function getIndustrialIntegrationForOfficer(integrationId: string) {
-  return getIndustrialIntegrationByIdForOfficer(integrationId);
+async function getIndustrialIntegrationForOfficer(actorUserId: string, integrationId: string) {
+  return getIndustrialIntegrationByIdForOfficer(actorUserId, integrationId);
 }
