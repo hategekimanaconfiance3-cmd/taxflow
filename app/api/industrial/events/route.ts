@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import db from '@/db/drizzle';
 import { industrialGateway, industrialGatewayCredential, industrialEvent } from '@/db/schema';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, lt } from 'drizzle-orm';
 import { createHash } from 'crypto';
+import { verifyGatewaySignature, isTimestampFresh } from '@/lib/industrial-security';
 
 // POST /api/industrial/events
 // Called by industrial gateways to submit production events.
 // Auth: Bearer token hashed and compared against gateway credential.
+// Security: Ed25519 signature verification + nonce replay protection + credential expiry check.
 
 export async function POST(req: NextRequest) {
   try {
@@ -17,6 +19,17 @@ export async function POST(req: NextRequest) {
     const apiKey = authHeader.slice(7);
     if (!apiKey || apiKey.length < 16) {
       return NextResponse.json({ error: 'API key too short' }, { status: 401 });
+    }
+
+    // ── C2: Timestamp freshness check (replay protection — ±5 min window) ───
+    const timestamp = req.headers.get('x-tfi-timestamp');
+    const nonce     = req.headers.get('x-tfi-nonce');
+    const signature = req.headers.get('x-tfi-signature');
+    const keyVersion = req.headers.get('x-tfi-key-version');
+
+    // Signed gateways MUST supply a fresh timestamp; legacy bearer gateways may omit it
+    if (timestamp !== null && !isTimestampFresh(timestamp)) {
+      return NextResponse.json({ error: 'Request timestamp invalid or expired (±5 min window)' }, { status: 401 });
     }
 
     const tokenHash = createHash('sha256').update(apiKey).digest('hex');
@@ -32,6 +45,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unknown credential' }, { status: 401 });
     }
 
+    // ── C4: Credential expiry and revocation check ───────────────────────────
+    const now = new Date();
+    if (credential.revokedAt) {
+      return NextResponse.json({ error: 'Credential has been revoked' }, { status: 401 });
+    }
+    if (credential.expiresAt && credential.expiresAt < now) {
+      return NextResponse.json({ error: 'Credential has expired' }, { status: 401 });
+    }
+
     const [gateway] = await db
       .select()
       .from(industrialGateway)
@@ -42,7 +64,80 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Gateway not found or not active' }, { status: 403 });
     }
 
-    const body = await req.json();
+    // ── C1: Ed25519 signature verification (signed_ed25519 auth mode only) ───
+    // Read raw body before .json() — required for signature verification
+    let rawBody: string;
+    try {
+      rawBody = await req.text();
+    } catch {
+      return NextResponse.json({ error: 'Failed to read request body' }, { status: 400 });
+    }
+
+    if (gateway.authMode === 'signed_ed25519') {
+      if (!timestamp || !nonce || !signature) {
+        return NextResponse.json(
+          { error: 'Signed gateways must supply x-tfi-timestamp, x-tfi-nonce, and x-tfi-signature headers' },
+          { status: 401 }
+        );
+      }
+      if (!credential.publicSigningKey) {
+        return NextResponse.json({ error: 'Gateway credential has no signing key on record' }, { status: 500 });
+      }
+
+      // ── Nonce uniqueness check (prevents replay of a previously valid request) ─
+      const { industrialGatewayRequestNonce } = await import('@/db/schema');
+      const [existingNonce] = await db
+        .select({ id: industrialGatewayRequestNonce.id })
+        .from(industrialGatewayRequestNonce)
+        .where(
+          and(
+            eq(industrialGatewayRequestNonce.gatewayId, gateway.id),
+            eq(industrialGatewayRequestNonce.nonce, nonce),
+          )
+        )
+        .limit(1);
+
+      if (existingNonce) {
+        return NextResponse.json({ error: 'Nonce already used — replay detected' }, { status: 401 });
+      }
+
+      // Verify Ed25519 signature over canonical request
+      const valid = verifyGatewaySignature(credential.publicSigningKey, signature, {
+        method: 'POST',
+        path: '/api/industrial/events',
+        rawBody,
+        timestamp,
+        nonce,
+        keyVersion,
+        signatureVersion: '1',
+        signature,
+      });
+      if (!valid) {
+        return NextResponse.json({ error: 'Invalid request signature' }, { status: 401 });
+      }
+
+      // Record nonce with 10-minute TTL (matches ±5 min timestamp window × 2)
+      const nonceExpiry = new Date(Date.now() + 10 * 60 * 1000);
+      await db.insert(industrialGatewayRequestNonce).values({
+        id: crypto.randomUUID(),
+        gatewayId: gateway.id,
+        nonce,
+        expiresAt: nonceExpiry,
+      });
+
+      // Purge expired nonces periodically (best-effort, non-blocking)
+      void db.delete(industrialGatewayRequestNonce)
+        .where(lt(industrialGatewayRequestNonce.expiresAt, now))
+        .catch(() => { /* non-critical */ });
+    }
+
+    // Parse body (already read as text above; re-parse as JSON)
+    let body: unknown;
+    try {
+      body = JSON.parse(rawBody!);
+    } catch {
+      return NextResponse.json({ error: 'Request body must be valid JSON' }, { status: 400 });
+    }
     const events: unknown[] = Array.isArray(body) ? body : [body];
 
     if (events.length === 0 || events.length > 100) {
@@ -111,7 +206,8 @@ export async function POST(req: NextRequest) {
           originalPayload,
           normalizedPayload,
           payloadHash,
-          isSimulated: (ev.isSimulated as boolean) ?? false,
+          // C4: isSimulated is server-derived from gateway.sourceType — never trusted from client payload
+          isSimulated: gateway.sourceType === 'simulator',
         }).returning({ id: industrialEvent.id });
         inserted.push(row.id);
       } catch (err) {
