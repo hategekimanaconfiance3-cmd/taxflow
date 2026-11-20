@@ -1,6 +1,6 @@
 // POST /api/cron/ai-daily
 // Daily AI background jobs: risk score refresh, inventory reconciliation,
-// dispatch mismatch detection, and revenue snapshot.
+// dispatch mismatch detection, revenue snapshot, and anomaly detection.
 //
 // Called by Vercel Cron at 03:00 UTC every day.
 // Also accepts an on-demand POST from a super_admin via the AI dashboard.
@@ -16,6 +16,8 @@ import { detectDispatchMismatches } from '@/lib/ai/reconciliation';
 import { computeAllRiskScores } from '@/lib/ai/risk-scoring';
 import { getRevenueForecast } from '@/lib/ai/revenue-forecast';
 import { routeFindingToRRAStaff } from '@/lib/ai/finding-router';
+import { detectSystemWideAnomalies } from '@/lib/ai/anomaly-detector';
+import { scanForMissingArrivals } from '@/lib/ai/transport-tracker';
 import db from '@/db/drizzle';
 import { aiFinding } from '@/db/schema';
 import { and, eq, sql } from 'drizzle-orm';
@@ -212,6 +214,46 @@ async function runDailyAIJobs(trigger: 'cron' | 'on_demand') {
   } catch (err) {
     results.revenueForecast = { error: err instanceof Error ? err.message : 'unknown' };
     console.error('[cron:ai-daily] Revenue forecast failed:', err);
+  }
+
+  // ── 5. Statistical Anomaly Detection ─────────────────────────────────────
+  // Run ML anomaly detector across all merchants — detects unusual patterns
+  // in daily sales value, transaction counts, VAT payment ratios, and stock
+  // depletion rates using Z-score statistical models.
+  try {
+    const anomalyScan = await detectSystemWideAnomalies(100);
+    results.anomalyDetection = {
+      scanned: anomalyScan.scanned,
+      anomalousCount: anomalyScan.anomalousCount,
+      topAnomalies: anomalyScan.profiles.slice(0, 5).map(p => ({
+        merchantId: p.merchantId,
+        businessName: p.businessName,
+        compositeScore: p.compositeAnomalyScore,
+        dominantAnomaly: p.dominantAnomaly,
+      })),
+    };
+    console.log(`[cron:ai-daily] Anomaly detection — scanned: ${anomalyScan.scanned}, anomalous: ${anomalyScan.anomalousCount}`);
+  } catch (err) {
+    results.anomalyDetection = { error: err instanceof Error ? err.message : 'unknown' };
+    console.error('[cron:ai-daily] Anomaly detection failed:', err);
+  }
+
+  // ── 6. GPS Missing Arrival Scan ──────────────────────────────────────────
+  // Scan for dispatched transactions with no arrival confirmation in 48h.
+  try {
+    const gpsAlerts = await scanForMissingArrivals(48);
+    results.gpsTracking = {
+      missingArrivalsFound: gpsAlerts.length,
+      alerts: gpsAlerts.slice(0, 10).map(a => ({
+        transactionId: a.transactionId,
+        alertType: a.alertType,
+        severity: a.severity,
+      })),
+    };
+    console.log(`[cron:ai-daily] GPS scan — missing arrivals: ${gpsAlerts.length}`);
+  } catch (err) {
+    results.gpsTracking = { error: err instanceof Error ? err.message : 'unknown' };
+    console.error('[cron:ai-daily] GPS tracking scan failed:', err);
   }
 
   const completedAt = new Date();

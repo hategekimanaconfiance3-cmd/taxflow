@@ -17,6 +17,12 @@ import { analyzeMerchantBehavior } from "@/lib/ai/behavioral-analysis";
 import { searchProductJourney } from "@/lib/actions/product-journey.action";
 import { getTaxpayerIntelligenceForAI } from "@/lib/actions/admin-tin-lookup.action";
 import { getProductionHistoryAnalysis } from "@/lib/ai/production-history-service";
+import { generateMerchantRiskInsight, generateRevenueGapInsight } from "@/lib/ai/llm-insights";
+import { computeMerchantAnomalyProfile } from "@/lib/ai/anomaly-detector";
+import { distanceBetweenDistricts, RWANDA_DISTRICTS } from "@/lib/ai/transport-tracker";
+import { generateMerchantRiskInsight, generateRevenueGapInsight, explainAIFinding } from "@/lib/ai/llm-insights";
+import { computeMerchantAnomalyProfile, detectSystemWideAnomalies } from "@/lib/ai/anomaly-detector";
+import { distanceBetweenDistricts, RWANDA_DISTRICTS } from "@/lib/ai/transport-tracker";
 
 // ---------------------------------------------------------------------------
 // AI Tools — Database query tools for TF Intelligence Agent.
@@ -736,4 +742,90 @@ export const getProductionHistoryAnalysisTool = tool({
     }),
     execute: async ({ tin, batchReference, productName, lookbackDays }) =>
         getProductionHistoryAnalysis({ tin, batchReference, productName, lookbackDays }),
+});
+
+// ---------------------------------------------------------------------------
+// NEW: LLM-Powered Intelligence Tools
+// ---------------------------------------------------------------------------
+
+/** Generate a Gemini-powered natural language risk insight for a merchant. */
+export const generateMerchantInsightTool = tool({
+    description: "Generate an AI-powered natural language intelligence brief for a specific merchant, synthesizing their risk score, behavioral patterns, and detected anomalies into a plain-English executive summary with recommended actions. Always label output as 'AI-Generated Review Signal — Human Review Required'. Use this after getRiskAssessment or getBehavioralAnalysis to explain findings in accessible language for officers.",
+    inputSchema: z.object({
+        traderTin: z.string().trim().min(5).max(32).describe("Trader TIN number"),
+    }),
+    execute: async ({ traderTin }) => {
+        const [trader] = await db
+            .select({ id: user.id })
+            .from(user)
+            .where(and(eq(user.tinNumber, traderTin), sql`${user.role} IN ('manufacturer', 'wholesaler', 'retailer')`))
+            .limit(1);
+        if (!trader) return { ok: false, error: "Trader not found" };
+        return generateMerchantRiskInsight(trader.id);
+    },
+});
+
+/** Generate an LLM-powered revenue gap intelligence brief. */
+export const generateRevenueInsightTool = tool({
+    description: "Generate an AI-powered natural language analysis of the current tax revenue gap — explaining what is driving the gap, which merchants are the top contributors, and what enforcement actions are recommended. Use for revenue-focused questions where you need strategic analysis beyond raw numbers.",
+    inputSchema: z.object({
+        months: z.number().int().min(1).max(12).default(6).describe("Number of months to analyze (default 6)"),
+    }),
+    execute: async ({ months }) => generateRevenueGapInsight(months),
+});
+
+/** Get ML anomaly profile for a merchant — statistical Z-score signals. */
+export const getMerchantAnomalyProfileTool = tool({
+    description: "Run the statistical ML anomaly detector for a merchant. Returns Z-score analysis of their daily sales value, transaction count, VAT payment ratio, and stock depletion rate against their own historical baseline. Use to detect unusual activity patterns that may not appear in the rule-based risk score. All signals are statistical indicators, not findings of wrongdoing.",
+    inputSchema: z.object({
+        traderTin: z.string().trim().min(5).max(32).describe("Trader TIN number"),
+    }),
+    execute: async ({ traderTin }) => {
+        const [trader] = await db
+            .select({ id: user.id })
+            .from(user)
+            .where(and(eq(user.tinNumber, traderTin), sql`${user.role} IN ('manufacturer', 'wholesaler', 'retailer')`))
+            .limit(1);
+        if (!trader) return { ok: false, error: "Trader not found" };
+        return computeMerchantAnomalyProfile(trader.id);
+    },
+});
+
+/** Get list of districts and calculate inter-district transport distances. */
+export const getRwandaDistancesTool = tool({
+    description: "Get the approximate distance in km between two Rwanda districts, or list all known district coordinates. Use for transport route validation — to assess whether a truck's declared route is plausible given the distance and expected travel time.",
+    inputSchema: z.object({
+        districtA: z.string().trim().optional().describe("Source district name (e.g. kigali, butare, musanze)"),
+        districtB: z.string().trim().optional().describe("Destination district name"),
+    }),
+    execute: async ({ districtA, districtB }) => {
+        if (districtA && districtB) {
+            const distance = distanceBetweenDistricts(districtA, districtB);
+            if (!distance) {
+                return {
+                    found: false,
+                    message: `Could not find coordinates for '${districtA}' or '${districtB}'.`,
+                    knownDistricts: Object.keys(RWANDA_DISTRICTS),
+                };
+            }
+            const estimatedHours = Math.round((distance / 60) * 10) / 10; // 60 km/h avg
+            return {
+                found: true,
+                districtA,
+                districtB,
+                distanceKm: distance,
+                estimatedTravelHours: estimatedHours,
+                note: "Approximate crow-flight distance using district center coordinates. Actual road distance may be 20–40% longer.",
+            };
+        }
+        return {
+            found: true,
+            knownDistricts: Object.entries(RWANDA_DISTRICTS).map(([key, d]) => ({
+                key,
+                name: d.name,
+                lat: d.lat,
+                lng: d.lng,
+            })),
+        };
+    },
 });
