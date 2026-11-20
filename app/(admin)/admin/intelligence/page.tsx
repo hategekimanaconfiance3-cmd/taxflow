@@ -119,14 +119,19 @@ export default async function IntelligenceHubPage({
     });
   } catch { /* noop */ }
 
-  // Risk score band counts
+  // Risk score band counts — 7-second timeout prevents 504 when TIN DB is slow
   const riskBands = { low: 0, medium: 0, high: 0, critical: 0 };
   try {
-    const scores = await computeAllRiskScores();
+    const scores = await Promise.race([
+      computeAllRiskScores(),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Risk score timeout')), 7000)
+      ),
+    ]);
     for (const s of scores) {
       if (s.level !== 'unavailable') riskBands[s.level]++;
     }
-  } catch { /* noop */ }
+  } catch { /* noop — timeout or TIN DB unavailable */ }
 
   const TABS = [
     { key: 'all',          label: 'All' },

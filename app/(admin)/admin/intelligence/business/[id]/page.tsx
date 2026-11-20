@@ -104,10 +104,16 @@ export default async function BusinessIntelligencePage({
   if (!trader) notFound();
 
   // ── Risk score ───────────────────────────────────────────────────────────
+  // 5-second timeout — single-merchant score is cheaper but still hits TIN DB
   let riskScore: Awaited<ReturnType<typeof computeRiskScore>> | null = null;
   try {
-    riskScore = await computeRiskScore(id);
-  } catch { /* noop */ }
+    riskScore = await Promise.race([
+      computeRiskScore(id),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Risk score timeout')), 5000)
+      ),
+    ]);
+  } catch { /* noop — timeout or TIN DB unavailable */ }
 
   // ── Open findings ────────────────────────────────────────────────────────
   let findings: Awaited<ReturnType<typeof getFindings>> = [];

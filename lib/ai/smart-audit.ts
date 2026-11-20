@@ -54,7 +54,24 @@ export async function getAuditRecommendations(
     topN: number = 20,
 ): Promise<AuditPlan> {
     // 1. Get all risk scores (sorted highest first)
-    const riskScores = await computeAllRiskScores();
+    // Wrapped in a 7-second timeout — same protection as anomaly detection.
+    // If the TIN database or risk engine is slow, return an empty plan gracefully.
+    let riskScores: Awaited<ReturnType<typeof computeAllRiskScores>>;
+    try {
+        riskScores = await Promise.race([
+            computeAllRiskScores(),
+            new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error("Risk score timeout")), 7000)
+            ),
+        ]);
+    } catch {
+        return {
+            clusters: [],
+            totalMerchants: 0,
+            totalEstimatedRecovery: 0,
+            computedAt: new Date(),
+        };
+    }
 
     // 2. Filter to actionable risk levels (medium+)
     const actionable = riskScores.filter(
