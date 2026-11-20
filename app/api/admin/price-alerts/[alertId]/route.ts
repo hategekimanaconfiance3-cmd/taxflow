@@ -26,7 +26,7 @@ export async function POST(request: Request, context: { params: Promise<{ alertI
     try { body = await request.json(); } catch { return NextResponse.json({ error: 'Enter a valid review action.', requestId }, { status: 400 }); }
     const parsed = priceAlertActionSchema.safeParse(body);
     if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0]?.message ?? 'Enter a valid review action.', requestId }, { status: 400 });
-    const permission = parsed.data.action === 'review' ? 'price.alert.review' : 'price.alert.escalate';
+    const permission = parsed.data.action === 'escalate' ? 'price.alert.escalate' : 'price.alert.review';
     const { user: actor, staff } = await requireRRAPermission(permission);
     const { alertId } = await context.params;
     await reviewPriceAlert(staff, alertId, parsed.data.action, parsed.data.reason, actor.id);

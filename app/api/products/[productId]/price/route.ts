@@ -24,6 +24,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ produ
       businessId: session.user.id,
       productId,
       newPrice: parsed.data.price,
+      actorUserId: session.user.id,
       actorName: session.user.name,
       reason: parsed.data.reason,
       idempotencyKey: parsed.data.idempotencyKey,

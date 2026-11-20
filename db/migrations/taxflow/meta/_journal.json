@@ -309,6 +309,13 @@
       "when": 1794700000010,
       "tag": "0043_price_change_monitoring",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1794700000011,
+      "tag": "0044_price_monitoring_policies",
+      "breakpoints": true
     }
   ]
 }

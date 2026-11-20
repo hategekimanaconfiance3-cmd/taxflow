@@ -987,6 +987,8 @@ export const priceChangeAlert = pgTable(
     newPrice: integer('new_price').notNull(),
     differenceRwf: integer('difference_rwf').notNull(),
     percentageChange: real('percentage_change').notNull(),
+    severity: text('severity').notNull().default('low'), // low | medium | high | critical
+    alertReason: text('alert_reason'),
     status: text('status').notNull().default('pending'), // pending | reviewed | escalated
     assignmentStatus: text('assignment_status').notNull().default('unassigned'), // assigned | unassigned
     assignedStaffId: text('assigned_staff_id').references(() => rraStaff.id, { onDelete: 'set null' }),
@@ -1003,8 +1005,36 @@ export const priceChangeAlert = pgTable(
     index('price_change_alert_business_created_idx').on(table.businessId, table.createdAt),
     index('price_change_alert_product_created_idx').on(table.productId, table.createdAt),
     check('price_change_alert_direction_check', sql`${table.direction} IN ('increase', 'decrease')`),
-    check('price_change_alert_status_check', sql`${table.status} IN ('pending', 'reviewed', 'escalated')`),
+    check('price_change_alert_status_check', sql`${table.status} IN ('pending', 'reviewed', 'escalated', 'suspicious', 'resolved')`),
     check('price_change_alert_assignment_check', sql`${table.assignmentStatus} IN ('assigned', 'unassigned')`),
+    check('price_change_alert_severity_check', sql`${table.severity} IN ('low', 'medium', 'high', 'critical')`),
+  ],
+);
+
+export const priceMonitoringPolicy = pgTable(
+  'price_monitoring_policy',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    scopeType: text('scope_type').notNull(), // default | category | product
+    scopeKey: text('scope_key').notNull(), // * for default, category code, or product id
+    increaseThresholdPercent: real('increase_threshold_percent').notNull().default(5),
+    decreaseThresholdPercent: real('decrease_threshold_percent').notNull().default(5),
+    absoluteDifferenceRwf: integer('absolute_difference_rwf').notNull().default(0),
+    mediumThresholdPercent: real('medium_threshold_percent').notNull().default(10),
+    highThresholdPercent: real('high_threshold_percent').notNull().default(20),
+    criticalThresholdPercent: real('critical_threshold_percent').notNull().default(50),
+    isActive: boolean('is_active').notNull().default(true),
+    createdByUserId: text('created_by_user_id').notNull().references(() => user.id),
+    updatedByUserId: text('updated_by_user_id').notNull().references(() => user.id),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+    updatedAt: timestamp('updated_at').defaultNow().$onUpdate(() => new Date()).notNull(),
+  },
+  (table) => [
+    uniqueIndex('price_monitoring_policy_scope_uniq').on(table.scopeType, table.scopeKey),
+    index('price_monitoring_policy_active_idx').on(table.isActive, table.scopeType),
+    check('price_monitoring_policy_scope_check', sql`${table.scopeType} IN ('default', 'category', 'product')`),
+    check('price_monitoring_policy_scope_key_check', sql`(${table.scopeType} = 'default' AND ${table.scopeKey} = '*') OR (${table.scopeType} IN ('category', 'product') AND length(trim(${table.scopeKey})) > 0)`),
+    check('price_monitoring_policy_threshold_check', sql`${table.increaseThresholdPercent} >= 0 AND ${table.decreaseThresholdPercent} >= 0 AND ${table.absoluteDifferenceRwf} >= 0 AND ${table.mediumThresholdPercent} >= ${table.increaseThresholdPercent} AND ${table.highThresholdPercent} >= ${table.mediumThresholdPercent} AND ${table.criticalThresholdPercent} >= ${table.highThresholdPercent}`),
   ],
 );
 
@@ -1022,6 +1052,23 @@ export const priceChangeAlertRecipient = pgTable(
     uniqueIndex('price_change_alert_recipient_uniq').on(table.alertId, table.recipientUserId),
     uniqueIndex('price_change_alert_notification_uniq').on(table.notificationId),
     index('price_change_alert_recipient_user_idx').on(table.recipientUserId, table.notifiedAt),
+  ],
+);
+
+export const priceChangeAlertExplanation = pgTable(
+  'price_change_alert_explanation',
+  {
+    id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+    alertId: text('alert_id').notNull().references(() => priceChangeAlert.id, { onDelete: 'cascade' }),
+    businessId: text('business_id').notNull().references(() => user.id),
+    submittedByUserId: text('submitted_by_user_id').notNull().references(() => user.id),
+    explanation: text('explanation').notNull(),
+    supportingDocumentUrl: text('supporting_document_url'),
+    createdAt: timestamp('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    index('price_change_alert_explanation_alert_idx').on(table.alertId, table.createdAt),
+    index('price_change_alert_explanation_business_idx').on(table.businessId, table.createdAt),
   ],
 );
 

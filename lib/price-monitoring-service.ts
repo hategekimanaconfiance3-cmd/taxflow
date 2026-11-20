@@ -8,6 +8,8 @@ import {
   notification,
   priceChangeAlert,
   priceChangeAlertRecipient,
+  priceChangeAlertExplanation,
+  priceMonitoringPolicy,
   product,
   rraStaff,
   rraStaffJurisdiction,
@@ -18,7 +20,7 @@ import {
 import { emitToUser } from '@/lib/realtime';
 import { hasRRAPermission, isRRARole, type RRARole } from '@/lib/rra-rbac';
 import type { z } from 'zod';
-import type { priceAlertQuerySchema } from '@/lib/validation/price-monitoring.schema';
+import { priceAlertExplanationSchema, priceMonitoringPolicySchema, type priceAlertQuerySchema } from '@/lib/validation/price-monitoring.schema';
 import { calculatePercentageChange, priceDirection } from '@/lib/price-monitoring-domain';
 
 type TaxflowTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -29,12 +31,30 @@ type StaffScope = {
 };
 type PriceAlertFilters = z.infer<typeof priceAlertQuerySchema>;
 
+type PricePolicy = {
+  increaseThresholdPercent: number;
+  decreaseThresholdPercent: number;
+  absoluteDifferenceRwf: number;
+  mediumThresholdPercent: number;
+  highThresholdPercent: number;
+  criticalThresholdPercent: number;
+};
+
+const DEFAULT_PRICE_POLICY: PricePolicy = {
+  increaseThresholdPercent: 5,
+  decreaseThresholdPercent: 5,
+  absoluteDifferenceRwf: 0,
+  mediumThresholdPercent: 10,
+  highThresholdPercent: 20,
+  criticalThresholdPercent: 50,
+};
+
 export type MerchantLocation = { province: string | null; district: string | null };
 
 export type PriceChangeResult =
   | { kind: 'initial'; historyId: string; price: number }
   | { kind: 'unchanged'; historyId: null; price: number }
-  | { kind: 'changed'; historyId: string; alertId: string; recipients: number; assigned: boolean; price: number; previousPrice: number; percentageChange: number }
+  | { kind: 'changed'; historyId: string; alertId: string | null; recipients: number; assigned: boolean; significant: boolean; severity: string | null; price: number; previousPrice: number; percentageChange: number }
   | { kind: 'duplicate'; historyId: string; alertId: string | null; price: number };
 
 /** TIN location is read-only government registry data. A missing/unavailable lookup leaves the alert unassigned. */
@@ -146,6 +166,36 @@ async function resolveRecipients(tx: TaxflowTransaction, location: MerchantLocat
   };
 }
 
+async function resolvePricePolicy(tx: TaxflowTransaction, productId: string, categoryCode: string | null): Promise<PricePolicy> {
+  const rows = await tx.select().from(priceMonitoringPolicy).where(and(
+    eq(priceMonitoringPolicy.isActive, true),
+    or(
+      and(eq(priceMonitoringPolicy.scopeType, 'product'), eq(priceMonitoringPolicy.scopeKey, productId)),
+      ...(categoryCode ? [and(eq(priceMonitoringPolicy.scopeType, 'category'), eq(priceMonitoringPolicy.scopeKey, categoryCode))] : []),
+      and(eq(priceMonitoringPolicy.scopeType, 'default'), eq(priceMonitoringPolicy.scopeKey, '*')),
+    ),
+  ));
+  const selected = rows.find((row) => row.scopeType === 'product')
+    ?? rows.find((row) => row.scopeType === 'category')
+    ?? rows.find((row) => row.scopeType === 'default');
+  return selected ? {
+    increaseThresholdPercent: selected.increaseThresholdPercent,
+    decreaseThresholdPercent: selected.decreaseThresholdPercent,
+    absoluteDifferenceRwf: selected.absoluteDifferenceRwf,
+    mediumThresholdPercent: selected.mediumThresholdPercent,
+    highThresholdPercent: selected.highThresholdPercent,
+    criticalThresholdPercent: selected.criticalThresholdPercent,
+  } : DEFAULT_PRICE_POLICY;
+}
+
+function severityForChange(percentageChange: number, policy: PricePolicy): 'low' | 'medium' | 'high' | 'critical' {
+  const magnitude = Math.abs(percentageChange);
+  if (magnitude >= policy.criticalThresholdPercent) return 'critical';
+  if (magnitude >= policy.highThresholdPercent) return 'high';
+  if (magnitude >= policy.mediumThresholdPercent) return 'medium';
+  return 'low';
+}
+
 function notificationMessage(input: {
   merchantName: string | null;
   tinNumber: string | null;
@@ -181,6 +231,7 @@ export async function updateMerchantSellingPrice(input: {
   businessId: string;
   productId: string;
   newPrice: number;
+  actorUserId?: string;
   actorName: string;
   reason?: string;
   idempotencyKey: string;
@@ -194,6 +245,7 @@ export async function updateMerchantSellingPrice(input: {
       currentPrice: stock.price,
       unit: product.unit,
       productName: product.name,
+      categoryCode: product.categoryCode,
       merchantName: user.businessName,
       tinNumber: user.tinNumber,
     })
@@ -226,7 +278,7 @@ export async function updateMerchantSellingPrice(input: {
       const [history] = await tx.insert(merchantPriceHistory).values({
         businessId: input.businessId, productId: input.productId, previousPrice: null, newPrice: input.newPrice,
         differenceRwf: 0, percentageChange: 0, unit: current.unit, changeKind: 'initial',
-        sourceType: 'merchant_price_update', sourceId: input.idempotencyKey, actorUserId: input.businessId,
+        sourceType: 'merchant_price_update', sourceId: input.idempotencyKey, actorUserId: input.actorUserId ?? input.businessId,
         reason: input.reason?.trim() || null,
       }).returning({ id: merchantPriceHistory.id });
       if (!history) throw new Error('Price history could not be created.');
@@ -243,17 +295,29 @@ export async function updateMerchantSellingPrice(input: {
     const [history] = await tx.insert(merchantPriceHistory).values({
       businessId: input.businessId, productId: input.productId, previousPrice: current.currentPrice, newPrice: input.newPrice,
       differenceRwf: difference, percentageChange: percentage, unit: current.unit, changeKind: 'merchant_update',
-      sourceType: 'merchant_price_update', sourceId: input.idempotencyKey, actorUserId: input.businessId,
+      sourceType: 'merchant_price_update', sourceId: input.idempotencyKey, actorUserId: input.actorUserId ?? input.businessId,
       reason: input.reason?.trim() || null,
     }).returning({ id: merchantPriceHistory.id });
     if (!history) throw new Error('Price history could not be created.');
+
+    const policy = await resolvePricePolicy(tx, input.productId, current.categoryCode);
+    const absoluteDifference = Math.abs(difference);
+    const directionThreshold = direction === 'increase' ? policy.increaseThresholdPercent : policy.decreaseThresholdPercent;
+    const significant = Math.abs(percentage) >= directionThreshold || (policy.absoluteDifferenceRwf > 0 && absoluteDifference >= policy.absoluteDifferenceRwf);
+    if (!significant) {
+      await tx.insert(auditLog).values({ userId: input.actorUserId ?? input.businessId, action: 'MERCHANT_PRICE_CHANGED_BELOW_ALERT_THRESHOLD', targetType: 'merchant_price_history', targetId: history.id,
+        metadata: JSON.stringify({ productId: input.productId, previousPrice: current.currentPrice, newPrice: input.newPrice, percentageChange: percentage, policy }) });
+      return { kind: 'changed' as const, historyId: history.id, alertId: null, recipients: 0, assigned: false, significant: false, severity: null, price: input.newPrice, previousPrice: current.currentPrice, percentageChange: percentage, realtime: [] };
+    }
+    const severity = severityForChange(percentage, policy);
+    const alertReason = `${direction} of ${Math.abs(percentage).toFixed(2)}% exceeded the ${directionThreshold}% policy threshold${policy.absoluteDifferenceRwf > 0 ? ` or RWF ${policy.absoluteDifferenceRwf.toLocaleString()} absolute threshold` : ''}.`;
 
     const resolved = await resolveRecipients(tx, location);
     const [alert] = await tx.insert(priceChangeAlert).values({
       priceHistoryId: history.id, businessId: input.businessId, productId: input.productId,
       merchantProvince: location.province, merchantDistrict: location.district, direction,
       previousPrice: current.currentPrice, newPrice: input.newPrice, differenceRwf: difference,
-      percentageChange: percentage, assignmentStatus: resolved.assignedStaffId ? 'assigned' : 'unassigned',
+      percentageChange: percentage, severity, alertReason, assignmentStatus: resolved.assignedStaffId ? 'assigned' : 'unassigned',
       assignedStaffId: resolved.assignedStaffId,
     }).returning({ id: priceChangeAlert.id });
     if (!alert) throw new Error('Price alert could not be created.');
@@ -270,11 +334,11 @@ export async function updateMerchantSellingPrice(input: {
         alertId: alert.id, recipientUserId: created.userId, scopeType: resolved.recipients[index]?.scopeType ?? 'national', notificationId: created.id,
       })));
     }
-    await tx.insert(auditLog).values({ userId: input.businessId, action: 'MERCHANT_PRICE_CHANGED', targetType: 'price_change_alert', targetId: alert.id,
+    await tx.insert(auditLog).values({ userId: input.actorUserId ?? input.businessId, action: 'MERCHANT_PRICE_CHANGED', targetType: 'price_change_alert', targetId: alert.id,
       metadata: JSON.stringify({ productId: input.productId, historyId: history.id, direction, previousPrice: current.currentPrice, newPrice: input.newPrice,
         differenceRwf: difference, percentageChange: percentage, location, recipients: resolved.recipients.length, reason: input.reason?.trim() || null }) });
     return { kind: 'changed' as const, historyId: history.id, alertId: alert.id, recipients: createdNotifications.length,
-      assigned: Boolean(resolved.assignedStaffId), price: input.newPrice, previousPrice: current.currentPrice, percentageChange: percentage,
+      assigned: Boolean(resolved.assignedStaffId), significant: true, severity, price: input.newPrice, previousPrice: current.currentPrice, percentageChange: percentage,
       realtime: createdNotifications };
   });
 
@@ -305,9 +369,11 @@ export async function listPriceAlerts(staff: StaffScope, filters: PriceAlertFilt
   }
   if (filters.direction) conditions.push(eq(priceChangeAlert.direction, filters.direction));
   if (filters.status) conditions.push(eq(priceChangeAlert.status, filters.status));
+  if (filters.severity) conditions.push(eq(priceChangeAlert.severity, filters.severity));
   if (filters.district) conditions.push(eq(priceChangeAlert.merchantDistrict, filters.district));
   if (filters.tin) conditions.push(eq(user.tinNumber, filters.tin));
   if (filters.product) conditions.push(ilike(product.name, `%${filters.product}%`));
+  if (filters.category) conditions.push(eq(product.categoryCode, filters.category));
   if (filters.productId) conditions.push(eq(priceChangeAlert.productId, filters.productId));
   if (filters.businessId) conditions.push(eq(priceChangeAlert.businessId, filters.businessId));
   if (filters.minPercentage !== undefined) conditions.push(gte(priceChangeAlert.percentageChange, filters.minPercentage));
@@ -318,7 +384,7 @@ export async function listPriceAlerts(staff: StaffScope, filters: PriceAlertFilt
     id: priceChangeAlert.id, businessId: priceChangeAlert.businessId, merchantName: user.businessName, tinNumber: user.tinNumber,
     productId: priceChangeAlert.productId, productName: product.name, merchantProvince: priceChangeAlert.merchantProvince,
     merchantDistrict: priceChangeAlert.merchantDistrict, direction: priceChangeAlert.direction, previousPrice: priceChangeAlert.previousPrice,
-    newPrice: priceChangeAlert.newPrice, differenceRwf: priceChangeAlert.differenceRwf, percentageChange: priceChangeAlert.percentageChange,
+    newPrice: priceChangeAlert.newPrice, differenceRwf: priceChangeAlert.differenceRwf, percentageChange: priceChangeAlert.percentageChange, severity: priceChangeAlert.severity,
     status: priceChangeAlert.status, assignmentStatus: priceChangeAlert.assignmentStatus, createdAt: priceChangeAlert.createdAt,
   }).from(priceChangeAlert)
     .innerJoin(user, eq(user.id, priceChangeAlert.businessId))
@@ -328,12 +394,32 @@ export async function listPriceAlerts(staff: StaffScope, filters: PriceAlertFilt
   return rows.map((row) => ({ ...row, createdAt: row.createdAt.toISOString() }));
 }
 
+export async function listPriceMonitoringPolicies() {
+  return db.select().from(priceMonitoringPolicy).orderBy(priceMonitoringPolicy.scopeType, priceMonitoringPolicy.scopeKey);
+}
+
+export async function upsertPriceMonitoringPolicy(actorUserId: string, rawInput: unknown) {
+  const parsed = priceMonitoringPolicySchema.safeParse(rawInput);
+  if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? 'Invalid price-monitoring policy.');
+  const input = parsed.data;
+  return db.transaction(async (tx) => {
+    const [existing] = await tx.select({ id: priceMonitoringPolicy.id }).from(priceMonitoringPolicy).where(and(eq(priceMonitoringPolicy.scopeType, input.scopeType), eq(priceMonitoringPolicy.scopeKey, input.scopeKey))).for('update').limit(1);
+    const values = { scopeType: input.scopeType, scopeKey: input.scopeKey, increaseThresholdPercent: input.increaseThresholdPercent, decreaseThresholdPercent: input.decreaseThresholdPercent, absoluteDifferenceRwf: input.absoluteDifferenceRwf, mediumThresholdPercent: input.mediumThresholdPercent, highThresholdPercent: input.highThresholdPercent, criticalThresholdPercent: input.criticalThresholdPercent, isActive: true, updatedByUserId: actorUserId };
+    const [policy] = existing
+      ? await tx.update(priceMonitoringPolicy).set(values).where(eq(priceMonitoringPolicy.id, existing.id)).returning()
+      : await tx.insert(priceMonitoringPolicy).values({ ...values, createdByUserId: actorUserId }).returning();
+    if (!policy) throw new Error('Price-monitoring policy could not be saved.');
+    await tx.insert(auditLog).values({ userId: actorUserId, action: 'PRICE_MONITORING_POLICY_UPDATED', targetType: 'price_monitoring_policy', targetId: policy.id, afterState: { ...values, reason: input.reason }, metadata: JSON.stringify({ reason: input.reason }) });
+    return policy;
+  });
+}
+
 export async function getPriceAlertDetail(staff: StaffScope, alertId: string) {
   const [row] = await db.select({
     id: priceChangeAlert.id, businessId: priceChangeAlert.businessId, merchantName: user.businessName, tinNumber: user.tinNumber,
     productId: priceChangeAlert.productId, productName: product.name, merchantProvince: priceChangeAlert.merchantProvince,
     merchantDistrict: priceChangeAlert.merchantDistrict, direction: priceChangeAlert.direction, previousPrice: priceChangeAlert.previousPrice,
-    newPrice: priceChangeAlert.newPrice, differenceRwf: priceChangeAlert.differenceRwf, percentageChange: priceChangeAlert.percentageChange,
+    newPrice: priceChangeAlert.newPrice, differenceRwf: priceChangeAlert.differenceRwf, percentageChange: priceChangeAlert.percentageChange, severity: priceChangeAlert.severity, alertReason: priceChangeAlert.alertReason,
     status: priceChangeAlert.status, assignmentStatus: priceChangeAlert.assignmentStatus, reviewNote: priceChangeAlert.reviewNote,
     createdAt: priceChangeAlert.createdAt,
   }).from(priceChangeAlert).innerJoin(user, eq(user.id, priceChangeAlert.businessId)).innerJoin(product, eq(product.id, priceChangeAlert.productId))
@@ -344,21 +430,35 @@ export async function getPriceAlertDetail(staff: StaffScope, alertId: string) {
     percentageChange: merchantPriceHistory.percentageChange, reason: merchantPriceHistory.reason, changeKind: merchantPriceHistory.changeKind,
     changedAt: merchantPriceHistory.changedAt, actorUserId: merchantPriceHistory.actorUserId })
     .from(merchantPriceHistory).where(eq(merchantPriceHistory.id, (await db.select({ id: priceChangeAlert.priceHistoryId }).from(priceChangeAlert).where(eq(priceChangeAlert.id, alertId)).limit(1))[0]?.id ?? '__missing__')).limit(1);
-  return { ...row, createdAt: row.createdAt.toISOString(), history: history[0] ? { ...history[0], changedAt: history[0].changedAt.toISOString() } : null };
+  const merchantHistory = await listMerchantPriceHistory(staff, row.businessId);
+  const explanations = await db.select({ id: priceChangeAlertExplanation.id, explanation: priceChangeAlertExplanation.explanation, supportingDocumentUrl: priceChangeAlertExplanation.supportingDocumentUrl, submittedByUserId: priceChangeAlertExplanation.submittedByUserId, createdAt: priceChangeAlertExplanation.createdAt }).from(priceChangeAlertExplanation).where(eq(priceChangeAlertExplanation.alertId, alertId)).orderBy(desc(priceChangeAlertExplanation.createdAt));
+  return { ...row, createdAt: row.createdAt.toISOString(), history: history[0] ? { ...history[0], changedAt: history[0].changedAt.toISOString() } : null, recentHistory: merchantHistory, explanations: explanations.map((item) => ({ ...item, createdAt: item.createdAt.toISOString() })) };
 }
 
-export async function reviewPriceAlert(staff: StaffScope, alertId: string, action: 'review' | 'escalate', reason: string, actorUserId: string) {
+export async function submitPriceAlertExplanation(businessId: string, alertId: string, rawInput: unknown) {
+  const parsed = priceAlertExplanationSchema.safeParse(rawInput);
+  if (!parsed.success) throw new Error(parsed.error.issues[0]?.message ?? 'Enter a valid explanation.');
+  const [alert] = await db.select({ id: priceChangeAlert.id, businessId: priceChangeAlert.businessId }).from(priceChangeAlert).where(and(eq(priceChangeAlert.id, alertId), eq(priceChangeAlert.businessId, businessId))).limit(1);
+  if (!alert) throw new Error('Price alert not found.');
+  const [created] = await db.insert(priceChangeAlertExplanation).values({ alertId, businessId, submittedByUserId: businessId, explanation: parsed.data.explanation, supportingDocumentUrl: parsed.data.supportingDocumentUrl ?? null }).returning();
+  if (!created) throw new Error('Explanation could not be saved.');
+  await db.insert(auditLog).values({ userId: businessId, action: 'PRICE_ALERT_EXPLANATION_SUBMITTED', targetType: 'price_change_alert', targetId: alertId, metadata: JSON.stringify({ explanationId: created.id, hasSupportingDocument: Boolean(parsed.data.supportingDocumentUrl) }) });
+  return { id: created.id, createdAt: created.createdAt.toISOString() };
+}
+
+export async function reviewPriceAlert(staff: StaffScope, alertId: string, action: 'review' | 'escalate' | 'mark_suspicious' | 'resolve', reason: string, actorUserId: string) {
   const detail = await getPriceAlertDetail(staff, alertId);
   if (!detail) throw new Error('Price alert not found or outside your jurisdiction.');
   const now = new Date();
   await db.transaction(async (tx) => {
     const [locked] = await tx.select({ id: priceChangeAlert.id, status: priceChangeAlert.status }).from(priceChangeAlert).where(eq(priceChangeAlert.id, alertId)).for('update').limit(1);
     if (!locked) throw new Error('Price alert not found.');
+    const nextStatus = action === 'review' ? 'reviewed' : action === 'escalate' ? 'escalated' : action === 'mark_suspicious' ? 'suspicious' : 'resolved';
     await tx.update(priceChangeAlert).set(action === 'review'
-      ? { status: 'reviewed', reviewNote: reason.trim(), reviewedByUserId: actorUserId, reviewedAt: now, updatedAt: now }
-      : { status: 'escalated', reviewNote: reason.trim(), escalatedAt: now, updatedAt: now }).where(eq(priceChangeAlert.id, alertId));
-    await tx.insert(auditLog).values({ userId: actorUserId, action: action === 'review' ? 'PRICE_ALERT_REVIEWED' : 'PRICE_ALERT_ESCALATED', targetType: 'price_change_alert', targetId: alertId,
-      beforeState: { status: locked.status }, afterState: { status: action === 'review' ? 'reviewed' : 'escalated', reason: reason.trim() }, metadata: JSON.stringify({ reason: reason.trim() }) });
+      ? { status: nextStatus, reviewNote: reason.trim(), reviewedByUserId: actorUserId, reviewedAt: now, updatedAt: now }
+      : { status: nextStatus, reviewNote: reason.trim(), ...(action === 'escalate' ? { escalatedAt: now } : {}), updatedAt: now }).where(eq(priceChangeAlert.id, alertId));
+    await tx.insert(auditLog).values({ userId: actorUserId, action: `PRICE_ALERT_${action === 'mark_suspicious' ? 'MARKED_SUSPICIOUS' : action === 'resolve' ? 'RESOLVED' : action === 'review' ? 'REVIEWED' : 'ESCALATED'}`, targetType: 'price_change_alert', targetId: alertId,
+      beforeState: { status: locked.status }, afterState: { status: nextStatus, reason: reason.trim() }, metadata: JSON.stringify({ reason: reason.trim() }) });
   });
   return { success: true as const };
 }

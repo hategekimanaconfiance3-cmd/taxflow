@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { calculatePercentageChange, priceDirection } from '../lib/price-monitoring-domain';
-import { merchantPriceUpdateSchema, priceAlertQuerySchema } from '../lib/validation/price-monitoring.schema';
+import { merchantPriceUpdateSchema, priceAlertQuerySchema, priceMonitoringPolicySchema } from '../lib/validation/price-monitoring.schema';
 import { hasRRAPermission } from '../lib/rra-rbac';
 
 test('price monitoring calculates increases and decreases from the previous valid price', () => {
@@ -39,5 +39,19 @@ test('price alert permissions are explicit and do not grant jurisdiction managem
 test('price alert filters accept percentage ranges and reject reversed ranges', () => {
   assert.equal(priceAlertQuerySchema.safeParse({ minPercentage: '-5', maxPercentage: '20' }).success, true);
   assert.equal(priceAlertQuerySchema.safeParse({ minPercentage: '20', maxPercentage: '5' }).success, false);
+});
+
+test('price monitoring policies support global, category, and product scopes with ordered severity bands', () => {
+  const base = { increaseThresholdPercent: 5, decreaseThresholdPercent: 5, absoluteDifferenceRwf: 0, mediumThresholdPercent: 10, highThresholdPercent: 20, criticalThresholdPercent: 50, reason: 'Annual review' };
+  assert.equal(priceMonitoringPolicySchema.safeParse({ ...base, scopeType: 'default', scopeKey: '*' }).success, true);
+  assert.equal(priceMonitoringPolicySchema.safeParse({ ...base, scopeType: 'category', scopeKey: 'FOOD' }).success, true);
+  assert.equal(priceMonitoringPolicySchema.safeParse({ ...base, scopeType: 'product', scopeKey: 'product-1' }).success, true);
+  assert.equal(priceMonitoringPolicySchema.safeParse({ ...base, scopeType: 'default', scopeKey: 'FOOD' }).success, false);
+  assert.equal(priceMonitoringPolicySchema.safeParse({ ...base, scopeType: 'default', scopeKey: '*', highThresholdPercent: 4 }).success, false);
+});
+
+test('price alert filters include severity and product category', () => {
+  assert.equal(priceAlertQuerySchema.safeParse({ severity: 'critical', category: 'FOOD' }).success, true);
+  assert.equal(priceAlertQuerySchema.safeParse({ severity: 'invalid' }).success, false);
 });
 
