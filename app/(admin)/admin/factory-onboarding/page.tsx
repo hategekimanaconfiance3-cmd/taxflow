@@ -83,24 +83,17 @@ export default async function FactoryOnboardingPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {factories.map((factory: {
-                  id: string;
-                  manufacturerName: string;
-                  factoryName: string;
-                  location: string;
-                  registrationNumber: string;
-                  status: string;
-                }) => (
+                {factories.map((factory) => (
                   <TableRow key={factory.id}>
                     <TableCell className="font-medium text-sm">
-                      {factory.manufacturerName}
+                      {factory.manufacturerName ?? '—'}
                     </TableCell>
-                    <TableCell className="text-sm">{factory.factoryName}</TableCell>
+                    <TableCell className="text-sm">{factory.name}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {factory.location}
                     </TableCell>
                     <TableCell className="font-mono text-xs text-muted-foreground">
-                      {factory.registrationNumber}
+                      {factory.registrationNumber ?? '—'}
                     </TableCell>
                     <TableCell>
                       <Badge variant={statusVariant(factory.status)} className="text-xs capitalize">
@@ -150,22 +143,15 @@ export default async function FactoryOnboardingPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {gateways.map((gateway: {
-                  id: string;
-                  gatewayId: string;
-                  factoryName: string;
-                  deviceType: string;
-                  registeredAt: string;
-                  status: string;
-                }) => (
+                {gateways.map((gateway) => (
                   <TableRow key={gateway.id}>
                     <TableCell className="font-mono text-xs">{gateway.gatewayId}</TableCell>
-                    <TableCell className="text-sm">{gateway.factoryName}</TableCell>
+                    <TableCell className="text-sm">{gateway.factoryName ?? '—'}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">
-                      {gateway.deviceType}
+                      {gateway.protocol}
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">
-                      {new Date(gateway.registeredAt).toLocaleDateString()}
+                      {new Date(gateway.createdAt).toLocaleDateString()}
                     </TableCell>
                     <TableCell>
                       <Badge variant={statusVariant(gateway.status)} className="text-xs capitalize">
