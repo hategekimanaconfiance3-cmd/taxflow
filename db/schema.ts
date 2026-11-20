@@ -2832,3 +2832,43 @@ export const knowledgeFaq = pgTable('knowledge_faq', {
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
 
+// ---------------------------------------------------------------------------
+// Anomaly investigation tracking (migration 0045)
+// ---------------------------------------------------------------------------
+
+export const anomalyInvestigation = pgTable('anomaly_investigation', {
+  id: text('id').primaryKey(),
+  anomalyKey: text('anomaly_key').notNull().unique(),
+  anomalyType: text('anomaly_type').notNull(),
+  severity: text('severity').notNull(),
+  status: text('status').notNull().default('open'),
+  assignedToUserId: text('assigned_to_user_id'),
+  assignedAt: timestamp('assigned_at'),
+  investigatedByUserId: text('investigated_by_user_id'),
+  investigationStartedAt: timestamp('investigation_started_at'),
+  resolvedByUserId: text('resolved_by_user_id'),
+  resolvedAt: timestamp('resolved_at'),
+  resolutionReason: text('resolution_reason'),
+  isFalsePositive: boolean('is_false_positive').notNull().default(false),
+  notes: text('notes'),
+  escalatedToUserId: text('escalated_to_user_id'),
+  escalatedAt: timestamp('escalated_at'),
+  reopenedAt: timestamp('reopened_at'),
+  sellerName: text('seller_name'),
+  productName: text('product_name'),
+  description: text('description'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+export const anomalyAuditLog = pgTable('anomaly_audit_log', {
+  id: text('id').primaryKey(),
+  anomalyId: text('anomaly_id').notNull().references(() => anomalyInvestigation.id, { onDelete: 'cascade' }),
+  actorUserId: text('actor_user_id').notNull(),
+  action: text('action').notNull(),
+  previousStatus: text('previous_status'),
+  newStatus: text('new_status'),
+  note: text('note'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+});
+
