@@ -24,13 +24,15 @@ export function FactoryActions({ factoryId, currentStatus }: FactoryActionsProps
 
   const handleApprove = () => {
     startTransition(async () => {
-      await approveFactory({ factoryId });
+      await approveFactory(factoryId);
     });
   };
 
   const handleSuspend = () => {
+    const reason = window.prompt('Suspension reason (required):');
+    if (!reason || reason.trim().length < 5) return;
     startTransition(async () => {
-      await suspendFactory({ factoryId });
+      await suspendFactory({ factoryId, reason: reason.trim() });
     });
   };
 
@@ -78,13 +80,15 @@ export function GatewayActions({ gatewayId, currentStatus }: GatewayActionsProps
 
   const handleApprove = () => {
     startTransition(async () => {
-      await approveGateway({ gatewayId });
+      await approveGateway(gatewayId);
     });
   };
 
   const handleRevoke = () => {
+    const reason = window.prompt('Revocation reason (required):');
+    if (!reason || reason.trim().length < 5) return;
     startTransition(async () => {
-      await revokeGateway({ gatewayId });
+      await revokeGateway({ gatewayId, reason: reason.trim() });
     });
   };
 
