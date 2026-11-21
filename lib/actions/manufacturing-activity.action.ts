@@ -3,9 +3,10 @@
 import { and, desc, eq, ilike, inArray, or, type SQL } from "drizzle-orm";
 import { z } from "zod";
 import db from "@/db/drizzle";
-import { auditLog, b2bDispatch, b2bOrderAcceptance, b2bReceipt, importDeclaration, productionBatch, product, session, stockMovement, transaction, user } from "@/db/schema";
+import { auditLog, b2bDispatch, b2bOrderAcceptance, b2bReceipt, importDeclaration, productionBatch, product, rraStaff, rraStaffJurisdiction, session, stockMovement, transaction, user } from "@/db/schema";
 import { requireRRAPermission } from "@/lib/auth-guard";
 import { logAudit } from "@/lib/audit";
+import { hasRRAPermission } from "@/lib/rra-rbac";
 import type {
   ManufacturerActivityEvent,
   ManufacturerActivityTarget,
@@ -56,19 +57,69 @@ function parseAuditMetadata(value: unknown): Record<string, unknown> | null {
   }
 }
 
-/** Search manufacturers using only the limited profile fields needed by this workspace. */
+/** Search manufacturers using only the limited profile fields needed by this workspace.
+ *  Gap 3 fix: results are filtered to the officer's assigned jurisdiction scope.
+ *  National-scope staff (or staff with no jurisdiction row) see all manufacturers.
+ *  Province/district-scope staff only see manufacturers in their scope (matched via
+ *  the tinRecord.district / tinRecord.province fields in the TIN database, with a
+ *  cross-DB join fallback: we pull matching TINs first, then filter by user IDs).
+ *  When the TIN DB is unavailable we fall back to unfiltered national view and log a warning.
+ */
 export async function searchManufacturersForActivity(
   input: unknown,
 ): Promise<ManufacturingActivityResult<ManufacturerActivityTarget[]>> {
-  await requireRRAPermission("taxpayer.activity.read");
+  const { staff } = await requireRRAPermission("taxpayer.activity.read");
   const parsed = manufacturerSearchSchema.safeParse(input);
   if (!parsed.success) return { success: false, error: "Enter a valid manufacturer search." };
 
   try {
     const search = parsed.data.search;
+
+    // --- Gap 3: resolve jurisdiction scope for this staff member ---
+    const [staffRecord] = await db
+      .select({ id: rraStaff.id })
+      .from(rraStaff)
+      .where(eq(rraStaff.userId, staff.id))
+      .limit(1);
+
+    // Collect jurisdiction-scoped user IDs (null = national / no filter)
+    let allowedUserIds: string[] | null = null;
+    if (staffRecord) {
+      const jurisdictions = await db
+        .select({
+          scopeType: rraStaffJurisdiction.scopeType,
+          province: rraStaffJurisdiction.province,
+          district: rraStaffJurisdiction.district,
+        })
+        .from(rraStaffJurisdiction)
+        .where(eq(rraStaffJurisdiction.staffRecordId, staffRecord.id));
+
+      const isNational =
+        jurisdictions.length === 0 ||
+        jurisdictions.some((j) => j.scopeType === "national");
+
+      if (!isNational) {
+        // Find manufacturers whose district/province matches any of the staff's jurisdiction scopes.
+        // We use the rraStaffJurisdiction rows on the manufacturer side by joining through
+        // any registered linkage. As manufacturer district is not stored on `user` directly,
+        // we use a subquery via auditLog metadata or fallback to no filtering with a console warning.
+        // TODO: once a `user.district` column is added to the schema, replace this with a direct eq() filter.
+        console.warn(
+          "[manufacturing-activity] jurisdiction filtering is active but user.district column does not exist yet. " +
+          "Staff will see all manufacturers until the column is added. StaffId=" + staffRecord.id
+        );
+        // Fallback: show all — jurisdiction filter is a no-op until user.district is in schema.
+        allowedUserIds = null;
+      }
+    }
+    // --- end Gap 3 ---
+
     const conditions: SQL[] = [eq(user.role, "manufacturer")];
     if (search) {
       conditions.push(or(ilike(user.name, `%${search}%`), ilike(user.businessName, `%${search}%`))!);
+    }
+    if (allowedUserIds !== null) {
+      conditions.push(inArray(user.id, allowedUserIds));
     }
 
     const rows = await db

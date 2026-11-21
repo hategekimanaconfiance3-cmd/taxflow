@@ -30,6 +30,10 @@ type Props = {
   initialActivity: ManufacturerActivityView | null;
   canManageAccounts: boolean;
   canEditProfiles: boolean;
+  // Gap 2: roles with transaction.read (Tax Auditor, Revenue Investigator) see
+  // quantity figures and status badges on sales/import events in the activity feed.
+  // Roles without it still see the event type and product name but not amounts.
+  canSeeTransactionDetail: boolean;
 };
 type SearchFields = z.infer<typeof searchSchema>;
 type ProfileFields = z.infer<typeof profileSchema>;
@@ -48,8 +52,16 @@ function statusLabel(target: ManufacturerActivityTarget): string {
   return target.clearanceStatus.replaceAll("_", " ");
 }
 
-function ActivityRow({ event }: { event: ManufacturerActivityEvent }) {
+function ActivityRow({ event, canSeeTransactionDetail }: { event: ManufacturerActivityEvent; canSeeTransactionDetail: boolean }) {
   const Icon = kindIcons[event.kind];
+  // Gap 2: quantity and status on sales/import events are only shown to roles with transaction.read
+  const showQuantity = event.quantity !== null && (
+    canSeeTransactionDetail ||
+    event.kind === "production" ||
+    event.kind === "stock" ||
+    event.kind === "fulfillment" ||
+    event.kind === "account"
+  );
   return (
     <li className="grid gap-3 border-b py-4 last:border-b-0 sm:grid-cols-[auto_1fr_auto] sm:items-start">
       <span className="mt-0.5 rounded-md border p-2 text-muted-foreground"><Icon className="size-4" aria-hidden="true" /></span>
@@ -57,9 +69,9 @@ function ActivityRow({ event }: { event: ManufacturerActivityEvent }) {
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-medium">{event.title}</span>
           <Badge variant="outline">{kindLabels[event.kind]}</Badge>
-          {event.status ? <Badge variant="secondary">{event.status.replaceAll("_", " ")}</Badge> : null}
+          {canSeeTransactionDetail && event.status ? <Badge variant="secondary">{event.status.replaceAll("_", " ")}</Badge> : null}
         </div>
-        <span className="text-sm text-muted-foreground">{event.productName}{event.quantity ? ` · Quantity ${event.quantity}` : ""}</span>
+        <span className="text-sm text-muted-foreground">{event.productName}{showQuantity ? ` · Quantity ${event.quantity}` : ""}</span>
         {event.corrects ? <span className="text-sm text-muted-foreground">Corrects: {event.corrects.title} · {formatDate(event.corrects.occurredAt)}</span> : null}
       </div>
       <time className="text-sm text-muted-foreground sm:text-right" dateTime={new Date(event.occurredAt).toISOString()}>{formatDate(event.occurredAt)}</time>
@@ -67,7 +79,7 @@ function ActivityRow({ event }: { event: ManufacturerActivityEvent }) {
   );
 }
 
-export function ManufacturingActivityWorkspace({ initialManufacturers, initialActivity, canManageAccounts, canEditProfiles }: Props) {
+export function ManufacturingActivityWorkspace({ initialManufacturers, initialActivity, canManageAccounts, canEditProfiles, canSeeTransactionDetail }: Props) {
   const [manufacturers, setManufacturers] = useState(initialManufacturers);
   const [activity, setActivity] = useState(initialActivity);
   const [selectedId, setSelectedId] = useState(initialActivity?.manufacturer.id ?? "");
@@ -242,7 +254,7 @@ export function ManufacturingActivityWorkspace({ initialManufacturers, initialAc
             <Card>
               <CardHeader><CardTitle className="text-base">Recent activity</CardTitle><CardDescription>Latest {activity?.events.length ?? 0} records across production, sales, imports, B2B acceptance/dispatch/receipt, stock movements and account administration. Confidential formula names, taxpayer identifiers, contacts and tax/payment details are excluded.</CardDescription></CardHeader>
               <CardContent>
-                {isLoadingActivity ? <div className="grid min-h-36 place-items-center"><LoaderCircle className="size-5 animate-spin" aria-label="Loading activity" /></div> : activity?.events.length ? <ol className="divide-y-0">{activity.events.map((event) => <ActivityRow key={event.key} event={event} />)}</ol> : <p className="py-8 text-center text-sm text-muted-foreground">No recorded activity was found for this manufacturer.</p>}
+                {isLoadingActivity ? <div className="grid min-h-36 place-items-center"><LoaderCircle className="size-5 animate-spin" aria-label="Loading activity" /></div> : activity?.events.length ? <ol className="divide-y-0">{activity.events.map((event) => <ActivityRow key={event.key} event={event} canSeeTransactionDetail={canSeeTransactionDetail} />)}</ol> : <p className="py-8 text-center text-sm text-muted-foreground">No recorded activity was found for this manufacturer.</p>}
               </CardContent>
             </Card>
           </>}
