@@ -388,6 +388,31 @@ async function createSaleForConfirmationInternal(data: {
 
   if (!buyerCompliance.isCompliant) throw new Error(`Buyer has not met tax compliance (${buyerCompliance.compliancePct}% paid). They must pay at least ${buyerCompliance.threshold}% to purchase.`);
 
+  // ── Buyer sell-through eligibility pre-check (seller side, per product, fail-closed) ──
+  setFailureStage('verify buyer purchase eligibility');
+  const buyerDisplayName = buyer.businessName ?? buyer.name ?? `TIN ${buyer.tinNumber}`;
+  const eligibilityChecks = await withActionDeadline(
+    Promise.all(data.items.map((item) => checkPurchaseEligibility(buyer.id, item.productId))),
+    6_000,
+    'Buyer eligibility could not be verified in time. No sale was created; please try again.',
+  );
+  for (const eligResult of eligibilityChecks) {
+    if (!eligResult.eligible) {
+      const pct = eligResult.sellThroughPercent !== null
+        ? `${eligResult.sellThroughPercent.toFixed(1)}%`
+        : 'unknown';
+      const threshold = eligResult.thresholdPercent !== null
+        ? `${eligResult.thresholdPercent}%`
+        : '75%';
+      const remaining = eligResult.remainingSalesQuantity > 0
+        ? ` They must sell ${eligResult.remainingSalesQuantity.toLocaleString()} more unit(s) of ${eligResult.productName} first.`
+        : '';
+      throw new Error(
+        `Buyer is not eligible to purchase additional ${eligResult.productName}. ${buyerDisplayName} has sold ${pct} of their eligible ${eligResult.productName} stock (required: ${threshold}).${remaining} Please inform the buyer to sell more existing stock before attempting another purchase.`,
+      );
+    }
+  }
+
   // Fire-and-forget price floor checks (never block the sale)
   data.items.forEach((item) => { validatePriceFloor(item.productId, session.user.id, item.unitPrice).catch(() => {}); });
 
@@ -586,6 +611,7 @@ export async function createSaleForConfirmation(data: {
       'Buyer verification took too long', 'Sale eligibility checks took too long',
       'Checking a previous sale submission took too long', 'This sale submission key',
       'Submission key must be a UUID',
+      'Buyer is not eligible to purchase', 'Buyer eligibility could not be verified',
     ].some((prefix) => error.message.startsWith(prefix))
       ? error.message
       : `Sale could not be saved during ${failureStage}. Reference ${reference}${errorCode ? ` (database code: ${errorCode})` : ''}.`;
