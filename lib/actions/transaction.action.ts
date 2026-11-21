@@ -21,7 +21,7 @@ import { validatePriceFloor } from '@/lib/ai/price-suggestion';
 import type { PriceSuggestion } from '@/lib/ai/price-suggestion';
 import { calculateVat } from '@/lib/intelligence/tax-engine';
 import { assertVerifiedBusinessOwner } from '@/lib/b2b-authorization';
-import { assertPurchasedStockReceiptEligible } from '@/lib/stock-sell-through-enforcement';
+import { assertPurchasedStockReceiptEligible, checkPurchaseEligibility, type PurchaseEligibilityResult } from '@/lib/stock-sell-through-enforcement';
 import { createSalesInvoiceForTransaction } from '@/lib/sales-invoice-service';
 import { attemptSalesInvoiceEmail } from '@/lib/sales-invoice-delivery';
 import { triggerManufacturerAICheck } from '@/lib/ai/manufacturer-hooks';
@@ -718,10 +718,11 @@ export async function confirmTransaction(transactionId: string) {
     }).returning({ id: b2bOrderAcceptance.id, acceptedAt: b2bOrderAcceptance.acceptedAt });
     if (!acceptance) throw new Error('Order acceptance evidence could not be saved.');
 
-    // Enforce the mandatory 75% sell-through rule before crediting the buyer.
-    // This is the authoritative stock-credit gate for all B2B purchases.
-    // assertPurchasedStockReceiptEligible acquires a row-level lock on the
-    // buyer's stock and sell-through cycle, serializing concurrent confirmations.
+    // Enforce the mandatory 75% sell-through purchase eligibility rule.
+    // The buyer must have sold ≥75% of their current eligible stock of this
+    // product before they are permitted to purchase additional quantities.
+    // This gate runs inside the same DB transaction and locks the buyer's
+    // stock + sell-through cycle row to serialize concurrent attempts.
     const confirmAt = new Date();
     await assertPurchasedStockReceiptEligible(
       tx,
@@ -734,32 +735,11 @@ export async function confirmTransaction(transactionId: string) {
       confirmAt,
     );
 
-    // Credit buyer inventory only after the sell-through gate clears.
-    // The stock movement is traceable to the acceptance row (idempotency) and
-    // measured receipts can later reconcile shortages without double credit.
-    const [buyerStock] = await tx.insert(stock).values({
-      businessId: lockedTxn.buyerId,
-      productId: lockedTxn.productId,
-      quantity: lockedTxn.quantity,
-    }).onConflictDoUpdate({
-      target: [stock.businessId, stock.productId],
-      set: { quantity: sql`${stock.quantity} + ${lockedTxn.quantity}` },
-    }).returning({ quantity: stock.quantity });
-    if (!buyerStock) throw new Error('Buyer inventory could not be updated.');
-    const buyerQuantityAfter = buyerStock.quantity;
-    const buyerQuantityBefore = buyerQuantityAfter - lockedTxn.quantity;
-    await tx.insert(stockMovement).values({
-      businessId: lockedTxn.buyerId,
-      productId: lockedTxn.productId,
-      quantityDelta: lockedTxn.quantity,
-      quantityBefore: buyerQuantityBefore,
-      quantityAfter: buyerQuantityAfter,
-      movementType: 'b2b_purchase_confirmed',
-      sourceType: 'b2b_order_acceptance',
-      sourceId: acceptance.id,
-      actorUserId: session.user.id,
-      reason: `Buyer-confirmed purchase for transaction ${lockedTxn.id}`,
-    });
+    // ── NO STOCK CREDIT HERE ────────────────────────────────────────────────
+    // The commercial acceptance confirms the purchase contract only.
+    // Buyer inventory is credited ONLY after the seller dispatches and the
+    // buyer records a measured receipt (recordB2BReceipt in b2b-fulfillment).
+    // This ensures physical verification before inventory is updated.
 
     // 3. Create VAT output record (seller)
     await tx.insert(vatRecord).values({
@@ -805,12 +785,10 @@ export async function confirmTransaction(transactionId: string) {
       beforeState: {
         status: 'pending',
         sellerStockQuantity: sellerStock.quantity,
-        buyerStockQuantity: buyerQuantityBefore,
       },
       afterState: {
         status: 'confirmed',
         sellerStockQuantity: sellerQuantityAfter,
-        buyerStockQuantity: buyerQuantityAfter,
         vatAmount: lockedTxn.vatAmount,
       },
       metadata: JSON.stringify({
@@ -821,9 +799,9 @@ export async function confirmTransaction(transactionId: string) {
         acceptanceId: acceptance.id,
         acceptedAt: acceptance.acceptedAt,
         acceptedBy: actorAuthority,
-        receiptRequiredForBuyerStockCredit: false,
-        buyerStockCreditSource: 'b2b_order_acceptance',
-        sellThroughGatePassed: true,
+        receiptRequiredForBuyerStockCredit: true,
+        buyerStockCreditSource: 'b2b_receipt',
+        sellThroughEligibilityVerified: true,
         stockMovements: !reservation ? [{
             movementId: `${lockedTxn.id}:seller`,
             movementType: 'sale',
@@ -833,14 +811,13 @@ export async function confirmTransaction(transactionId: string) {
             quantityBefore: sellerStock.quantity,
             quantityAfter: sellerQuantityAfter,
           }] : [],
-        stockCreditedToBuyer: lockedTxn.quantity,
         reservationId: reservation?.id ?? null,
       }),
     });
 
     const [savedNotification] = await tx.insert(notification).values({
       userId: lockedTxn.sellerId, type: 'txn_confirmed', title: 'Order accepted',
-      message: `${session.user.name} accepted your order for ${lockedTxn.quantity} units. The quantity was added to the buyer's inventory; delivery receipts can reconcile actual quantities.`,
+      message: `${session.user.name} accepted your order for ${lockedTxn.quantity} units. The purchase is confirmed; stock will be credited to the buyer after measured receipt.`,
       link: '/dashboard/pending',
     }).returning();
     return { txn: lockedTxn, savedNotification, expired: false, invoiceId: issuedInvoice.id };
@@ -1516,5 +1493,32 @@ export async function lookupBuyer(buyerTin: string) {
     return {
       error: err instanceof Error ? err.message : 'Failed to lookup buyer',
     };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Purchase Eligibility Check — read-only, used by buyer's pending UI
+// ---------------------------------------------------------------------------
+
+/**
+ * Check whether the authenticated buyer is eligible to purchase more of a
+ * given product under the 75% sell-through rule. Returns structured data for
+ * clear UI display. The authoritative enforcement is in confirmTransaction().
+ */
+export async function getPurchaseEligibility(
+  transactionId: string,
+): Promise<PurchaseEligibilityResult | null> {
+  try {
+    const session = await requireTraderSession();
+    const [txn] = await db.select({
+      buyerId: transaction.buyerId,
+      productId: transaction.productId,
+      status: transaction.status,
+    }).from(transaction).where(eq(transaction.id, transactionId)).limit(1);
+
+    if (!txn || txn.buyerId !== session.user.id || txn.status !== 'pending') return null;
+    return await checkPurchaseEligibility(txn.buyerId, txn.productId);
+  } catch {
+    return null;
   }
 }

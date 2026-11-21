@@ -1,7 +1,110 @@
 import { and, asc, desc, eq, gte, inArray, lte } from "drizzle-orm";
 import db from "@/db/drizzle";
 import { auditLog, b2bOrderAcceptance, product, stock, stockMovement, stockReservation, stockRestockRequest, stockSellThroughCycle, stockSellThroughThreshold, transaction } from "@/db/schema";
-import { calculateSellThrough, resolveSellThroughThreshold, type SellThroughMovement, type SellThroughThresholdRecord } from "@/lib/stock-sell-through";
+import { calculateSellThrough, resolveSellThroughThreshold, type SellThroughCalculation, type SellThroughMovement, type SellThroughThresholdRecord } from "@/lib/stock-sell-through";
+
+export interface PurchaseEligibilityResult {
+  eligible: boolean;
+  productName: string;
+  productId: string;
+  currentStock: number;
+  thresholdPercent: number | null;
+  sellThroughPercent: number | null;
+  qualifyingSalesQuantity: number;
+  requiredSalesQuantity: number;
+  remainingSalesQuantity: number;
+  reason: string;
+  status: SellThroughCalculation["status"];
+  hasApprovedException: boolean;
+}
+
+/**
+ * Read-only purchase eligibility check. Returns structured data for UI display
+ * without locking or throwing. Use assertPurchasedStockReceiptEligible inside
+ * a DB transaction for the authoritative enforcement path.
+ */
+export async function checkPurchaseEligibility(
+  businessId: string,
+  productId: string,
+): Promise<PurchaseEligibilityResult> {
+  const at = new Date();
+
+  const [item] = await db.select({ id: product.id, name: product.name, categoryCode: product.categoryCode })
+    .from(product).where(eq(product.id, productId)).limit(1);
+  if (!item) throw new Error("Product not found.");
+
+  const [balance] = await db.select({ quantity: stock.quantity })
+    .from(stock).where(and(eq(stock.businessId, businessId), eq(stock.productId, productId))).limit(1);
+  const currentQuantity = Number(balance?.quantity ?? 0);
+
+  const [cycle] = await db.select().from(stockSellThroughCycle).where(and(
+    eq(stockSellThroughCycle.businessId, businessId), eq(stockSellThroughCycle.productId, productId),
+  )).limit(1);
+
+  const policyRows = await db.select().from(stockSellThroughThreshold).where(and(
+    eq(stockSellThroughThreshold.scopeType, "default"), eq(stockSellThroughThreshold.scopeKey, "*"),
+    lte(stockSellThroughThreshold.effectiveAt, at),
+  )).orderBy(desc(stockSellThroughThreshold.effectiveAt), desc(stockSellThroughThreshold.createdAt), desc(stockSellThroughThreshold.id)).limit(1);
+  const policy = resolveSellThroughThreshold(policyRows as SellThroughThresholdRecord[], productId, item.categoryCode, at);
+
+  const baselineQty = cycle ? Number(cycle.baselineQuantity) : currentQuantity;
+  const cycleStart = cycle?.cycleStartedAt ?? at;
+  const baselineStatus = (cycle?.baselineStatus ?? "needs_review") as "needs_review" | "ledger_verified";
+
+  const movements = await db.select({
+    id: stockMovement.id, movementType: stockMovement.movementType, quantityDelta: stockMovement.quantityDelta,
+    quantityBefore: stockMovement.quantityBefore, quantityAfter: stockMovement.quantityAfter,
+    createdAt: stockMovement.createdAt, sourceType: stockMovement.sourceType, sourceId: stockMovement.sourceId,
+  }).from(stockMovement).where(and(
+    eq(stockMovement.businessId, businessId), eq(stockMovement.productId, productId),
+    gte(stockMovement.createdAt, cycleStart), lte(stockMovement.createdAt, at),
+  )).orderBy(asc(stockMovement.createdAt), asc(stockMovement.id)).limit(MAX_EVIDENCE_ROWS + 1);
+
+  const reservations = await db.select({ transactionId: stockReservation.transactionId, status: stockReservation.status, reservedAt: stockReservation.reservedAt })
+    .from(stockReservation).where(and(eq(stockReservation.productId, productId), eq(stockReservation.sellerId, businessId), inArray(stockReservation.status, ["active", "converted"]))).limit(MAX_EVIDENCE_ROWS + 1);
+  const accepted = await db.select({
+    transactionId: b2bOrderAcceptance.transactionId, quantity: transaction.quantity,
+    acceptedAt: b2bOrderAcceptance.acceptedAt, reservedAt: stockReservation.reservedAt,
+  }).from(b2bOrderAcceptance).innerJoin(transaction, eq(b2bOrderAcceptance.transactionId, transaction.id))
+    .leftJoin(stockReservation, eq(stockReservation.transactionId, transaction.id)).where(and(
+      eq(transaction.sellerId, businessId), eq(transaction.productId, productId),
+      inArray(transaction.status, ["confirmed", "completed"]),
+      gte(b2bOrderAcceptance.acceptedAt, cycleStart), lte(b2bOrderAcceptance.acceptedAt, at),
+    )).limit(MAX_EVIDENCE_ROWS + 1);
+  const acceptedIds = new Set(accepted.map((r) => r.transactionId));
+  const hasUnresolvedReservation = reservations.some((r) => r.status === "active"
+    || (r.status === "converted" && r.reservedAt.getTime() >= cycleStart.getTime() && !acceptedIds.has(r.transactionId)));
+  const evidenceComplete = movements.length <= MAX_EVIDENCE_ROWS && reservations.length <= MAX_EVIDENCE_ROWS && accepted.length <= MAX_EVIDENCE_ROWS;
+
+  const result = calculateSellThrough({
+    thresholdPercent: policy?.thresholdPercent ?? null, evaluatedAt: at,
+    baselineQuantity: baselineQty, cycleStartedAt: cycleStart, baselineStatus: baselineStatus,
+    currentQuantity, movements: movements.slice(0, MAX_EVIDENCE_ROWS) as SellThroughMovement[],
+    acceptedB2BSales: accepted.map((r) => ({ transactionId: r.transactionId, quantity: Number(r.quantity), acceptedAt: r.acceptedAt, reservedAt: r.reservedAt })),
+    hasUnresolvedReservation, evidenceComplete,
+  });
+
+  const [approvedException] = await db.select({ id: stockRestockRequest.id })
+    .from(stockRestockRequest).where(and(
+      eq(stockRestockRequest.businessId, businessId), eq(stockRestockRequest.productId, productId),
+      eq(stockRestockRequest.exceptionStatus, "approved"),
+    )).limit(1);
+
+  return {
+    eligible: result.status === "eligible" || Boolean(approvedException),
+    productName: item.name,
+    productId,
+    currentStock: currentQuantity,
+    thresholdPercent: policy?.thresholdPercent ?? null,
+    sellThroughPercent: result.sellThroughPercent,
+    qualifyingSalesQuantity: result.qualifyingSalesQuantity,
+    requiredSalesQuantity: result.requiredSalesQuantity,
+    remainingSalesQuantity: result.remainingSalesQuantity,
+    reason: result.reason,
+    status: result.status,
+    hasApprovedException: Boolean(approvedException),
+  };
+}
 
 const MAX_EVIDENCE_ROWS = 500;
 type DbTx = Parameters<Parameters<typeof db.transaction>[0]>[0];

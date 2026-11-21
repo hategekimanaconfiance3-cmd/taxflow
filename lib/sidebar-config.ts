@@ -19,6 +19,7 @@ import {
     Brain,
     UsersRound,
     ClipboardList,
+    Plug,
 } from "lucide-react";
 
 export type TraderRole = "manufacturer" | "wholesaler" | "retailer";

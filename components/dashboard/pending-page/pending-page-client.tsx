@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useTransition, useCallback, useRef, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import { cancelTransaction, confirmTransaction, rejectTransaction } from '@/lib/actions/transaction.action';
+import { cancelTransaction, confirmTransaction, rejectTransaction, type getPurchaseEligibility } from '@/lib/actions/transaction.action';
 import { getB2BFulfillmentQueue, recordB2BDispatch, recordB2BReceipt } from '@/lib/actions/b2b-fulfillment.action';
 import { useSocket } from '@/lib/socket-client';
 import { useSocketContext } from '@/components/providers/socket-provider';
@@ -11,7 +11,10 @@ import { TransactionStatusBadge } from '@/components/dashboard/status-badges/sta
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Clock, ArrowDownLeft, ArrowUpRight, Check, X, Loader2, RefreshCw, Send, Timer, PackageCheck } from 'lucide-react';
+import { Clock, ArrowDownLeft, ArrowUpRight, Check, X, Loader2, RefreshCw, Send, Timer, PackageCheck, ShieldAlert } from 'lucide-react';
+
+type EligibilityResult = NonNullable<Awaited<ReturnType<typeof getPurchaseEligibility>>>;
+type EligibilityMap = Record<string, EligibilityResult>;
 
 /** Pending transactions expire after 10 minutes (must match server constant). */
 /** Returns remaining ms until expiry, or 0 if already expired. */
@@ -83,6 +86,46 @@ interface OutgoingTxn {
 }
 
 type FulfillmentQueue = Awaited<ReturnType<typeof getB2BFulfillmentQueue>>;
+
+// ---------------------------------------------------------------------------
+// Purchase Eligibility Banner
+// ---------------------------------------------------------------------------
+
+function EligibilityBanner({ eligibility }: { eligibility: EligibilityResult }) {
+  if (eligibility.eligible) {
+    return (
+      <div className="mb-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+        <span className="font-semibold">✓ Purchase eligible.</span>{' '}
+        You have sold {eligibility.sellThroughPercent !== null ? `${eligibility.sellThroughPercent.toFixed(1)}%` : 'enough'} of your {eligibility.productName} stock
+        {eligibility.thresholdPercent !== null ? ` (required: ${eligibility.thresholdPercent}%)` : ''}.
+      </div>
+    );
+  }
+  const pct = eligibility.sellThroughPercent !== null ? `${eligibility.sellThroughPercent.toFixed(1)}%` : 'unknown %';
+  const threshold = eligibility.thresholdPercent !== null ? `${eligibility.thresholdPercent}%` : 'required threshold';
+  const remaining = eligibility.remainingSalesQuantity > 0
+    ? ` You must sell ${eligibility.remainingSalesQuantity.toLocaleString()} more unit(s) to qualify.`
+    : '';
+  return (
+    <div className="mb-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800 space-y-1">
+      <p className="font-semibold flex items-center gap-1">
+        <ShieldAlert className="h-3.5 w-3.5 shrink-0" />
+        Purchase blocked — insufficient sell-through
+      </p>
+      <p>
+        You cannot purchase additional <strong>{eligibility.productName}</strong> yet.
+        You have sold <strong>{pct}</strong> of your eligible stock (threshold: <strong>{threshold}</strong>).{remaining}
+      </p>
+      <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 mt-1 text-red-700">
+        <span>Current stock:</span><span className="font-mono">{eligibility.currentStock.toLocaleString()}</span>
+        <span>Sold this cycle:</span><span className="font-mono">{eligibility.qualifyingSalesQuantity.toLocaleString()}</span>
+        <span>Required to sell:</span><span className="font-mono">{eligibility.requiredSalesQuantity.toLocaleString()}</span>
+        <span>Still needed:</span><span className="font-mono font-semibold">{eligibility.remainingSalesQuantity.toLocaleString()}</span>
+      </div>
+      <p className="text-red-600 mt-1">Accepting this order will be blocked by the server. Sell more {eligibility.productName} first.</p>
+    </div>
+  );
+}
 
 function DispatchForm({ item }: { item: FulfillmentQueue['outgoing'][number] }) {
   const router = useRouter();
@@ -242,7 +285,7 @@ function ConfirmRejectActions({ transactionId }: { transactionId: string }) {
                     : "text-red-500"
                     }`}
             >
-                {result === "confirmed" ? "✓ Accepted; inventory updated" : "✕ Rejected"}
+                {result === "confirmed" ? "✓ Purchase accepted — await dispatch & receipt" : "✕ Rejected"}
                 {result === "confirmed" && invoiceId && (
                     <a className="ml-2 underline underline-offset-2" href={`/dashboard/invoices/${invoiceId}`}>View invoice</a>
                 )}
@@ -314,9 +357,10 @@ interface PendingPageClientProps {
   incoming: IncomingTxn[];
   outgoing: OutgoingTxn[];
   fulfillment: FulfillmentQueue;
+  eligibilityMap: EligibilityMap;
 }
 
-export function PendingPageClient({ incoming, outgoing, fulfillment }: PendingPageClientProps) {
+export function PendingPageClient({ incoming, outgoing, fulfillment, eligibilityMap }: PendingPageClientProps) {
   const router = useRouter();
   const { userId } = useSocketContext();
   const [tab, setTab] = useState<'incoming' | 'outgoing'>('incoming');
@@ -365,7 +409,7 @@ export function PendingPageClient({ incoming, outgoing, fulfillment }: PendingPa
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Pending Orders</h1>
-        <p className="text-sm text-muted-foreground mt-1">Accepting an incoming order adds its quantity to inventory immediately. Record dispatch and measured receipts to reconcile actual deliveries.</p>
+        <p className="text-sm text-muted-foreground mt-1">Review incoming purchase offers. You must have sold at least 75% of your existing stock of each product before accepting additional quantities. Stock is credited only after measured receipt.</p>
       </div>
 
       {/* Tabs */}
@@ -446,6 +490,7 @@ export function PendingPageClient({ incoming, outgoing, fulfillment }: PendingPa
                   <Clock className="h-4 w-4 text-amber-500" />
                   Awaiting Your Order Decision ({pendingIncoming.length})
                 </CardTitle>
+                <p className="text-xs text-muted-foreground">The 75% sell-through rule applies per product. Orders blocked by insufficient sell-through will be rejected by the server even if you click Accept.</p>
               </CardHeader>
               <CardContent>
                 <Table>
@@ -461,13 +506,25 @@ export function PendingPageClient({ incoming, outgoing, fulfillment }: PendingPa
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {pendingIncoming.map((txn) => (
-                      <TableRow key={txn.id}>
+                    {pendingIncoming.map((txn) => {
+                      const eligibility = eligibilityMap[txn.id];
+                      const blocked = eligibility && !eligibility.eligible;
+                      return (
+                      <TableRow key={txn.id} className={blocked ? 'bg-red-50/50' : undefined}>
                         <TableCell className="font-mono text-sm text-muted-foreground">
                           {txn.sellerTin ?? '—'}
                         </TableCell>
                         <TableCell className="font-medium">{txn.sellerName ?? '—'}</TableCell>
-                        <TableCell>{txn.productName}</TableCell>
+                        <TableCell>
+                          <div>
+                            {txn.productName}
+                            {eligibility && (
+                              <div className="mt-1.5">
+                                <EligibilityBanner eligibility={eligibility} />
+                              </div>
+                            )}
+                          </div>
+                        </TableCell>
                         <TableCell className="text-right font-mono">{txn.quantity.toLocaleString()}</TableCell>
                         <TableCell className="text-right font-mono">{formatRWF(txn.totalAmount)}</TableCell>
                         <TableCell>
@@ -480,7 +537,8 @@ export function PendingPageClient({ incoming, outgoing, fulfillment }: PendingPa
                           <ConfirmRejectActions transactionId={txn.id} />
                         </TableCell>
                       </TableRow>
-                    ))}
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </CardContent>
