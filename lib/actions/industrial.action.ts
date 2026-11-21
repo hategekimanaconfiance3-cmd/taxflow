@@ -260,3 +260,4 @@ export async function getIndustrialIntegrationAuditForOfficer(integrationId: str
 async function getIndustrialIntegrationForOfficer(actorUserId: string, integrationId: string) {
   return getIndustrialIntegrationByIdForOfficer(actorUserId, integrationId);
 }
+

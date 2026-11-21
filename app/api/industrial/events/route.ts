@@ -4,14 +4,29 @@ import { industrialGateway, industrialGatewayCredential, industrialEvent } from 
 import { and, eq, lt } from 'drizzle-orm';
 import { createHash } from 'crypto';
 import { verifyGatewaySignature, isTimestampFresh } from '@/lib/industrial-security';
+import { consumeRateLimit, getRequestIdentity } from '@/lib/rate-limit';
 
 // POST /api/industrial/events
 // Called by industrial gateways to submit production events.
 // Auth: Bearer token hashed and compared against gateway credential.
-// Security: Ed25519 signature verification + nonce replay protection + credential expiry check.
+// Security: IP rate limit → Ed25519 signature + nonce replay protection + credential expiry check.
 
 export async function POST(req: NextRequest) {
   try {
+    // ── IP-level rate limit (before expensive DB auth) ───────────────────────
+    const ipRate = await consumeRateLimit(
+      'industrial-event-ip',
+      getRequestIdentity(req.headers),
+      120,
+      60,
+    ).catch(() => ({ allowed: true, retryAfterSeconds: 0 }));
+    if (!ipRate.allowed) {
+      return NextResponse.json(
+        { error: 'Rate limit exceeded. Try again later.' },
+        { status: 429, headers: { 'Retry-After': String(ipRate.retryAfterSeconds) } },
+      );
+    }
+
     const authHeader = req.headers.get('authorization');
     if (!authHeader?.startsWith('Bearer ')) {
       return NextResponse.json({ error: 'Missing or invalid authorization header' }, { status: 401 });
@@ -62,6 +77,16 @@ export async function POST(req: NextRequest) {
 
     if (!gateway) {
       return NextResponse.json({ error: 'Gateway not found or not active' }, { status: 403 });
+    }
+
+    // ── Gateway-specific rate limit (after authentication) ───────────────────
+    const gwRate = await consumeRateLimit('industrial-event-gateway', gateway.id, 6000, 60)
+      .catch(() => ({ allowed: true, retryAfterSeconds: 0 }));
+    if (!gwRate.allowed) {
+      return NextResponse.json(
+        { error: 'Gateway event rate limit exceeded.' },
+        { status: 429, headers: { 'Retry-After': String(gwRate.retryAfterSeconds) } },
+      );
     }
 
     // ── C1: Ed25519 signature verification (signed_ed25519 auth mode only) ───

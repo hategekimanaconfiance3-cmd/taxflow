@@ -475,7 +475,23 @@ export async function claimIndustrialIntegrationCredentials(manufacturerId: stri
     const [claimed] = await tx.update(industrialCredentialDelivery).set({ claimedAt: new Date(), claimedByUserId: manufacturerId }).where(and(eq(industrialCredentialDelivery.id, delivery.id), isNull(industrialCredentialDelivery.claimedAt))).returning({ id: industrialCredentialDelivery.id });
     if (!claimed) throw new Error('Credential delivery could not be claimed.');
     await tx.update(industrialIntegration).set({ requiresCredentialReissue: false, status: integration.status === 'provisioning' ? 'provisioned' : integration.status }).where(eq(industrialIntegration.id, integrationId));
-    await tx.insert(auditLog).values({ userId: manufacturerId, action: 'INDUSTRIAL_CREDENTIALS_CLAIMED', targetType: 'industrial_integration', targetId: integrationId, metadata: JSON.stringify({ credentialVersion: payload.credentialVersion }) });
+    const [gatewayForAudit] = await tx.select({ id: industrialGateway.id }).from(industrialGateway).where(eq(industrialGateway.integrationId, integrationId)).limit(1);
+    await tx.insert(auditLog).values({
+      userId: manufacturerId,
+      action: 'INDUSTRIAL_CREDENTIALS_CLAIMED',
+      targetType: 'industrial_integration',
+      targetId: integrationId,
+      metadata: JSON.stringify({
+        integrationId,
+        gatewayId: gatewayForAudit?.id ?? null,
+        manufacturerId,
+        integrationCode: integration.integrationCode,
+        environment: integration.environment,
+        credentialVersion: payload.credentialVersion,
+        outcome: 'success',
+        claimedAt: new Date().toISOString(),
+      }),
+    });
     return { ...payload, claimedAt: new Date().toISOString() };
   });
 }
@@ -805,7 +821,7 @@ export async function ingestAuthenticatedIndustrialEvent(gateway: typeof industr
       synchronizationStatus: 'acknowledged',
       sequenceStatus,
       counterStatus,
-      isSimulated: input.source === 'simulator',
+      isSimulated: gateway.sourceType === 'simulator',
     }).returning();
     if (!created) throw new Error('Industrial event could not be stored.');
 

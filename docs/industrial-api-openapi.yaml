@@ -1,0 +1,458 @@
+openapi: 3.1.0
+info:
+  title: TaxFlow Industrial Machine Integration API
+  version: 1.0.0
+  description: >
+    API for authorized manufacturer gateways to submit production events,
+    send heartbeats, retrieve diagnostics, and synchronize acknowledgements
+    with the TaxFlow platform. All endpoints require Bearer authentication.
+    Event ingestion additionally requires an Ed25519 request signature.
+  contact:
+    name: TaxFlow Integration Support
+    url: https://taxflow-five.vercel.app
+
+servers:
+  - url: https://taxflow-five.vercel.app
+    description: TaxFlow (sandbox and production)
+
+security:
+  - BearerAuth: []
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: >
+        Gateway client secret obtained via the credential claim endpoint.
+        Must be at least 32 characters.
+
+  parameters:
+    XTFTimestamp:
+      name: X-TF-Timestamp
+      in: header
+      required: true
+      schema:
+        type: string
+        pattern: '^\d+$'
+      description: Unix epoch in seconds (integer as a string). Must be within ±5 minutes of server time.
+    XTFNonce:
+      name: X-TF-Nonce
+      in: header
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: UUID v4, unique per request per gateway. Never reuse across requests.
+    XTFKeyVersion:
+      name: X-TF-Key-Version
+      in: header
+      required: true
+      schema:
+        type: integer
+      description: Integer key version matching the registered Ed25519 public signing key.
+    XTFSignatureVersion:
+      name: X-TF-Signature-Version
+      in: header
+      required: true
+      schema:
+        type: string
+        enum: [v1]
+      description: Signature scheme version. Always "v1".
+    XTFSignature:
+      name: X-TF-Signature
+      in: header
+      required: true
+      schema:
+        type: string
+      description: >
+        Base64url-encoded Ed25519 signature over the canonical request:
+        METHOD\nPATH\nTIMESTAMP\nNONCE\nKEY_VERSION\nSHA256_HEX(raw_body)
+
+  schemas:
+    IndustrialEvent:
+      type: object
+      required:
+        - eventType
+        - equipmentId
+        - sequenceNumber
+        - eventTimestamp
+      properties:
+        eventId:
+          type: string
+          format: uuid
+          description: Client-generated UUID. Used for idempotency.
+        gatewayId:
+          type: string
+          format: uuid
+        factoryId:
+          type: string
+          format: uuid
+        lineId:
+          type: string
+          format: uuid
+        equipmentId:
+          type: string
+          format: uuid
+          description: Must be authorized for this integration.
+        eventType:
+          type: string
+          enum:
+            - production_count
+            - weight_reading
+            - line_start
+            - line_stop
+            - reject_count
+            - downtime
+            - sensor_reading
+            - batch_tag
+        sequenceNumber:
+          type: integer
+          minimum: 1
+          description: Monotonically increasing counter per gateway.
+        eventTimestamp:
+          type: string
+          format: date-time
+          description: ISO 8601 timestamp of the production event.
+        measurements:
+          type: object
+          additionalProperties:
+            type: number
+          description: Key-value measurement data (e.g. count, weight, temperature).
+        schemaVersion:
+          type: string
+          default: '1.0'
+        batchId:
+          type: string
+          format: uuid
+        batchReference:
+          type: string
+          maxLength: 128
+        stageCode:
+          type: string
+          maxLength: 64
+
+    EventsResponse:
+      type: object
+      properties:
+        accepted:
+          type: integer
+        rejected:
+          type: integer
+        insertedIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              index:
+                type: integer
+              error:
+                type: string
+
+    HeartbeatRequest:
+      type: object
+      required:
+        - gatewayId
+      properties:
+        gatewayId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [online, degraded, offline]
+        cpuPercent:
+          type: number
+          minimum: 0
+          maximum: 100
+        memoryPercent:
+          type: number
+          minimum: 0
+          maximum: 100
+        uptimeSeconds:
+          type: integer
+          minimum: 0
+        firmwareVersion:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    HeartbeatResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        serverTime:
+          type: string
+          format: date-time
+
+    DiagnosticsResponse:
+      type: object
+      properties:
+        gatewayId:
+          type: string
+          format: uuid
+        status:
+          type: string
+        lastHeartbeatAt:
+          type: string
+          format: date-time
+        lastEventAt:
+          type: string
+          format: date-time
+        eventCountToday:
+          type: integer
+        pendingAcknowledgements:
+          type: integer
+
+    AcknowledgeRequest:
+      type: object
+      required:
+        - gatewayId
+        - eventIds
+      properties:
+        gatewayId:
+          type: string
+          format: uuid
+        eventIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          minItems: 1
+          maxItems: 500
+
+    AcknowledgeResponse:
+      type: object
+      properties:
+        acknowledged:
+          type: integer
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Human-readable error message.
+
+paths:
+  /api/v1/industrial/events:
+    post:
+      operationId: submitIndustrialEvents
+      summary: Submit production events
+      description: >
+        Submit one or more production events from an authenticated gateway.
+        Requires Bearer authentication AND a valid Ed25519 request signature.
+        Batch size: 1–100 events per request.
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XTFTimestamp'
+        - $ref: '#/components/parameters/XTFNonce'
+        - $ref: '#/components/parameters/XTFKeyVersion'
+        - $ref: '#/components/parameters/XTFSignatureVersion'
+        - $ref: '#/components/parameters/XTFSignature'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/IndustrialEvent'
+                - type: array
+                  items:
+                    $ref: '#/components/schemas/IndustrialEvent'
+                  minItems: 1
+                  maxItems: 100
+            examples:
+              single:
+                summary: Single event
+                value:
+                  eventId: 'd5f8c3a2-1234-4abc-b678-9def01234567'
+                  gatewayId: 'a1b2c3d4-0001-4000-8000-000000000001'
+                  factoryId: 'a1b2c3d4-0002-4000-8000-000000000002'
+                  equipmentId: 'a1b2c3d4-0003-4000-8000-000000000003'
+                  eventType: 'production_count'
+                  sequenceNumber: 42
+                  eventTimestamp: '2026-11-20T08:00:00.000Z'
+                  measurements:
+                    count: 120
+                  schemaVersion: '1.0'
+      responses:
+        '202':
+          description: Events accepted (partial acceptance possible — check errors array)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventsResponse'
+        '400':
+          description: Malformed request or validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Authentication failure (missing/expired/revoked credential, invalid/replayed signature)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Gateway or integration is not active
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Rate limit exceeded
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+              description: Seconds to wait before retrying
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/industrial/heartbeat:
+    post:
+      operationId: sendGatewayHeartbeat
+      summary: Send gateway heartbeat
+      description: Report gateway health and connectivity status. No Ed25519 signature required.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HeartbeatRequest'
+      responses:
+        '200':
+          description: Heartbeat received
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HeartbeatResponse'
+        '400':
+          description: Missing gatewayId or malformed request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Authentication failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Rate limit exceeded
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/industrial/diagnostics:
+    get:
+      operationId: getGatewayDiagnostics
+      summary: Retrieve gateway diagnostics
+      description: Retrieve current diagnostic information for a gateway. No Ed25519 signature required.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: gatewayId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: Gateway UUID
+      responses:
+        '200':
+          description: Diagnostics retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiagnosticsResponse'
+        '400':
+          description: Missing gatewayId
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Authentication failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Rate limit exceeded
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/industrial/sync/acknowledge:
+    post:
+      operationId: acknowledgeIndustrialEvents
+      summary: Acknowledge event receipt
+      description: Acknowledge successful receipt of events queued for the gateway. No Ed25519 signature required.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AcknowledgeRequest'
+      responses:
+        '200':
+          description: Acknowledgement recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AcknowledgeResponse'
+        '400':
+          description: Missing required fields
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Authentication failure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Rate limit exceeded
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'

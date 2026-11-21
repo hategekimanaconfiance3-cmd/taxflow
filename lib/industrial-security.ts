@@ -115,3 +115,28 @@ export function isTimestampFresh(timestamp: string, toleranceMs = 5 * 60 * 1_000
   return Math.abs(Date.now() - milliseconds) <= toleranceMs;
 }
 
+/**
+ * Validates INDUSTRIAL_CREDENTIAL_ENCRYPTION_KEY at startup.
+ * Call from application initialization or a startup health check.
+ * Never exposes the secret value — only checks format and presence.
+ *
+ * @throws {Error} If the key is missing or has the wrong format.
+ */
+export function validateIndustrialEncryptionKeyConfig(): void {
+  const configured = process.env.INDUSTRIAL_CREDENTIAL_ENCRYPTION_KEY;
+  if (!configured) {
+    throw new Error(
+      '[industrial-security] INDUSTRIAL_CREDENTIAL_ENCRYPTION_KEY is not set. ' +
+      'Generate a 32-byte hex key and set it as an environment variable. ' +
+      'Example: openssl rand -hex 32',
+    );
+  }
+  if (!/^[a-f0-9]{64}$/i.test(configured)) {
+    throw new Error(
+      '[industrial-security] INDUSTRIAL_CREDENTIAL_ENCRYPTION_KEY is invalid. ' +
+      'Must be exactly 64 hexadecimal characters (32 bytes). ' +
+      'The current value has the wrong format or length.',
+    );
+  }
+}
+
