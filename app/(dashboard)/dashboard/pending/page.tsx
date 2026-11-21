@@ -17,7 +17,9 @@ export default async function PendingPage() {
   const eligibilityEntries = await Promise.all(
     pendingIds.map(async (id) => [id, await getPurchaseEligibility(id)] as const),
   );
-  const eligibilityMap = Object.fromEntries(eligibilityEntries.filter(([, v]) => v !== null));
+  const eligibilityMap = Object.fromEntries(
+    eligibilityEntries.filter((e): e is [string, NonNullable<typeof e[1]>] => e[1] !== null),
+  );
 
   return (
     <PendingPageClient incoming={incoming} outgoing={outgoing} fulfillment={fulfillment} eligibilityMap={eligibilityMap} />
