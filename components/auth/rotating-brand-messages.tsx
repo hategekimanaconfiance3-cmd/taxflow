@@ -1,12 +1,13 @@
 'use client';
 
 import { useEffect, useId, useRef, useState } from 'react';
+import { usePathname } from 'next/navigation';
 
 type BrandMessage = {
   parts: Array<{ text: string; tone?: 'accent' | 'muted' }>;
 };
 
-const MESSAGES: BrandMessage[] = [
+const TAXPAYER_MESSAGES: BrandMessage[] = [
   {
     parts: [
       { text: 'Every Tax Counts. ', tone: 'accent' },
@@ -28,9 +29,33 @@ const MESSAGES: BrandMessage[] = [
   },
 ];
 
-const ROTATION_MS = 5500;
+const STAFF_MESSAGES: BrandMessage[] = [
+  {
+    parts: [
+      { text: 'Integrity in Every Action. ', tone: 'accent' },
+      { text: 'Progress in Every Decision.', tone: 'muted' },
+    ],
+  },
+  {
+    parts: [
+      { text: 'Serving Businesses. ', tone: 'muted' },
+      { text: 'Strengthening Rwanda.', tone: 'accent' },
+    ],
+  },
+  {
+    parts: [
+      { text: 'Transparency Today. ', tone: 'muted' },
+      { text: 'A Stronger Rwanda Tomorrow.', tone: 'accent' },
+    ],
+  },
+];
+
+const ROTATION_MS = 4500;
 
 export function RotatingBrandMessages({ compact = false }: { compact?: boolean }) {
+  const pathname = usePathname();
+  const isStaffLogin = pathname === '/admin-login';
+  const messages = isStaffLogin ? STAFF_MESSAGES : TAXPAYER_MESSAGES;
   const [activeIndex, setActiveIndex] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
@@ -49,10 +74,10 @@ export function RotatingBrandMessages({ compact = false }: { compact?: boolean }
   useEffect(() => {
     if (prefersReducedMotion || isPaused || hasInteracted) return;
     const timer = window.setInterval(() => {
-      setActiveIndex((current) => (current + 1) % MESSAGES.length);
+      setActiveIndex((current) => (current + 1) % messages.length);
     }, ROTATION_MS);
     return () => window.clearInterval(timer);
-  }, [hasInteracted, isPaused, prefersReducedMotion]);
+  }, [hasInteracted, isPaused, messages.length, prefersReducedMotion]);
 
   const selectMessage = (index: number) => {
     setActiveIndex(index);
@@ -70,11 +95,11 @@ export function RotatingBrandMessages({ compact = false }: { compact?: boolean }
     if (!hasInteracted) setIsPaused(false);
   };
 
-  const message = MESSAGES[activeIndex];
+  const message = messages[activeIndex];
 
   return (
     <section
-      aria-label="TaxFlow mission"
+      aria-label={isStaffLogin ? 'TaxFlow staff mission' : 'TaxFlow taxpayer mission'}
       className={compact ? 'w-full text-center' : 'w-full max-w-2xl'}
       onMouseEnter={handlePointerEnter}
       onMouseLeave={handlePointerLeave}
@@ -85,7 +110,7 @@ export function RotatingBrandMessages({ compact = false }: { compact?: boolean }
       }}
     >
       <p className="mb-3 text-xs font-semibold uppercase tracking-[0.22em] text-gray-400">
-        TaxFlow
+        {isStaffLogin ? 'TaxFlow Staff' : 'TaxFlow'}
       </p>
       <div
         key={activeIndex}
@@ -100,9 +125,9 @@ export function RotatingBrandMessages({ compact = false }: { compact?: boolean }
             key={part.text}
             className={
               part.tone === 'accent'
-                ? 'text-gray-900 underline decoration-gray-900 decoration-2 underline-offset-8'
+                ? 'text-[#111827]'
                 : part.tone === 'muted'
-                  ? 'text-gray-400'
+                  ? 'text-[#9ca3af]'
                   : undefined
             }
           >
@@ -110,8 +135,8 @@ export function RotatingBrandMessages({ compact = false }: { compact?: boolean }
           </span>
         ))}
       </div>
-      <div className="mt-6 flex items-center justify-center gap-2 lg:justify-start" role="tablist" aria-label="TaxFlow messages">
-        {MESSAGES.map((item, index) => (
+      <div className="mt-6 flex items-center justify-center gap-2 lg:justify-start" role="tablist" aria-label={isStaffLogin ? 'Staff slogans' : 'Taxpayer slogans'}>
+        {messages.map((item, index) => (
           <button
             key={item.parts.map((part) => part.text).join('')}
             type="button"
