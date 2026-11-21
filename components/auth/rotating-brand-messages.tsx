@@ -79,7 +79,8 @@ export function RotatingBrandMessages({ compact = false }: { compact?: boolean }
       onMouseEnter={handlePointerEnter}
       onMouseLeave={handlePointerLeave}
       onFocus={() => setIsPaused(true)}
-      onBlur={() => {
+      onBlur={(event) => {
+        if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
         if (!hasInteracted && !pauseFromPointer.current) setIsPaused(false);
       }}
     >
