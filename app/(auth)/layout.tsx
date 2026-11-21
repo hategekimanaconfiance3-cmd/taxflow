@@ -1,5 +1,6 @@
 import Image from 'next/image';
 import { SystemStatus } from '@/components/auth/system-status';
+import { RotatingBrandMessages } from '@/components/auth/rotating-brand-messages';
 
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -12,16 +13,9 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
           <span>TaxFlow</span>
         </div>
 
-        {/* Hero Text */}
-        <div className="flex-1 flex items-center px-10 pb-56 z-10 relative">
-          <h1 className="text-4xl xl:text-5xl font-bold leading-snug tracking-tight text-gray-900 whitespace-nowrap">
-            Transparency <span className="text-gray-400">Today</span>,
-            <br />
-            <span className="ml-14 xl:ml-16">
-              <span className="text-gray-400">Prosperity</span>{' '}
-              <span className="border-b-4 border-black pb-1">Tomorrow.</span>
-            </span>
-          </h1>
+        {/* Rotating mission messages */}
+        <div className="relative z-10 flex flex-1 items-center px-8 pb-56 sm:px-10">
+          <RotatingBrandMessages />
         </div>
 
         {/* Public illustration asset */}
@@ -38,7 +32,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
       </div>
 
       {/* ── Right Side ────────────────────────────────────────────── */}
-      <div className="relative flex w-full flex-col items-center justify-center bg-gray-50 lg:w-1/2">
+      <div className="relative flex min-h-screen w-full flex-col items-center justify-center overflow-x-hidden bg-gray-50 px-4 py-8 sm:px-6 lg:w-1/2 lg:px-8 lg:py-0">
         {/* Background Pattern */}
         <div className="absolute inset-0 z-0 opacity-40">
           <Image
@@ -56,8 +50,12 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
           <SystemStatus status="active" />
         </div>
 
+        <div className="z-10 mb-8 w-full max-w-md lg:hidden">
+          <RotatingBrandMessages compact />
+        </div>
+
         {/* Auth Form Container */}
-        <div className="z-10 w-full max-w-md px-8">{children}</div>
+        <div className="z-10 w-full max-w-md">{children}</div>
       </div>
     </div>
   );
