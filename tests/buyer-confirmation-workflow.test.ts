@@ -20,7 +20,7 @@ test("B2B sales notify the buyer and keep seller stock reserved pending buyer co
   assert.match(create, /link: '\/dashboard\/pending'/);
 });
 
-test("buyer confirmation remains authorized, idempotent, audited, and immediately credits buyer inventory", async () => {
+test("buyer confirmation remains authorized and audited without crediting buyer inventory before receipt", async () => {
   const source = await readFile(new URL("../lib/actions/transaction.action.ts", import.meta.url), "utf8");
   const confirm = sourceBlock(source, "export async function confirmTransaction(", "// Reject Transaction (Buyer rejects)");
 
@@ -28,20 +28,24 @@ test("buyer confirmation remains authorized, idempotent, audited, and immediatel
   assert.match(confirm, /session\.user\.id !== lockedTxn\.buyerId/);
   assert.match(confirm, /lockedTxn\.status !== 'pending'/);
   assert.match(confirm, /tx\.insert\(b2bOrderAcceptance\)/);
-  assert.match(confirm, /tx\.insert\(stock\)\.values\(\{[\s\S]*?businessId: lockedTxn\.buyerId,[\s\S]*?productId: lockedTxn\.productId,[\s\S]*?quantity: lockedTxn\.quantity/);
-  assert.match(confirm, /movementType: 'b2b_purchase_confirmed'/);
-  assert.match(confirm, /sourceType: 'b2b_order_acceptance'/);
+  assert.doesNotMatch(confirm, /tx\.insert\(stock\)\.values\(\{[\s\S]*?businessId: lockedTxn\.buyerId,[\s\S]*?productId: lockedTxn\.productId,[\s\S]*?quantity: lockedTxn\.quantity/);
+  assert.doesNotMatch(confirm, /movementType: 'b2b_purchase_confirmed'/);
+  assert.match(confirm, /Buyer inventory will be credited after a measured receipt/);
   assert.match(confirm, /tx\.insert\(vatRecord\)/);
-  assert.match(confirm, /receiptRequiredForBuyerStockCredit: false/);
-  assert.match(confirm, /stockCreditedToBuyer: lockedTxn\.quantity/);
+  assert.match(confirm, /receiptRequiredForBuyerStockCredit: true/);
+  assert.match(confirm, /buyerStockCreditSource: 'b2b_receipt'/);
+  assert.match(confirm, /stockCreditedToBuyer: 0/);
+  assert.match(confirm, /stockCreditPendingQuantity: lockedTxn\.quantity/);
   assert.match(confirm, /action: 'TRANSACTION_CONFIRMED'/);
 });
 
-test("later measured receipts reconcile immediate purchase credit instead of adding the same stock twice", async () => {
+test("measured receipts gate new stock credit and retain legacy reconciliation compatibility", async () => {
   const source = await readFile(new URL("../lib/actions/b2b-fulfillment.action.ts", import.meta.url), "utf8");
   const receipt = sourceBlock(source, "export async function recordB2BReceipt(", "export async function getB2BFulfillmentQueue(");
 
   assert.match(receipt, /sourceType, 'b2b_order_acceptance'/);
+  assert.match(receipt, /assertPurchasedStockReceiptEligible\(tx, txn\.buyerId, txn\.productId, data\.acceptedQuantity/);
+  assert.ok(receipt.indexOf("assertPurchasedStockReceiptEligible(tx, txn.buyerId, txn.productId, data.acceptedQuantity") < receipt.indexOf("movementType: 'b2b_receipt_accepted'"));
   assert.match(receipt, /data\.acceptedQuantity - txn\.quantity/);
   assert.match(receipt, /movementType: 'b2b_receipt_reconciliation'/);
   assert.match(receipt, /else if \(data\.acceptedQuantity > 0\)/);

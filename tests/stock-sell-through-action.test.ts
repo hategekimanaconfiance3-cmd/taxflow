@@ -23,7 +23,7 @@ test("all reseller roles can request eligibility using the authenticated busines
   assert.doesNotMatch(action, /tx\.(?:insert|update|delete)\(stockMovement\)/);
   assert.doesNotMatch(action, /tx\.update\(stock\)/);
   assert.doesNotMatch(action, /tx\.insert\(transaction\)/);
-  assert.match(action, /evaluateRequest\(tx, businessId, parsed\.data\.productId, at\)/);
+  assert.match(action, /evaluateRequest\(tx, businessId, parsed\.data\.productId, at, session\.user\.id, requestId\)/);
   assert.ok(action.indexOf('for("update")') < action.indexOf("const at = new Date()"), "evaluation time must be captured after the stock lock");
   assert.match(source, /onConflictDoNothing\(\)/);
   assert.match(source, /\.for\("update"\)/);

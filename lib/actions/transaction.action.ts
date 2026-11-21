@@ -717,33 +717,11 @@ export async function confirmTransaction(transactionId: string) {
     }).returning({ id: b2bOrderAcceptance.id, acceptedAt: b2bOrderAcceptance.acceptedAt });
     if (!acceptance) throw new Error('Order acceptance evidence could not be saved.');
 
-    // A confirmed incoming purchase is immediately visible in the buyer's
-    // inventory. The immutable stock movement makes this credit idempotency-
-    // traceable to the unique acceptance row and lets measured receipts later
-    // reconcile shortages, damage, or rejected quantities without double credit.
-    const [buyerStock] = await tx.insert(stock).values({
-      businessId: lockedTxn.buyerId,
-      productId: lockedTxn.productId,
-      quantity: lockedTxn.quantity,
-    }).onConflictDoUpdate({
-      target: [stock.businessId, stock.productId],
-      set: { quantity: sql`${stock.quantity} + ${lockedTxn.quantity}` },
-    }).returning({ quantity: stock.quantity });
-    if (!buyerStock) throw new Error('Buyer inventory could not be updated.');
-    const buyerQuantityAfter = buyerStock.quantity;
-    const buyerQuantityBefore = buyerQuantityAfter - lockedTxn.quantity;
-    await tx.insert(stockMovement).values({
-      businessId: lockedTxn.buyerId,
-      productId: lockedTxn.productId,
-      quantityDelta: lockedTxn.quantity,
-      quantityBefore: buyerQuantityBefore,
-      quantityAfter: buyerQuantityAfter,
-      movementType: 'b2b_purchase_confirmed',
-      sourceType: 'b2b_order_acceptance',
-      sourceId: acceptance.id,
-      actorUserId: session.user.id,
-      reason: `Buyer-confirmed purchase for transaction ${lockedTxn.id}`,
-    });
+    // Commercial acceptance is not physical receipt. Do not credit buyer
+    // inventory here: the measured receipt action performs the centralized
+    // sell-through check and credits only the accepted quantity in that same
+    // transaction. Existing acceptance-credit rows remain supported by the
+    // receipt reconciliation branch for backward compatibility.
 
     // 3. Create VAT output record (seller)
     await tx.insert(vatRecord).values({
@@ -789,12 +767,14 @@ export async function confirmTransaction(transactionId: string) {
       beforeState: {
         status: 'pending',
         sellerStockQuantity: sellerStock.quantity,
-        buyerStockQuantity: buyerQuantityBefore,
+        buyerStockQuantity: null,
+        buyerStockCreditPendingQuantity: lockedTxn.quantity,
       },
       afterState: {
         status: 'confirmed',
         sellerStockQuantity: sellerQuantityAfter,
-        buyerStockQuantity: buyerQuantityAfter,
+        buyerStockQuantity: null,
+        buyerStockCreditPendingQuantity: lockedTxn.quantity,
         vatAmount: lockedTxn.vatAmount,
       },
       metadata: JSON.stringify({
@@ -805,8 +785,8 @@ export async function confirmTransaction(transactionId: string) {
         acceptanceId: acceptance.id,
         acceptedAt: acceptance.acceptedAt,
         acceptedBy: actorAuthority,
-        receiptRequiredForBuyerStockCredit: false,
-        buyerStockCreditSource: 'b2b_order_acceptance',
+        receiptRequiredForBuyerStockCredit: true,
+        buyerStockCreditSource: 'b2b_receipt',
         stockMovements: !reservation ? [{
             movementId: `${lockedTxn.id}:seller`,
             movementType: 'sale',
@@ -816,14 +796,15 @@ export async function confirmTransaction(transactionId: string) {
             quantityBefore: sellerStock.quantity,
             quantityAfter: sellerQuantityAfter,
           }] : [],
-        stockCreditedToBuyer: lockedTxn.quantity,
+        stockCreditedToBuyer: 0,
+        stockCreditPendingQuantity: lockedTxn.quantity,
         reservationId: reservation?.id ?? null,
       }),
     });
 
     const [savedNotification] = await tx.insert(notification).values({
       userId: lockedTxn.sellerId, type: 'txn_confirmed', title: 'Order accepted',
-      message: `${session.user.name} accepted your order for ${lockedTxn.quantity} units. The quantity was added to the buyer's inventory; delivery receipts can reconcile actual quantities.`,
+      message: `${session.user.name} accepted your order for ${lockedTxn.quantity} units. Buyer inventory will be credited after a measured receipt passes the sell-through eligibility check.`,
       link: '/dashboard/pending',
     }).returning();
     return { txn: lockedTxn, savedNotification, expired: false, invoiceId: issuedInvoice.id };

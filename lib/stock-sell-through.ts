@@ -1,6 +1,10 @@
 export type SellThroughScopeType = "default" | "category" | "product";
 export type SellThroughEligibilityStatus = "eligible" | "blocked" | "review_required";
 
+/** Shared policy constants; this module remains safe for client-side validation. */
+export const SYSTEM_DEFAULT_SELL_THROUGH_THRESHOLD_ID = "taxflow-global-sell-through-default-75";
+export const MANDATORY_SELL_THROUGH_THRESHOLD_PERCENT = 75;
+
 export interface SellThroughThresholdRecord {
   id: string;
   scopeType: SellThroughScopeType;

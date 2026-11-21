@@ -277,9 +277,9 @@ export async function recordB2BReceipt(input: unknown): Promise<{ success: true;
 
     let stockAdjustment = 0;
     if (acceptanceStockCredit) {
-      // Confirmation already credited the ordered quantity. On the first
-      // measured receipt, replace that provisional credit with actual accepted
-      // goods; subsequent partial receipts add only their accepted quantity.
+      // Backward compatibility for historical confirmations that credited
+      // buyer stock before the sell-through gate existed. New confirmations do
+      // not create this movement; their first accepted receipt is gated below.
       const adjustment = Number(priorReceiptTotals?.count ?? 0) === 0
         ? data.acceptedQuantity - txn.quantity
         : data.acceptedQuantity;
@@ -330,7 +330,7 @@ export async function recordB2BReceipt(input: unknown): Promise<{ success: true;
 
     await tx.insert(auditLog).values({
       userId: session.user.id, action: 'B2B_RECEIPT_RECORDED', targetType: 'b2b_receipt', targetId: saved.id,
-      metadata: JSON.stringify({ transactionId: txn.id, dispatchId: dispatch.id, buyerBusinessId: txn.buyerId, quantityReceived: data.quantityReceived, acceptedQuantity: data.acceptedQuantity, damagedQuantity: data.damagedQuantity, rejectedQuantity: data.rejectedQuantity, disputedQuantity: data.disputedQuantity, stockAdjustment, stockCreditedAtConfirmation: Boolean(acceptanceStockCredit), taxChanged: false }),
+      metadata: JSON.stringify({ transactionId: txn.id, dispatchId: dispatch.id, buyerBusinessId: txn.buyerId, quantityReceived: data.quantityReceived, acceptedQuantity: data.acceptedQuantity, damagedQuantity: data.damagedQuantity, rejectedQuantity: data.rejectedQuantity, disputedQuantity: data.disputedQuantity, stockAdjustment, stockCreditedAtConfirmation: Boolean(acceptanceStockCredit), stockCreditSource: acceptanceStockCredit ? 'legacy_b2b_order_acceptance' : 'b2b_receipt', taxChanged: false }),
     });
     return saved.id;
   });

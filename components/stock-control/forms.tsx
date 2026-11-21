@@ -105,7 +105,7 @@ export function SellThroughThresholdForm({
       <p className="text-sm font-medium">Applies globally to all sellers and products</p>
       <label className="space-y-1 text-sm font-medium">
         Sell-through percentage
-        <input className={controlClass} type="number" min="0" max="100" step="0.01" {...form.register("thresholdPercent")} disabled={pending} />
+        <input className={controlClass} type="number" min="75" max="100" step="0.01" {...form.register("thresholdPercent")} disabled={pending} />
         <ErrorText>{form.formState.errors.thresholdPercent?.message}</ErrorText>
       </label>
       <label className="space-y-1 text-sm font-medium">

@@ -5,9 +5,10 @@ import {
   stockSellThroughThresholdSchema,
 } from "../lib/validation/stock-sell-through.schema";
 
-test("threshold validation accepts 0 and 100 percent and rejects values outside the policy range", () => {
+test("threshold validation accepts the mandatory 75% minimum and rejects weaker values", () => {
   const base = { scopeType: "default", scopeKey: "*", effectiveAt: "2027-01-01T00:00", reason: "Approved policy revision" };
-  assert.equal(stockSellThroughThresholdSchema.safeParse({ ...base, thresholdPercent: "0" }).success, true);
+  assert.equal(stockSellThroughThresholdSchema.safeParse({ ...base, thresholdPercent: "74.99" }).success, false);
+  assert.equal(stockSellThroughThresholdSchema.safeParse({ ...base, thresholdPercent: "75" }).success, true);
   assert.equal(stockSellThroughThresholdSchema.safeParse({ ...base, thresholdPercent: "100" }).success, true);
   assert.equal(stockSellThroughThresholdSchema.safeParse({ ...base, thresholdPercent: "100.01" }).success, false);
   assert.equal(stockSellThroughThresholdSchema.safeParse({ ...base, thresholdPercent: "-1" }).success, false);

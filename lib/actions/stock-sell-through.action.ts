@@ -1,7 +1,7 @@
 "use server";
 
 import { randomUUID } from "node:crypto";
-import { and, asc, desc, eq, gte, inArray, lte, ne } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lte } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import db from "@/db/drizzle";
@@ -21,10 +21,9 @@ import { requireApprovedClearance, requireRRAPermission, requireTraderSession } 
 import { hasRRAPermission } from "@/lib/rra-rbac";
 import {
   calculateSellThrough,
-  resolveSellThroughThreshold,
-  type SellThroughThresholdRecord,
   type SellThroughMovement,
 } from "@/lib/stock-sell-through";
+import { resolveSystemSellThroughPolicy } from "@/lib/stock-sell-through-policy";
 import {
   stockRestockExceptionReviewSchema,
   stockRestockRequestSchema,
@@ -44,6 +43,8 @@ async function evaluateRequest(
   businessId: string,
   productId: string,
   at: Date,
+  actorUserId: string,
+  sourceId: string,
 ): Promise<{
   productName: string;
   unit: string;
@@ -64,14 +65,15 @@ async function evaluateRequest(
   if (!stockRow) throw new Error("PRODUCT_NOT_HELD");
   const stockQuantity = Number(stockRow?.quantity ?? 0);
 
-  const thresholdRows = await tx.select().from(stockSellThroughThreshold).where(and(
-      eq(stockSellThroughThreshold.scopeType, "default"),
-      eq(stockSellThroughThreshold.scopeKey, "*"),
-      // The migration's 75% row is a bootstrap placeholder, not an approved policy.
-      ne(stockSellThroughThreshold.id, "taxflow-global-sell-through-default-75"),
-      lte(stockSellThroughThreshold.effectiveAt, at),
-    )).orderBy(desc(stockSellThroughThreshold.effectiveAt), desc(stockSellThroughThreshold.createdAt), desc(stockSellThroughThreshold.id)).limit(1);
-  const threshold = resolveSellThroughThreshold(thresholdRows as SellThroughThresholdRecord[], productId, null, at);
+  const policyResolution = await resolveSystemSellThroughPolicy(tx, {
+    actorUserId,
+    businessId,
+    productId,
+    sourceType: "stock_restock_request",
+    sourceId,
+    at,
+  });
+  const threshold = policyResolution.policy;
 
   const [historicalMovement] = await tx.select({ id: stockMovement.id }).from(stockMovement).where(and(
     eq(stockMovement.businessId, businessId),
@@ -220,7 +222,7 @@ export async function createRestockRequestAction(formData: FormData): Promise<vo
       )).for("update").limit(1);
       if (!lockedStock) throw new Error("PRODUCT_NOT_HELD");
       const at = new Date();
-      const evaluated = await evaluateRequest(tx, businessId, parsed.data.productId, at);
+      const evaluated = await evaluateRequest(tx, businessId, parsed.data.productId, at, session.user.id, requestId);
       const [duplicateAfterLock] = await tx.select({
         productId: stockRestockRequest.productId,
         requestedQuantity: stockRestockRequest.requestedQuantity,
@@ -394,7 +396,6 @@ export async function createSellThroughThresholdAction(formData: FormData): Prom
       }).from(stockSellThroughThreshold).where(and(
         eq(stockSellThroughThreshold.scopeType, parsed.data.scopeType),
         eq(stockSellThroughThreshold.scopeKey, key),
-        ne(stockSellThroughThreshold.id, "taxflow-global-sell-through-default-75"),
         lte(stockSellThroughThreshold.effectiveAt, effectiveAt),
       )).orderBy(desc(stockSellThroughThreshold.effectiveAt), desc(stockSellThroughThreshold.createdAt), desc(stockSellThroughThreshold.id)).limit(1);
       const [saved] = await tx.insert(stockSellThroughThreshold).values({

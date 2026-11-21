@@ -81,6 +81,13 @@ test("zero percent is eligible without sales and 75/100 percent thresholds use r
   assert.equal(calculateSellThrough(input({ thresholdPercent: 100 })).status, "blocked");
 });
 
+test("decimal quantities preserve the exact 75 percent boundary", () => {
+  const sales = [movement("sale-1", "retail_sale", -74.99, 100)];
+  const result = calculateSellThrough(input({ currentQuantity: 25.01, movements: sales }));
+  assert.equal(result.status, "blocked");
+  assert.ok(Math.abs(result.remainingSalesQuantity - 0.01) < 0.000001);
+});
+
 test("FIFO requires each prior purchase lot to meet sell-through even if the aggregate ratio qualifies", () => {
   const movements = [
     movement("1", "import_receipt", 20, 100, "import-1"),

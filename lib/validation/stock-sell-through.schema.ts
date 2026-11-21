@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MANDATORY_SELL_THROUGH_THRESHOLD_PERCENT } from "@/lib/stock-sell-through";
 
 const quantityString = z.string().trim()
   .regex(/^\d+(?:\.\d{1,6})?$/, "Enter a valid positive quantity.")
@@ -19,9 +20,9 @@ export const stockSellThroughThresholdSchema = z.object({
   scopeType: z.enum(["default", "category", "product"]),
   scopeKey: z.string().trim().min(1).max(128),
   thresholdPercent: z.string().trim()
-    .regex(/^\d+(?:\.\d{1,2})?$/, "Enter a percentage from 0 to 100.")
+    .regex(/^\d+(?:\.\d{1,2})?$/, `Enter a percentage from ${MANDATORY_SELL_THROUGH_THRESHOLD_PERCENT} to 100.`)
     .transform(Number)
-    .refine((value) => Number.isFinite(value) && value >= 0 && value <= 100, "Percentage must be between 0 and 100."),
+    .refine((value) => Number.isFinite(value) && value >= MANDATORY_SELL_THROUGH_THRESHOLD_PERCENT && value <= 100, `Percentage must be between ${MANDATORY_SELL_THROUGH_THRESHOLD_PERCENT} and 100.`),
   effectiveAt: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/),
   reason: z.string().trim().min(8).max(1000),
 });

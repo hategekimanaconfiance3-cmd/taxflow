@@ -235,8 +235,8 @@ function SellThroughThresholdRow({ threshold }: { threshold: ActiveSellThroughTh
 
     function handleSave(): void {
         const pct = parseInt(inputValue.trim(), 10);
-        if (isNaN(pct) || pct < 1 || pct > 100) {
-            setError("Enter a whole number between 1 and 100");
+        if (isNaN(pct) || pct < 75 || pct > 100) {
+            setError("Enter a whole number between 75 and 100");
             return;
         }
         if (!reason.trim() || reason.trim().length < 5) {
@@ -285,6 +285,11 @@ function SellThroughThresholdRow({ threshold }: { threshold: ActiveSellThroughTh
                             )}
                         </p>
                     )}
+                    {!threshold.isAvailable && (
+                        <p className="text-xs font-medium text-red-600 mt-1">
+                            {threshold.integrityFailureReason ?? "The mandatory 75% policy is unavailable."} Purchased-stock credit is blocked until the system policy is restored.
+                        </p>
+                    )}
                 </div>
 
                 {isEditing ? (
@@ -296,7 +301,7 @@ function SellThroughThresholdRow({ threshold }: { threshold: ActiveSellThroughTh
                                 value={inputValue}
                                 onChange={(e) => setInputValue(e.target.value)}
                                 step="1"
-                                min={1}
+                                min={75}
                                 max={100}
                                 autoFocus
                                 onKeyDown={(e) => {

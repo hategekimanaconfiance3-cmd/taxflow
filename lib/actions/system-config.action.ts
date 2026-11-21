@@ -6,6 +6,11 @@ import { systemConfig, auditLog, stockSellThroughThreshold } from "@/db/schema";
 import { requireRRASession } from "@/lib/auth-guard";
 import { hasRRAPermission } from "@/lib/rra-rbac";
 import { logAudit } from "@/lib/audit";
+import {
+    MANDATORY_SELL_THROUGH_THRESHOLD_PERCENT,
+    SYSTEM_DEFAULT_SELL_THROUGH_THRESHOLD_ID,
+    validateSystemSellThroughPolicy,
+} from "@/lib/stock-sell-through-policy";
 import { z } from "zod";
 
 // ---------------------------------------------------------------------------
@@ -124,8 +129,6 @@ export async function updateSystemConfig(data: { key: string; value: string }): 
 // Sell-Through Threshold — read & write via stockSellThroughThreshold table
 // ---------------------------------------------------------------------------
 
-const BOOTSTRAP_THRESHOLD_ID = "taxflow-global-sell-through-default-75";
-
 export interface ActiveSellThroughThreshold {
     thresholdPercent: number;
     effectiveAt: Date;
@@ -133,6 +136,8 @@ export interface ActiveSellThroughThreshold {
     createdByUserId: string | null;
     reason: string;
     isBootstrap: boolean;
+    isAvailable: boolean;
+    integrityFailureReason: string | null;
 }
 
 /** Read the currently active global sell-through threshold (no auth guard). */
@@ -154,24 +159,30 @@ export async function getActiveSellThroughThreshold(): Promise<ActiveSellThrough
         .limit(1);
 
     if (row) {
+        const resolution = validateSystemSellThroughPolicy(row, now);
         return {
-            thresholdPercent: row.thresholdPercent,
+            thresholdPercent: Number.isFinite(Number(row.thresholdPercent)) ? Number(row.thresholdPercent) : MANDATORY_SELL_THROUGH_THRESHOLD_PERCENT,
             effectiveAt: row.effectiveAt,
             createdAt: row.createdAt,
             createdByUserId: row.createdByUserId,
-            reason: row.reason,
-            isBootstrap: row.id === BOOTSTRAP_THRESHOLD_ID,
+            reason: resolution.integrityFailureReason ?? row.reason,
+            isBootstrap: row.id === SYSTEM_DEFAULT_SELL_THROUGH_THRESHOLD_ID,
+            isAvailable: resolution.policy !== null,
+            integrityFailureReason: resolution.integrityFailureReason,
         };
     }
 
-    // Fallback: seed row not yet effective
+    // The UI still displays the official default, but makes the integrity
+    // failure explicit. Eligibility paths never use this display fallback.
     return {
-        thresholdPercent: 75,
+        thresholdPercent: MANDATORY_SELL_THROUGH_THRESHOLD_PERCENT,
         effectiveAt: new Date(0),
         createdAt: new Date(0),
         createdByUserId: null,
-        reason: "System default",
+        reason: "Mandatory system default is missing; purchased-stock credit is blocked.",
         isBootstrap: true,
+        isAvailable: false,
+        integrityFailureReason: "The migration-seeded mandatory 75% policy row is missing.",
     };
 }
 
@@ -179,7 +190,7 @@ const sellThroughUpdateSchema = z.object({
     thresholdPercent: z
         .number()
         .int("Must be a whole number")
-        .min(1, "Minimum is 1%")
+        .min(MANDATORY_SELL_THROUGH_THRESHOLD_PERCENT, `Minimum is ${MANDATORY_SELL_THROUGH_THRESHOLD_PERCENT}%`)
         .max(100, "Maximum is 100%"),
     reason: z.string().min(5, "Reason must be at least 5 characters").max(500, "Reason is too long"),
 });

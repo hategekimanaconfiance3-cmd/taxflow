@@ -1,10 +1,16 @@
-import { and, asc, desc, eq, gte, inArray, lte, ne } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lte } from "drizzle-orm";
 import db from "@/db/drizzle";
-import { auditLog, b2bOrderAcceptance, product, stock, stockMovement, stockReservation, stockRestockRequest, stockSellThroughCycle, stockSellThroughThreshold, transaction } from "@/db/schema";
-import { calculateSellThrough, resolveSellThroughThreshold, type SellThroughMovement, type SellThroughThresholdRecord } from "@/lib/stock-sell-through";
+import { auditLog, b2bOrderAcceptance, product, stock, stockMovement, stockReservation, stockRestockRequest, stockSellThroughCycle, transaction } from "@/db/schema";
+import { calculateSellThrough, type SellThroughMovement } from "@/lib/stock-sell-through";
+import { MANDATORY_SELL_THROUGH_THRESHOLD_PERCENT, resolveSystemSellThroughPolicy } from "@/lib/stock-sell-through-policy";
 
 const MAX_EVIDENCE_ROWS = 500;
 type DbTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+type DbExecutor = typeof db | DbTx;
+
+async function recordEligibilityDecision(executor: DbExecutor, entry: typeof auditLog.$inferInsert): Promise<void> {
+  await executor.insert(auditLog).values(entry);
+}
 
 /**
  * Assert a prospective purchased-stock receipt is eligible. The caller must
@@ -21,7 +27,7 @@ export async function assertPurchasedStockReceiptEligible(
   sourceId: string,
   at = new Date(),
 ) {
-  const [item] = await tx.select({ id: product.id, name: product.name, categoryCode: product.categoryCode })
+  const [item] = await tx.select({ id: product.id, name: product.name })
     .from(product).where(eq(product.id, productId)).limit(1);
   if (!item) throw new Error("Product not found.");
 
@@ -45,12 +51,15 @@ export async function assertPurchasedStockReceiptEligible(
     .where(and(eq(stock.businessId, businessId), eq(stock.productId, productId))).for("update").limit(1);
   currentQuantity = Number(latestBalance?.quantity ?? 0);
 
-  const policyRows = await tx.select().from(stockSellThroughThreshold).where(and(
-    eq(stockSellThroughThreshold.scopeType, "default"), eq(stockSellThroughThreshold.scopeKey, "*"),
-    ne(stockSellThroughThreshold.id, "taxflow-global-sell-through-default-75"),
-    lte(stockSellThroughThreshold.effectiveAt, at),
-  )).orderBy(desc(stockSellThroughThreshold.effectiveAt), desc(stockSellThroughThreshold.createdAt), desc(stockSellThroughThreshold.id)).limit(1);
-  const policy = resolveSellThroughThreshold(policyRows as SellThroughThresholdRecord[], productId, item.categoryCode, at);
+  const policyResolution = await resolveSystemSellThroughPolicy(tx, {
+    actorUserId,
+    businessId,
+    productId,
+    sourceType,
+    sourceId,
+    at,
+  });
+  const policy = policyResolution.policy;
   const movements = await tx.select({
     id: stockMovement.id, movementType: stockMovement.movementType, quantityDelta: stockMovement.quantityDelta,
     quantityBefore: stockMovement.quantityBefore, quantityAfter: stockMovement.quantityAfter,
@@ -93,6 +102,52 @@ export async function assertPurchasedStockReceiptEligible(
     eq(stockRestockRequest.exceptionStatus, "approved"),
     gte(stockRestockRequest.requestedQuantity, receiptQuantity),
   )).orderBy(desc(stockRestockRequest.reviewedAt), desc(stockRestockRequest.createdAt)).for("update").limit(1);
+
+  const decisionOutcome = !policy
+    ? "policy_integrity_failure"
+    : result.status === "eligible"
+      ? "eligible"
+      : approvedException
+        ? "approved_exception"
+        : result.status;
+  const decisionAudit = {
+    userId: actorUserId,
+    action: "STOCK_PURCHASED_RECEIPT_ELIGIBILITY_EVALUATED",
+    targetType: sourceType,
+    targetId: sourceId,
+    afterState: {
+      businessId,
+      productId,
+      sourceType,
+      sourceId,
+      evaluatedAt: at.toISOString(),
+      eligiblePurchaseQuantity: result.availableCohortQuantity,
+      verifiedSalesQuantity: result.qualifyingSalesQuantity,
+      sellThroughPercent: result.sellThroughPercent,
+      thresholdPercent: policy?.thresholdPercent ?? null,
+      mandatoryThresholdPercent: MANDATORY_SELL_THROUGH_THRESHOLD_PERCENT,
+      eligibilityResult: result.status,
+      decisionOutcome,
+      exceptionReference: approvedException?.id ?? null,
+      receiptQuantity,
+    },
+    metadata: JSON.stringify({
+      calculationReason: result.reason,
+      exceptionStatus: approvedException ? "approved" : "none",
+    }),
+  } satisfies typeof auditLog.$inferInsert;
+
+  const receiptBlocked = !policy || (result.status !== "eligible" && !approvedException);
+  // A rejected receipt rolls back its caller's transaction. Keep the decision
+  // evidence durable by writing blocked outcomes through the base connection;
+  // successful outcomes remain atomic with the stock credit.
+  await recordEligibilityDecision(receiptBlocked ? db : tx, decisionAudit);
+
+  // An authorized exception cannot mask an unavailable or corrupted mandatory
+  // policy. Restore the system policy before any purchased stock is credited.
+  if (!policy) {
+    throw new Error(`Restocking is unavailable for ${item.name}. The mandatory ${MANDATORY_SELL_THROUGH_THRESHOLD_PERCENT}% sell-through policy could not be verified; purchased-stock credit is blocked and TF administrators have been notified. ${policyResolution.integrityFailureReason ?? "System policy integrity failure."}`);
+  }
 
   if (result.status !== "eligible" && !approvedException) {
     const pct = result.sellThroughPercent === null ? "unknown" : `${result.sellThroughPercent.toFixed(1)}%`;

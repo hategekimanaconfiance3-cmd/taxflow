@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, ilike, inArray, lte, max, ne, or } from "drizzle-orm";
+import { and, asc, count, desc, eq, ilike, inArray, lte, max, or } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { ClipboardList, Package, ShieldAlert, SlidersHorizontal } from "lucide-react";
 import { requireRRAPermission } from "@/lib/auth-guard";
@@ -6,9 +6,9 @@ import { hasRRAPermission } from "@/lib/rra-rbac";
 import db from "@/db/drizzle";
 import { product, stock, stockMovement, stockRestockRequest, stockSellThroughCycle, stockSellThroughThreshold, user } from "@/db/schema";
 import { BaselineAttestationForm, RestockExceptionReviewForm, SellThroughThresholdForm } from "@/components/stock-control/forms";
+import { SYSTEM_DEFAULT_SELL_THROUGH_THRESHOLD_ID } from "@/lib/stock-sell-through-policy";
 
 const PAGE_SIZE = 25;
-const SYSTEM_DEFAULT_THRESHOLD_ID = "taxflow-global-sell-through-default-75";
 const FILTERS = ["all", "pending_exception", "blocked", "review_required", "eligible"] as const;
 const SORTS = ["newest", "oldest", "requested_highest"] as const;
 
@@ -86,7 +86,6 @@ export default async function AdminStockControlPage({
       createdAt: stockSellThroughThreshold.createdAt,
     }).from(stockSellThroughThreshold).where(and(
       eq(stockSellThroughThreshold.scopeType, "default"), eq(stockSellThroughThreshold.scopeKey, "*"),
-      ne(stockSellThroughThreshold.id, SYSTEM_DEFAULT_THRESHOLD_ID),
       lte(stockSellThroughThreshold.effectiveAt, now),
     ))
       .orderBy(asc(stockSellThroughThreshold.scopeType), asc(stockSellThroughThreshold.scopeKey), desc(stockSellThroughThreshold.effectiveAt), desc(stockSellThroughThreshold.createdAt), desc(stockSellThroughThreshold.id)),
@@ -204,7 +203,7 @@ export default async function AdminStockControlPage({
     else groupsByPair.set(key, [request]);
   }
   const requestGroups = [...groupsByPair.entries()].map(([key, groupRequests]) => ({ key, requests: groupRequests }));
-  const systemDefaultThreshold = thresholdHistory.find((row) => row.id === SYSTEM_DEFAULT_THRESHOLD_ID);
+  const systemDefaultThreshold = thresholdHistory.find((row) => row.id === SYSTEM_DEFAULT_SELL_THROUGH_THRESHOLD_ID);
   const result = params.result ? RESULT_MESSAGES[params.result] : undefined;
 
   const filterHref = (nextFilter: typeof FILTERS[number]) => {
@@ -243,7 +242,7 @@ export default async function AdminStockControlPage({
             <SellThroughThresholdForm canManageGlobal={canManageGlobal} effectiveAtDefault={new Date(now.getTime() + 120_000).toISOString().slice(0, 16)} />
           </>
         ) : (
-          <p className="text-sm text-muted-foreground">Your role can review requests but cannot schedule a global threshold. An authorized officer must publish a policy before automatic eligibility decisions use one.</p>
+          <p className="text-sm text-muted-foreground">Your role can review requests but cannot change the mandatory global policy. TaxFlow automatically enforces the system-seeded 75% default; if it is missing or invalid, purchased-stock credit is blocked and TF administrators are notified.</p>
         )}
       </section>
 
@@ -258,9 +257,9 @@ export default async function AdminStockControlPage({
               <p className="font-medium">No authorized threshold revision is active.</p>
               <p className="mt-1 text-sm text-muted-foreground">
                 {systemDefaultThreshold
-                  ? `The ${systemDefaultThreshold.thresholdPercent}% system default is recorded but inactive; it is not used to decide trader eligibility.`
+                  ? `The ${systemDefaultThreshold.thresholdPercent}% system default is recorded, but no valid active policy row was found.`
                   : "No system default or approved threshold revision is recorded."}
-                {" "}Requests remain in officer review until an authorized officer schedules an effective policy.
+                {" "}Purchased-stock credit is fail-closed until the mandatory system policy is available; this is an integrity condition, not a manual activation step.
               </p>
             </div>
             {canManageGlobal && <a href="#threshold-revision" className="rounded-md border px-3 py-2 text-sm font-medium hover:bg-muted">Schedule a threshold</a>}
@@ -418,13 +417,13 @@ export default async function AdminStockControlPage({
         <div className="mb-4 flex items-center gap-2"><Package className="h-5 w-5" aria-hidden="true" /><h2 className="text-lg font-semibold">Threshold history</h2></div>
         {thresholdHistory.length === 0 ? <p className="text-sm text-muted-foreground">No threshold revisions have been recorded.</p> : (
           <div className="space-y-2">{thresholdHistory.map((row, index) => {
-            const isSystemDefault = row.id === SYSTEM_DEFAULT_THRESHOLD_ID;
+            const isSystemDefault = row.id === SYSTEM_DEFAULT_SELL_THROUGH_THRESHOLD_ID;
             const previousThreshold = thresholdHistory[index + 1]?.thresholdPercent;
             return (
               <div key={row.id} className="flex flex-wrap justify-between gap-2 border-b py-3 text-sm last:border-0">
                 <div>
-                  <span className="font-medium">{isSystemDefault ? `System default · ${row.thresholdPercent}% · inactive` : `Threshold revision · ${previousThreshold ?? "—"}% → ${row.thresholdPercent}%`}</span>
-                  <p className="mt-1 text-xs text-muted-foreground">{row.reason}{isSystemDefault ? " This baseline is not used in eligibility decisions." : ""}</p>
+                  <span className="font-medium">{isSystemDefault ? `System default · ${row.thresholdPercent}% · active` : `Threshold revision · ${previousThreshold ?? "—"}% → ${row.thresholdPercent}%`}</span>
+                  <p className="mt-1 text-xs text-muted-foreground">{row.reason}{isSystemDefault ? " This baseline is used until an authorized revision takes effect." : ""}</p>
                 </div>
                 <p className="text-xs text-muted-foreground">{row.actorName ?? "TaxFlow initial default"} · {row.actorRole ?? "system"} · recorded {row.createdAt.toLocaleString()} · effective {row.effectiveAt.toLocaleString()}</p>
               </div>
