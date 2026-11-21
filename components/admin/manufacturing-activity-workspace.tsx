@@ -223,6 +223,9 @@ export function ManufacturingActivityWorkspace({ initialManufacturers, initialAc
                 <span className="font-medium">{manufacturer.businessName || manufacturer.name}</span>
                 {manufacturer.businessName && manufacturer.name !== manufacturer.businessName ? <span className="text-sm text-muted-foreground">{manufacturer.name}</span> : null}
                 <span className="flex items-center gap-2 text-xs text-muted-foreground"><Badge variant={!manufacturer.isActive ? "destructive" : "outline"}>{statusLabel(manufacturer)}</Badge>Joined {new Date(manufacturer.createdAt).toLocaleDateString()}</span>
+                {manufacturer.district ?? manufacturer.province ? (
+                  <span className="text-xs text-muted-foreground">{[manufacturer.district, manufacturer.province].filter(Boolean).join(", ")}</span>
+                ) : null}
               </button>
             ))}
           </CardContent>
@@ -234,7 +237,7 @@ export function ManufacturingActivityWorkspace({ initialManufacturers, initialAc
               <CardHeader className="gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div className="grid gap-2">
                   <CardTitle>{selected.businessName || selected.name}</CardTitle>
-                  <CardDescription>{selected.businessName && selected.name !== selected.businessName ? `Account name: ${selected.name} · ` : ""}Registered {formatDate(selected.createdAt)}</CardDescription>
+                  <CardDescription>{selected.businessName && selected.name !== selected.businessName ? `Account name: ${selected.name} · ` : ""}Registered {formatDate(selected.createdAt)}{selected.district ?? selected.province ? ` · ${[selected.district, selected.province].filter(Boolean).join(", ")}` : ""}</CardDescription>
                   <div><Badge variant={!selected.isActive ? "destructive" : "secondary"}>{statusLabel(selected)}</Badge></div>
                 </div>
                 <div className="flex flex-wrap gap-2">

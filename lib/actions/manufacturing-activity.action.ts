@@ -60,10 +60,8 @@ function parseAuditMetadata(value: unknown): Record<string, unknown> | null {
 /** Search manufacturers using only the limited profile fields needed by this workspace.
  *  Gap 3 fix: results are filtered to the officer's assigned jurisdiction scope.
  *  National-scope staff (or staff with no jurisdiction row) see all manufacturers.
- *  Province/district-scope staff only see manufacturers in their scope (matched via
- *  the tinRecord.district / tinRecord.province fields in the TIN database, with a
- *  cross-DB join fallback: we pull matching TINs first, then filter by user IDs).
- *  When the TIN DB is unavailable we fall back to unfiltered national view and log a warning.
+ *  Province/district-scope staff only see manufacturers in their scope, matched via
+ *  user.district / user.province columns added in migration 0045.
  */
 export async function searchManufacturersForActivity(
   input: unknown,
@@ -82,8 +80,8 @@ export async function searchManufacturersForActivity(
       .where(eq(rraStaff.userId, staff.id))
       .limit(1);
 
-    // Collect jurisdiction-scoped user IDs (null = national / no filter)
-    let allowedUserIds: string[] | null = null;
+    // Build jurisdiction filter using real user.district / user.province columns (migration 0045)
+    let jurisdictionCondition: SQL | undefined;
     if (staffRecord) {
       const jurisdictions = await db
         .select({
@@ -99,17 +97,19 @@ export async function searchManufacturersForActivity(
         jurisdictions.some((j) => j.scopeType === "national");
 
       if (!isNational) {
-        // Find manufacturers whose district/province matches any of the staff's jurisdiction scopes.
-        // We use the rraStaffJurisdiction rows on the manufacturer side by joining through
-        // any registered linkage. As manufacturer district is not stored on `user` directly,
-        // we use a subquery via auditLog metadata or fallback to no filtering with a console warning.
-        // TODO: once a `user.district` column is added to the schema, replace this with a direct eq() filter.
-        console.warn(
-          "[manufacturing-activity] jurisdiction filtering is active but user.district column does not exist yet. " +
-          "Staff will see all manufacturers until the column is added. StaffId=" + staffRecord.id
-        );
-        // Fallback: show all — jurisdiction filter is a no-op until user.district is in schema.
-        allowedUserIds = null;
+        const scopeClauses: SQL[] = [];
+        for (const j of jurisdictions) {
+          if (j.scopeType === "district" && j.district) {
+            // Exact match — district names are standardised (e.g. "Gasabo", "Nyarugenge")
+            scopeClauses.push(eq(user.district, j.district));
+          } else if (j.scopeType === "province" && j.province) {
+            scopeClauses.push(eq(user.province, j.province));
+          }
+        }
+        if (scopeClauses.length > 0) {
+          // Staff see manufacturers in ANY of their assigned scopes
+          jurisdictionCondition = or(...scopeClauses)!;
+        }
       }
     }
     // --- end Gap 3 ---
@@ -118,8 +118,8 @@ export async function searchManufacturersForActivity(
     if (search) {
       conditions.push(or(ilike(user.name, `%${search}%`), ilike(user.businessName, `%${search}%`))!);
     }
-    if (allowedUserIds !== null) {
-      conditions.push(inArray(user.id, allowedUserIds));
+    if (jurisdictionCondition) {
+      conditions.push(jurisdictionCondition);
     }
 
     const rows = await db
@@ -130,6 +130,8 @@ export async function searchManufacturersForActivity(
         clearanceStatus: user.clearanceStatus,
         isActive: user.isActive,
         createdAt: user.createdAt,
+        district: user.district,
+        province: user.province,
       })
       .from(user)
       .where(and(...conditions))
@@ -160,6 +162,8 @@ export async function getManufacturerActivity(
         clearanceStatus: user.clearanceStatus,
         isActive: user.isActive,
         createdAt: user.createdAt,
+        district: user.district,
+        province: user.province,
       })
       .from(user)
       .where(and(eq(user.id, parsed.data.manufacturerId), eq(user.role, "manufacturer")))

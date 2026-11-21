@@ -5,6 +5,9 @@ export interface ManufacturerActivityTarget {
   clearanceStatus: string;
   isActive: boolean;
   createdAt: Date;
+  /** Added in migration 0045 — may be null for existing records not yet geocoded. */
+  district: string | null;
+  province: string | null;
 }
 
 export type ManufacturerActivityKind = "production" | "sales" | "imports" | "stock" | "fulfillment" | "account";

@@ -267,6 +267,13 @@
       "when": 1794820000000,
       "tag": "0037_industrial_integration",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1794820000001,
+      "tag": "0045_user_jurisdiction_location",
+      "breakpoints": true
     }
   ]
 }

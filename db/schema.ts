@@ -36,13 +36,22 @@ export const user = pgTable(
     emailVerified: boolean('email_verified').default(false).notNull(),
     image: text('image'),
     isActive: boolean('is_active').default(true).notNull(),
+    // Jurisdiction location — set during registration or by RRA staff.
+    // Used by province/district-scoped officers to filter their manufacturer list.
+    district: text('district'),
+    province: text('province'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
     updatedAt: timestamp('updated_at')
       .defaultNow()
       .$onUpdate(() => /* @__PURE__ */ new Date())
       .notNull(),
   },
-  (table) => [index('user_role_idx').on(table.role), index('user_clearance_status_idx').on(table.clearanceStatus)],
+  (table) => [
+    index('user_role_idx').on(table.role),
+    index('user_clearance_status_idx').on(table.clearanceStatus),
+    index('user_district_idx').on(table.district),
+    index('user_province_idx').on(table.province),
+  ],
 );
 
 export const session = pgTable(
