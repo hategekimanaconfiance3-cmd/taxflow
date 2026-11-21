@@ -21,6 +21,7 @@ import { validatePriceFloor } from '@/lib/ai/price-suggestion';
 import type { PriceSuggestion } from '@/lib/ai/price-suggestion';
 import { calculateVat } from '@/lib/intelligence/tax-engine';
 import { assertVerifiedBusinessOwner } from '@/lib/b2b-authorization';
+import { assertPurchasedStockReceiptEligible } from '@/lib/stock-sell-through-enforcement';
 import { createSalesInvoiceForTransaction } from '@/lib/sales-invoice-service';
 import { attemptSalesInvoiceEmail } from '@/lib/sales-invoice-delivery';
 import { triggerManufacturerAICheck } from '@/lib/ai/manufacturer-hooks';
@@ -717,10 +718,25 @@ export async function confirmTransaction(transactionId: string) {
     }).returning({ id: b2bOrderAcceptance.id, acceptedAt: b2bOrderAcceptance.acceptedAt });
     if (!acceptance) throw new Error('Order acceptance evidence could not be saved.');
 
-    // A confirmed incoming purchase is immediately visible in the buyer's
-    // inventory. The immutable stock movement makes this credit idempotency-
-    // traceable to the unique acceptance row and lets measured receipts later
-    // reconcile shortages, damage, or rejected quantities without double credit.
+    // Enforce the mandatory 75% sell-through rule before crediting the buyer.
+    // This is the authoritative stock-credit gate for all B2B purchases.
+    // assertPurchasedStockReceiptEligible acquires a row-level lock on the
+    // buyer's stock and sell-through cycle, serializing concurrent confirmations.
+    const confirmAt = new Date();
+    await assertPurchasedStockReceiptEligible(
+      tx,
+      lockedTxn.buyerId,
+      lockedTxn.productId,
+      lockedTxn.quantity,
+      session.user.id,
+      'b2b_order_acceptance',
+      acceptance.id,
+      confirmAt,
+    );
+
+    // Credit buyer inventory only after the sell-through gate clears.
+    // The stock movement is traceable to the acceptance row (idempotency) and
+    // measured receipts can later reconcile shortages without double credit.
     const [buyerStock] = await tx.insert(stock).values({
       businessId: lockedTxn.buyerId,
       productId: lockedTxn.productId,
@@ -807,6 +823,7 @@ export async function confirmTransaction(transactionId: string) {
         acceptedBy: actorAuthority,
         receiptRequiredForBuyerStockCredit: false,
         buyerStockCreditSource: 'b2b_order_acceptance',
+        sellThroughGatePassed: true,
         stockMovements: !reservation ? [{
             movementId: `${lockedTxn.id}:seller`,
             movementType: 'sale',
